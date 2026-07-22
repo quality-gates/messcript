@@ -5,6 +5,9 @@ import type { DiscoveryOptions } from "./discovery";
 import type { Finding } from "./finding";
 import { compareLocations } from "./location";
 import { findCyclomaticComplexity } from "./rules/cyclomatic-complexity";
+import { findExcessiveMethodLength } from "./rules/excessive-method-length";
+import { findExcessiveParameterList } from "./rules/excessive-parameter-list";
+import { findNPathComplexity } from "./rules/npath-complexity";
 
 export type ProcessingError = {
   path: string;
@@ -62,7 +65,12 @@ export function analyze(
       if (parseDiagnostics.length > 0) {
         continue;
       }
-      findings.push(...findCyclomaticComplexity(sourceFile));
+      findings.push(
+        ...findCyclomaticComplexity(sourceFile),
+        ...findNPathComplexity(sourceFile),
+        ...findExcessiveMethodLength(sourceFile),
+        ...findExcessiveParameterList(sourceFile),
+      );
     } catch (error) {
       errors.push({
         path,

@@ -44,6 +44,134 @@ before(() => {
   const complexSource = readFileSync(join(fixturesRoot, "complex.ts"), "utf8");
   const malformedSource = readFileSync(join(fixturesRoot, "malformed.ts"), "utf8");
   const customSource = complexSource.replace("value: number", "value").replace("): number", ")");
+  const npathSource = `export function npathExample(value: number): number {
+  if (value > 0) value += 1;
+  if (value > 1) value += 1;
+  if (value > 2) value += 1;
+  if (value > 3) value += 1;
+  if (value > 4) value += 1;
+  if (value > 5) value += 1;
+  if (value > 6) value += 1;
+  if (value > 7) value += 1;
+  return value;
+}
+
+export function npathNegative(value: number): number {
+  if (value > 0) value += 1;
+  return value;
+}
+
+export function decisionSyntax(value: { next?: () => number } | null): number {
+  const next = value?.next?.();
+  return next ?? 0;
+}
+
+export function npathInitializers(value: { next?: number } | null): number {
+  const one = value?.next;
+  const two = value?.next;
+  const three = value?.next;
+  const four = value?.next;
+  const five = value?.next;
+  const six = value?.next;
+  const seven = value?.next;
+  const eight = value?.next;
+  return one + two + three + four + five + six + seven + eight;
+}
+
+export function nullishNPath(value: number | null): number {
+  const one = value ?? 0;
+  const two = value ?? 0;
+  const three = value ?? 0;
+  const four = value ?? 0;
+  const five = value ?? 0;
+  const six = value ?? 0;
+  const seven = value ?? 0;
+  const eight = value ?? 0;
+  return one + two + three + four + five + six + seven + eight;
+}
+`;
+  const parameterSource = `export function manyParameters(first, second, third, fourth, fifth, sixth, seventh, eighth, ninth, tenth, eleventh) {
+  return first;
+}
+
+export function exactParameterThreshold(first, second, third, fourth, fifth, sixth, seventh, eighth, ninth, tenth) {
+  return first;
+}
+
+export function boundaryParameters({ first, second } = {}, third = 3, fourth = 4, fifth = 5, sixth = 6, seventh = 7, eighth = 8, ninth = 9, ...rest) {
+  return first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + rest.length;
+}
+
+export function typedThis(this: unknown, first, second, third, fourth, fifth, sixth, seventh, eighth, ninth) {
+  return first + ninth;
+}
+
+export function idiomaticParameters({ first, second } = {}, ...rest) {
+  return first + second + rest.length;
+}
+`;
+  const longSource = [
+    "export function shortMethod() { return 1; }",
+    "export function longFunction() {",
+    ...Array.from({ length: 100 }, (_, index) => `  const line${index} = ${index};`),
+    "}",
+  ].join("\n");
+  const decisionMetricsSource = `export function logicalNPath(value) {
+  if (value && value) {}
+  if (value && value) {}
+  if (value && value) {}
+  if (value && value) {}
+  if (value && value) {}
+  if (value && value) {}
+  if (value && value) {}
+  if (value && value) {}
+  return value;
+}
+
+export function conditionalNPath(value) {
+  const one = value ? 1 : 0;
+  const two = value ? 1 : 0;
+  const three = value ? 1 : 0;
+  const four = value ? 1 : 0;
+  const five = value ? 1 : 0;
+  const six = value ? 1 : 0;
+  const seven = value ? 1 : 0;
+  const eight = value ? 1 : 0;
+  return one + two + three + four + five + six + seven + eight;
+}
+
+export function loopNPath(value) {
+  let index = 0;
+  for (; index < value && value; index += 1) {}
+  for (; index < value && value; index += 1) {}
+  for (; index < value && value; index += 1) {}
+  for (; index < value && value; index += 1) {}
+  for (; index < value && value; index += 1) {}
+  for (; index < value && value; index += 1) {}
+  return index;
+}
+
+export function switchNPath(value) {
+  switch (value) { case 1: break; case 2: break; default: break; }
+  switch (value) { case 1: break; case 2: break; default: break; }
+  switch (value) { case 1: break; case 2: break; default: break; }
+  switch (value) { case 1: break; case 2: break; default: break; }
+  switch (value) { case 1: break; case 2: break; default: break; }
+  return value;
+}
+
+export function catchNPath(value) {
+  try { value; } catch { value; }
+  try { value; } catch { value; }
+  try { value; } catch { value; }
+  try { value; } catch { value; }
+  try { value; } catch { value; }
+  try { value; } catch { value; }
+  try { value; } catch { value; }
+  try { value; } catch { value; }
+  return value;
+}
+`;
   const writeScanFixture = (relativePath, contents) => {
     const path = join(scanRoot, relativePath);
     mkdirSync(dirname(path), { recursive: true });
@@ -54,6 +182,10 @@ before(() => {
   writeScanFixture("src/main.test.ts", complexSource);
   writeScanFixture("src/custom.source", customSource);
   writeScanFixture("src/broken.ts", malformedSource);
+  writeScanFixture("src/npath.ts", npathSource);
+  writeScanFixture("src/parameters.ts", parameterSource);
+  writeScanFixture("src/long.ts", longSource);
+  writeScanFixture("src/decision-metrics.ts", decisionMetricsSource);
   writeScanFixture("excluded/complex.ts", complexSource);
   for (const directory of ["node_modules", ".git", "generated", "coverage", ".cache", "build", "dist", "output", ".output"]) {
     writeScanFixture(`${directory}/ignored.ts`, complexSource);
@@ -141,6 +273,38 @@ test("CyclomaticComplexity reports a stable text finding", () => {
   assert.match(result.stdout, /complex\.ts:\d+:\d+: CyclomaticComplexity \[priority 3\]/);
   assert.match(result.stdout, /function complex\(\)/);
   assert.match(result.stdout, /Cyclomatic Complexity of 13/);
+  assert.equal(result.stderr, "");
+});
+
+test("function metrics report exact positive values and ignore idiomatic parameters", () => {
+  const result = runCli([
+    [
+      join(scanRoot, "src", "npath.ts"),
+      join(scanRoot, "src", "long.ts"),
+      join(scanRoot, "src", "parameters.ts"),
+      join(scanRoot, "src", "decision-metrics.ts"),
+    ].join(","),
+    "text",
+    "codesize",
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /NPathComplexity .*NPath complexity of 256/);
+  assert.match(result.stdout, /npathInitializers.*NPath complexity of 256/);
+  assert.match(result.stdout, /nullishNPath.*NPath complexity of 256/);
+  assert.match(result.stdout, /logicalNPath.*NPath complexity of 6561/);
+  assert.match(result.stdout, /conditionalNPath.*NPath complexity of 256/);
+  assert.match(result.stdout, /loopNPath.*NPath complexity of 729/);
+  assert.match(result.stdout, /switchNPath.*NPath complexity of 243/);
+  assert.match(result.stdout, /catchNPath.*NPath complexity of 256/);
+  assert.match(result.stdout, /ExcessiveMethodLength .*102 lines of code/);
+  assert.match(result.stdout, /ExcessiveParameterList .*11 parameters/);
+  assert.match(result.stdout, /exactParameterThreshold.*10 parameters/);
+  assert.doesNotMatch(result.stdout, /npathNegative.*NPathComplexity/);
+  assert.doesNotMatch(result.stdout, /boundaryParameters.*ExcessiveParameterList/);
+  assert.doesNotMatch(result.stdout, /typedThis.*ExcessiveParameterList/);
+  assert.doesNotMatch(result.stdout, /shortMethod.*ExcessiveMethodLength/);
+  assert.doesNotMatch(result.stdout, /idiomaticParameters.*ExcessiveParameterList/);
   assert.equal(result.stderr, "");
 });
 

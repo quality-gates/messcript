@@ -18,7 +18,7 @@
     "build": "tsc --build",
     "check": "tsc --noEmit",
     "prepack": "npm run build",
-    "test": "npm run build && node --test test/cli.test.mjs"
+    "test": "npm run build && node --test test/cli.test.mjs test/metrics.test.mjs"
   },
   "dependencies": {
     "typescript": "^5.9.2"
