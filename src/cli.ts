@@ -72,9 +72,18 @@ type ParsedArguments = {
   paths?: string[];
   format?: string;
   rulesets?: string[];
+  suffixes?: string[];
+  exclusions?: string[];
+  ignoreTests: boolean;
+  ignoreErrorsOnExit: boolean;
+  ignoreViolationsOnExit: boolean;
 };
 
-class CliError extends Error {}
+class CliError extends Error {
+  constructor(message: string, readonly ignoreErrorsOnExit = false) {
+    super(message);
+  }
+}
 
 function writeLine(stream: Writable, message: string): void {
   stream.write(`${message}\n`);
@@ -98,8 +107,14 @@ function splitNonEmpty(value: string): string[] {
 
 function parseArguments(argv: readonly string[]): ParsedArguments {
   const positional: string[] = [];
+  const suffixes: string[] = [];
+  const exclusions: string[] = [];
   let showHelp = false;
   let showVersion = false;
+  let suffixesProvided = false;
+  let ignoreTests = false;
+  let ignoreErrorsOnExit = false;
+  let ignoreViolationsOnExit = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -121,55 +136,85 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
 
     const { name, value } = splitOption(argument);
     if (valueOptions.has(name)) {
+      let optionValue = value;
       if (value === undefined) {
         if (argv[index + 1] === undefined || argv[index + 1].startsWith("-")) {
-          throw new CliError(`Missing value for option: ${name}`);
+          throw new CliError(`Missing value for option: ${name}`, ignoreErrorsOnExit);
         }
+        optionValue = argv[index + 1];
         index += 1;
+      }
+      if (optionValue === undefined) {
+        throw new CliError(`Missing value for option: ${name}`, ignoreErrorsOnExit);
+      }
+      if (name === "--suffixes") {
+        suffixesProvided = true;
+        suffixes.push(...splitNonEmpty(optionValue));
+      } else if (name === "--exclude") {
+        exclusions.push(...splitNonEmpty(optionValue));
       }
       continue;
     }
 
     if (booleanOptions.has(name)) {
       if (value !== undefined) {
-        throw new CliError(`Option does not accept a value: ${name}`);
+        throw new CliError(`Option does not accept a value: ${name}`, ignoreErrorsOnExit);
+      }
+      if (name === "--ignore-tests") {
+        ignoreTests = true;
+      } else if (name === "--ignore-errors-on-exit") {
+        ignoreErrorsOnExit = true;
+      } else if (name === "--ignore-violations-on-exit") {
+        ignoreViolationsOnExit = true;
       }
       continue;
     }
 
-    throw new CliError(`Unknown option: ${name}`);
+    throw new CliError(`Unknown option: ${name}`, ignoreErrorsOnExit);
   }
 
   if (showHelp || showVersion) {
     if (positional.length > 0) {
-      throw new CliError(`Unexpected positional argument: ${positional[0]}`);
+      throw new CliError(`Unexpected positional argument: ${positional[0]}`, ignoreErrorsOnExit);
     }
-    return { showHelp, showVersion };
+    return { showHelp, showVersion, ignoreTests, ignoreErrorsOnExit, ignoreViolationsOnExit };
   }
 
   if (positional.length < 3) {
-    throw new CliError(`Missing required arguments: ${requiredArguments}`);
+    throw new CliError(`Missing required arguments: ${requiredArguments}`, ignoreErrorsOnExit);
   }
 
   if (positional.length > 3) {
-    throw new CliError(`Unexpected positional argument: ${positional[3]}`);
+    throw new CliError(`Unexpected positional argument: ${positional[3]}`, ignoreErrorsOnExit);
   }
 
   const paths = splitNonEmpty(positional[0]);
   const rulesets = splitNonEmpty(positional[2]);
   if (paths.length === 0) {
-    throw new CliError("At least one input path is required");
+    throw new CliError("At least one input path is required", ignoreErrorsOnExit);
   }
   if (rulesets.length === 0) {
-    throw new CliError("At least one ruleset is required");
+    throw new CliError("At least one ruleset is required", ignoreErrorsOnExit);
   }
 
-  return { showHelp, showVersion, paths, format: positional[1], rulesets };
+  return {
+    showHelp,
+    showVersion,
+    paths,
+    format: positional[1],
+    rulesets,
+    suffixes: suffixesProvided ? suffixes : undefined,
+    exclusions,
+    ignoreTests,
+    ignoreErrorsOnExit,
+    ignoreViolationsOnExit,
+  };
 }
 
 export function runCli(argv: readonly string[], io: CliIo): number {
+  let parsedArguments: ParsedArguments | undefined;
   try {
-    const parsedArguments = parseArguments(argv);
+    parsedArguments = parseArguments(argv);
 
     if (parsedArguments.showHelp) {
       io.stdout.write(helpText);
@@ -185,13 +230,20 @@ export function runCli(argv: readonly string[], io: CliIo): number {
       throw new CliError(`Unknown format: ${parsedArguments.format}`);
     }
 
-    const findings = analyze(parsedArguments.paths ?? [], parsedArguments.rulesets ?? []);
-    io.stdout.write(formatText(findings));
-    return findings.length > 0 ? 2 : 0;
+    const result = analyze(parsedArguments.paths ?? [], parsedArguments.rulesets ?? [], {
+      suffixes: parsedArguments.suffixes,
+      exclusions: parsedArguments.exclusions,
+      ignoreTests: parsedArguments.ignoreTests,
+    });
+    io.stdout.write(formatText(result.findings, result.errors));
+    if (result.errors.length > 0 && !parsedArguments.ignoreErrorsOnExit) {
+      return 1;
+    }
+    return result.findings.length > 0 && !parsedArguments.ignoreViolationsOnExit ? 2 : 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown command error";
     writeLine(io.stderr, `Error: ${message}`);
-    return 1;
+    return parsedArguments?.ignoreErrorsOnExit || (error instanceof CliError && error.ignoreErrorsOnExit) ? 0 : 1;
   }
 }
 

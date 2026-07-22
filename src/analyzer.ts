@@ -1,10 +1,28 @@
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { discoverSourceFiles, scriptKindForPath } from "./discovery";
+import type { DiscoveryOptions } from "./discovery";
 import type { Finding } from "./finding";
+import { compareLocations } from "./location";
 import { findCyclomaticComplexity } from "./rules/cyclomatic-complexity";
 
-export function analyze(inputPaths: readonly string[], rulesets: readonly string[]): Finding[] {
+export type ProcessingError = {
+  path: string;
+  line: number;
+  column: number;
+  message: string;
+};
+
+export type AnalysisResult = {
+  findings: Finding[];
+  errors: ProcessingError[];
+};
+
+export function analyze(
+  inputPaths: readonly string[],
+  rulesets: readonly string[],
+  discoveryOptions: DiscoveryOptions = {},
+): AnalysisResult {
   const normalizedRulesets = [...new Set(rulesets.map((ruleset) => ruleset.toLowerCase()))];
   for (const ruleset of normalizedRulesets) {
     if (ruleset !== "codesize") {
@@ -13,29 +31,49 @@ export function analyze(inputPaths: readonly string[], rulesets: readonly string
   }
 
   const findings: Finding[] = [];
-  for (const path of discoverSourceFiles(inputPaths)) {
-    const sourceText = readFileSync(path, "utf8");
-    const sourceFile = ts.createSourceFile(path, sourceText, ts.ScriptTarget.Latest, true, scriptKindForPath(path));
-    const parseDiagnostics = (sourceFile as ts.SourceFile & { parseDiagnostics: readonly ts.Diagnostic[] }).parseDiagnostics;
-    if (parseDiagnostics.length > 0) {
-      const diagnostic = parseDiagnostics[0];
-      const position = sourceFile.getLineAndCharacterOfPosition(diagnostic.start ?? 0);
-      const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, " ");
-      throw new Error(`Could not parse ${path}:${position.line + 1}:${position.character + 1}: ${message}`);
+  const discovered = discoverSourceFiles(inputPaths, discoveryOptions);
+  const errors: ProcessingError[] = discovered.errors.map((error) => ({
+    path: error.path,
+    line: 1,
+    column: 1,
+    message: error.message,
+  }));
+  for (const path of discovered.files) {
+    try {
+      const sourceText = readFileSync(path, "utf8");
+      const sourceFile = ts.createSourceFile(
+        path,
+        sourceText,
+        ts.ScriptTarget.Latest,
+        true,
+        scriptKindForPath(path, discoveryOptions.suffixes),
+      );
+      const parseDiagnostics = (sourceFile as ts.SourceFile & { parseDiagnostics: readonly ts.Diagnostic[] }).parseDiagnostics;
+      for (const diagnostic of parseDiagnostics) {
+        const position = sourceFile.getLineAndCharacterOfPosition(diagnostic.start ?? 0);
+        const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, " ");
+        errors.push({
+          path,
+          line: position.line + 1,
+          column: position.character + 1,
+          message: `Could not parse ${path}: ${message}`,
+        });
+      }
+      if (parseDiagnostics.length > 0) {
+        continue;
+      }
+      findings.push(...findCyclomaticComplexity(sourceFile));
+    } catch (error) {
+      errors.push({
+        path,
+        line: 1,
+        column: 1,
+        message: `Could not process ${path}: ${error instanceof Error ? error.message : "Unknown processing error"}`,
+      });
     }
-    findings.push(...findCyclomaticComplexity(sourceFile));
   }
 
-  return findings.sort((left, right) => {
-    if (left.path !== right.path) {
-      return left.path < right.path ? -1 : 1;
-    }
-    if (left.line !== right.line) {
-      return left.line - right.line;
-    }
-    if (left.column !== right.column) {
-      return left.column - right.column;
-    }
-    return left.ruleName.localeCompare(right.ruleName);
-  });
+  findings.sort((left, right) => compareLocations(left, right) || left.ruleName.localeCompare(right.ruleName));
+  errors.sort(compareLocations);
+  return { findings, errors };
 }

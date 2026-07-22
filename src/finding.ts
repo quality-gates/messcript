@@ -7,4 +7,3 @@ export type Finding = {
   message: string;
   context: string;
 };
-
