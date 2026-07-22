@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import ts from "typescript";
+import { analyzeUnused } from "./analysis/unused";
 import { discoverSourceFiles, scriptKindForPath } from "./discovery";
 import type { DiscoveryOptions } from "./discovery";
 import type { Finding } from "./finding";
@@ -27,6 +28,10 @@ import { findCamelCaseMethodName } from "./rules/camel-case-method-name";
 import { findCamelCaseParameterName } from "./rules/camel-case-parameter-name";
 import { findCamelCasePropertyName } from "./rules/camel-case-property-name";
 import { findCamelCaseVariableName } from "./rules/camel-case-variable-name";
+import { findUnusedFormalParameter } from "./rules/unused-formal-parameter";
+import { findUnusedLocalVariable } from "./rules/unused-local-variable";
+import { findUnusedPrivateField } from "./rules/unused-private-field";
+import { findUnusedPrivateMethod } from "./rules/unused-private-method";
 
 export type ProcessingError = {
   path: string;
@@ -47,7 +52,7 @@ export function analyze(
 ): AnalysisResult {
   const normalizedRulesets = [...new Set(rulesets.map((ruleset) => ruleset.toLowerCase()))];
   for (const ruleset of normalizedRulesets) {
-    if (ruleset !== "codesize" && ruleset !== "naming" && ruleset !== "controversial") {
+    if (ruleset !== "codesize" && ruleset !== "naming" && ruleset !== "controversial" && ruleset !== "unusedcode") {
       throw new Error(`Unknown ruleset: ${ruleset}`);
     }
   }
@@ -117,6 +122,15 @@ export function analyze(
           ...findCamelCasePropertyName(sourceFile),
           ...findCamelCaseParameterName(sourceFile),
           ...findCamelCaseVariableName(sourceFile),
+        );
+      }
+      if (normalizedRulesets.includes("unusedcode")) {
+        const unused = analyzeUnused(sourceFile);
+        findings.push(
+          ...findUnusedPrivateField(sourceFile, unused),
+          ...findUnusedPrivateMethod(sourceFile, unused),
+          ...findUnusedFormalParameter(sourceFile, unused),
+          ...findUnusedLocalVariable(sourceFile, unused),
         );
       }
     } catch (error) {

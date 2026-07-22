@@ -275,6 +275,64 @@ export class GoodClass {
   [computed_js_property]() {}
 }
 `;
+  const unusedSource = `export class UnusedTypeScript {
+  private unusedField = 1;
+  private usedField = 2;
+  private unusedParameterProperty = 3;
+  private #unusedPrivate = 4;
+  private #usedPrivate = 5;
+  private unusedMethod() { return 1; }
+  private usedMethod() { return this.usedField; }
+  private overload(value: string): string;
+  private overload(value: number): string;
+  private overload(value: string | number): string { return String(value); }
+
+  constructor(private parameterProperty: number, private parameterField: number) {
+    this.#usedPrivate;
+    this.usedMethod();
+    this.parameterProperty;
+  }
+
+  run(usedParameter, unusedParameter, _ignoredParameter) {
+    const neverUsedLocal = 1;
+    const { used: usedDestructured, unused: unusedDestructured } = { used: 2, unused: 3 };
+    const captured = usedDestructured;
+    type CapturedType = typeof captured;
+    this.overload(1);
+    try {
+      return usedParameter + usedDestructured + this.#usedPrivate + this.parameterField;
+    } catch (unusedError) {
+      return captured;
+    }
+  }
+}
+
+function closure(usedParameter, unusedClosureParameter, _ignoredClosureParameter) {
+  const capturedByClosure = 1;
+  return () => capturedByClosure + usedParameter;
+}
+
+function recursive(value) {
+  return value > 0 ? recursive(value - 1) : 0;
+}
+
+declare class AmbientUnused {
+  private unusedField: number;
+  private unusedMethod(): void;
+}
+`;
+  const unusedJavaScriptSource = `export class UnusedJavaScript {
+  #unusedField = 1;
+  #usedField = 2;
+  #unusedMethod() { return 1; }
+  #usedMethod() { return this.#usedField; }
+  run(unusedParameter, _ignoredParameter) {
+    const neverUsedLocal = 1;
+    this.#usedMethod();
+    return this.#usedField;
+  }
+}
+`;
   const decisionMetricsSource = `export function logicalNPath(value) {
   if (value && value) {}
   if (value && value) {}
@@ -350,6 +408,8 @@ export function catchNPath(value) {
   writeScanFixture("src/naming.js", javascriptNamingSource);
   writeScanFixture("src/controversial.ts", controversialSource);
   writeScanFixture("src/controversial.js", controversialJavaScriptSource);
+  writeScanFixture("src/unused.ts", unusedSource);
+  writeScanFixture("src/unused.js", unusedJavaScriptSource);
   writeScanFixture("src/decision-metrics.ts", decisionMetricsSource);
   writeScanFixture("excluded/complex.ts", complexSource);
   for (const directory of ["node_modules", ".git", "generated", "coverage", ".cache", "build", "dist", "output", ".output"]) {
@@ -543,6 +603,31 @@ test("controversial rules distinguish camel-case roles and skip computed names",
   assert.match(result.stdout, /CamelCaseParameterName .*bad_js_parameter/);
   assert.match(result.stdout, /CamelCaseVariableName .*bad_js_variable/);
   assert.doesNotMatch(result.stdout, /GoodClass|goodProperty|goodMethod|goodParameter|goodVariable|privateField|computed_property|computed_method|computed_js_property/);
+  assert.equal(result.stderr, "");
+});
+
+test("unusedcode rules resolve lexical references without declaration certainty", () => {
+  const result = runCli([
+    join(scanRoot, "src", "unused.ts") + "," + join(scanRoot, "src", "unused.js"),
+    "text",
+    "unusedcode",
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /UnusedPrivateField .*unusedField/);
+  assert.match(result.stdout, /UnusedPrivateField .*unusedParameterProperty/);
+  assert.match(result.stdout, /UnusedPrivateField .*unusedPrivate/);
+  assert.match(result.stdout, /UnusedPrivateMethod .*unusedMethod/);
+  assert.match(result.stdout, /UnusedFormalParameter .*unusedParameter/);
+  assert.match(result.stdout, /UnusedFormalParameter .*unusedClosureParameter/);
+  assert.match(result.stdout, /UnusedLocalVariable .*neverUsedLocal/);
+  assert.match(result.stdout, /UnusedLocalVariable .*unusedDestructured/);
+  assert.match(result.stdout, /UnusedLocalVariable .*unusedError/);
+  assert.match(result.stdout, /UnusedPrivateField .*#unusedField/);
+  assert.match(result.stdout, /UnusedPrivateMethod .*#unusedMethod/);
+  assert.match(result.stdout, /UnusedFormalParameter .*unusedParameter/);
+  assert.match(result.stdout, /UnusedLocalVariable .*neverUsedLocal/);
+  assert.doesNotMatch(result.stdout, /AmbientUnused|such as '#usedField'|such as '#usedPrivate'|such as 'usedField'|such as 'usedPrivate'|such as 'usedMethod'|such as 'overload'|such as 'parameterProperty'|such as 'parameterField'|such as 'usedParameter'|such as '_ignoredParameter'|such as '_ignoredClosureParameter'|such as 'capturedByClosure'|such as 'captured'|such as 'usedDestructured'|such as 'recursive'/);
   assert.equal(result.stderr, "");
 });
 
