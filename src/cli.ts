@@ -3,6 +3,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
+import { analyze } from "./analyzer";
+import { formatText } from "./reporters/text";
 
 const packageMetadata = JSON.parse(
   readFileSync(join(__dirname, "..", "package.json"), "utf8"),
@@ -67,6 +69,9 @@ type CliIo = {
 type ParsedArguments = {
   showHelp: boolean;
   showVersion: boolean;
+  paths?: string[];
+  format?: string;
+  rulesets?: string[];
 };
 
 class CliError extends Error {}
@@ -85,6 +90,10 @@ function splitOption(argument: string): { name: string; value?: string } {
     name: argument.slice(0, separator),
     value: argument.slice(separator + 1),
   };
+}
+
+function splitNonEmpty(value: string): string[] {
+  return value.split(",").filter((part) => part.length > 0);
 }
 
 function parseArguments(argv: readonly string[]): ParsedArguments {
@@ -146,7 +155,16 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
     throw new CliError(`Unexpected positional argument: ${positional[3]}`);
   }
 
-  return { showHelp, showVersion };
+  const paths = splitNonEmpty(positional[0]);
+  const rulesets = splitNonEmpty(positional[2]);
+  if (paths.length === 0) {
+    throw new CliError("At least one input path is required");
+  }
+  if (rulesets.length === 0) {
+    throw new CliError("At least one ruleset is required");
+  }
+
+  return { showHelp, showVersion, paths, format: positional[1], rulesets };
 }
 
 export function runCli(argv: readonly string[], io: CliIo): number {
@@ -162,14 +180,19 @@ export function runCli(argv: readonly string[], io: CliIo): number {
       writeLine(io.stdout, `messcript ${packageMetadata.version}`);
       return 0;
     }
+
+    if (parsedArguments.format?.toLowerCase() !== "text") {
+      throw new CliError(`Unknown format: ${parsedArguments.format}`);
+    }
+
+    const findings = analyze(parsedArguments.paths ?? [], parsedArguments.rulesets ?? []);
+    io.stdout.write(formatText(findings));
+    return findings.length > 0 ? 2 : 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown command error";
     writeLine(io.stderr, `Error: ${message}`);
     return 1;
   }
-
-  writeLine(io.stderr, "Error: analysis is not available yet");
-  return 1;
 }
 
 if (require.main === module) {

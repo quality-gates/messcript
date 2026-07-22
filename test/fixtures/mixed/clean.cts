@@ -1,0 +1,2 @@
+export = { commonTypeScriptModule: 1 };
+

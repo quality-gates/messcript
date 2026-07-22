@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { after, before, test } from "node:test";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const fixturesRoot = join(repoRoot, "test", "fixtures");
 let consumerRoot;
 let executable;
 
@@ -98,5 +99,39 @@ test("help does not hide an extra positional argument", () => {
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Unexpected positional argument: extra/);
+  assert.equal(result.stdout, "");
+});
+
+test("a clean mixed-source directory exits successfully", () => {
+  const result = runCli([join(fixturesRoot, "mixed"), "text", "codesize"]);
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "");
+});
+
+test("CyclomaticComplexity reports a stable text finding", () => {
+  const result = runCli([join(fixturesRoot, "complex.ts"), "text", "codesize"]);
+
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /complex\.ts:\d+:\d+: CyclomaticComplexity \[priority 3\]/);
+  assert.match(result.stdout, /function complex\(\)/);
+  assert.match(result.stdout, /Cyclomatic Complexity of 13/);
+  assert.equal(result.stderr, "");
+});
+
+test("a missing input is an operational error", () => {
+  const result = runCli([join(fixturesRoot, "missing.ts"), "text", "codesize"]);
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Input path does not exist/);
+  assert.equal(result.stdout, "");
+});
+
+test("a parse error is an operational error", () => {
+  const result = runCli([join(fixturesRoot, "malformed.ts"), "text", "codesize"]);
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Could not parse .*malformed\.ts/);
   assert.equal(result.stdout, "");
 });

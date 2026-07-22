@@ -1,0 +1,2 @@
+export const jsxValue = <div />;
+
