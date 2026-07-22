@@ -5,9 +5,15 @@ import type { DiscoveryOptions } from "./discovery";
 import type { Finding } from "./finding";
 import { compareLocations } from "./location";
 import { findCyclomaticComplexity } from "./rules/cyclomatic-complexity";
+import { findExcessiveClassComplexity } from "./rules/excessive-class-complexity";
+import { findExcessiveClassLength } from "./rules/excessive-class-length";
 import { findExcessiveMethodLength } from "./rules/excessive-method-length";
 import { findExcessiveParameterList } from "./rules/excessive-parameter-list";
+import { findExcessivePublicCount } from "./rules/excessive-public-count";
 import { findNPathComplexity } from "./rules/npath-complexity";
+import { findTooManyFields } from "./rules/too-many-fields";
+import { findTooManyMethods } from "./rules/too-many-methods";
+import { findTooManyPublicMethods } from "./rules/too-many-public-methods";
 
 export type ProcessingError = {
   path: string;
@@ -70,6 +76,12 @@ export function analyze(
         ...findNPathComplexity(sourceFile),
         ...findExcessiveMethodLength(sourceFile),
         ...findExcessiveParameterList(sourceFile),
+        ...findExcessiveClassLength(sourceFile),
+        ...findExcessivePublicCount(sourceFile),
+        ...findTooManyFields(sourceFile),
+        ...findTooManyMethods(sourceFile),
+        ...findTooManyPublicMethods(sourceFile),
+        ...findExcessiveClassComplexity(sourceFile),
       );
     } catch (error) {
       errors.push({

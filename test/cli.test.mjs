@@ -116,6 +116,84 @@ export function idiomaticParameters({ first, second } = {}, ...rest) {
     ...Array.from({ length: 100 }, (_, index) => `  const line${index} = ${index};`),
     "}",
   ].join("\n");
+  const buildLargeClass = ({ typescript, name = "LargeJavaScript" }) => {
+    const header = typescript ? "export class LargeTypeScript {" : `export const ${name} = class {`;
+    const fields = [
+      ...Array.from({ length: 18 }, (_, index) => `  public field${index} = ${index};`.replace("public ", typescript ? "public " : "")),
+      typescript ? "  private hidden = 0;" : "  #hidden = 0;",
+      ...(typescript ? [] : ["  static extra = 0;"]),
+    ];
+    const constructor = typescript
+      ? [
+          "  constructor(public promoted: number) {",
+          "    if (promoted) return;",
+          "    return;",
+          "  }",
+        ]
+      : [
+          "  constructor() {",
+          "    if (this.field0) return;",
+          "    return;",
+          "  }",
+        ];
+    const methods = Array.from({ length: 25 }, (_, index) => [
+      typescript ? `  method${index}(value: number): number {` : `  method${index}(value) {`,
+      "    if (value) return 1;",
+      "    return 0;",
+      "  }",
+    ]).flat();
+    return [
+      header,
+      ...fields,
+      ...constructor,
+      ...methods,
+      ...Array.from({ length: 900 }, (_, index) => `  // filler ${index}`),
+      "}",
+    ].join("\n");
+  };
+  const classSource = `${buildLargeClass({ typescript: true })}
+
+${buildLargeClass({ typescript: false })}
+
+export class IdiomaticTypeScript {
+  private secret = 0;
+  static count = 0;
+  [Symbol.iterator](): Iterator<number> { return [][Symbol.iterator](); }
+  get value(): number { return this.secret; }
+  set value(next: number) { this.secret = next; }
+}
+
+export const IdiomaticJavaScript = class {
+  #secret = 0;
+  static count = 0;
+  [Symbol.iterator]() { return [][Symbol.iterator](); }
+  get value() { return this.#secret; }
+  set value(next) { this.#secret = next; }
+};
+
+class OverloadDeclarations {
+${Array.from({ length: 20 }, (_, index) => `  private run${index}(value: string): string;\n  private run${index}(value: number): string;\n  private run${index}(value: string | number): string { return String(value); }`).join("\n")}
+}
+
+class AccessorHeavy {
+${Array.from({ length: 30 }, (_, index) => `  get getter${index}() { return ${index}; }`).join("\n")}
+}
+
+interface NotAClass { first: string; second(): void; }
+type TypeLiteral = { first: string; second(): void };
+declare class AmbientDeclaration { readonly value: string; run(): void; }
+abstract class AbstractDeclaration { protected value = 0; abstract run(): void; }
+`;
+  const javascriptClassSource = `${buildLargeClass({ typescript: false, name: "LargeJavaScriptFile" })}
+
+export const IdiomaticJavaScriptFile = class {
+  #secret = 0;
+  static count = 0;
+  [Symbol.iterator]() { return [][Symbol.iterator](); }
+  get value() { return this.#secret; }
+  set value(next) { this.#secret = next; }
+};
+`;
   const decisionMetricsSource = `export function logicalNPath(value) {
   if (value && value) {}
   if (value && value) {}
@@ -185,6 +263,8 @@ export function catchNPath(value) {
   writeScanFixture("src/npath.ts", npathSource);
   writeScanFixture("src/parameters.ts", parameterSource);
   writeScanFixture("src/long.ts", longSource);
+  writeScanFixture("src/classes.ts", classSource);
+  writeScanFixture("src/classes.js", javascriptClassSource);
   writeScanFixture("src/decision-metrics.ts", decisionMetricsSource);
   writeScanFixture("excluded/complex.ts", complexSource);
   for (const directory of ["node_modules", ".git", "generated", "coverage", ".cache", "build", "dist", "output", ".output"]) {
@@ -305,6 +385,26 @@ test("function metrics report exact positive values and ignore idiomatic paramet
   assert.doesNotMatch(result.stdout, /typedThis.*ExcessiveParameterList/);
   assert.doesNotMatch(result.stdout, /shortMethod.*ExcessiveMethodLength/);
   assert.doesNotMatch(result.stdout, /idiomaticParameters.*ExcessiveParameterList/);
+  assert.equal(result.stderr, "");
+});
+
+test("class metrics cover JavaScript and TypeScript classes without declaration noise", () => {
+  const result = runCli([join(scanRoot, "src", "classes.ts") + "," + join(scanRoot, "src", "classes.js"), "text", "codesize"]);
+
+  assert.equal(result.status, 2);
+  for (const [className, lineCount] of [["LargeTypeScript", 1025], ["LargeJavaScript", 1026], ["LargeJavaScriptFile", 1026]]) {
+    assert.match(result.stdout, new RegExp(`ExcessiveClassLength .*${className} .*${lineCount} lines of code`));
+    assert.match(result.stdout, new RegExp(`ExcessivePublicCount .*${className} .*45 public methods and attributes`));
+    assert.match(result.stdout, new RegExp(`TooManyFields .*${className} .*20 fields`));
+    assert.match(result.stdout, new RegExp(`TooManyMethods .*${className} .*26 non-getter- and setter-methods`));
+    assert.match(result.stdout, new RegExp(`TooManyPublicMethods .*${className} .*26 public methods`));
+    assert.match(result.stdout, new RegExp(`ExcessiveClassComplexity .*${className} .*overall complexity of 52`));
+  }
+  assert.doesNotMatch(result.stdout, /IdiomaticTypeScript/);
+  assert.doesNotMatch(result.stdout, /IdiomaticJavaScript/);
+  assert.doesNotMatch(result.stdout, /IdiomaticJavaScriptFile/);
+  assert.doesNotMatch(result.stdout, /OverloadDeclarations|AccessorHeavy/);
+  assert.doesNotMatch(result.stdout, /NotAClass|TypeLiteral|AmbientDeclaration|AbstractDeclaration/);
   assert.equal(result.stderr, "");
 });
 
