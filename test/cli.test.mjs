@@ -476,6 +476,40 @@ function mutateState() {
 `;
   const globalVariableMutationSource = `sharedAcrossFiles += 1;
 `;
+  const couplingImports = Array.from(
+    { length: 13 },
+    (_, index) => `import type { Dependency${index} } from "./dependency-${index}";`,
+  ).join("\n");
+  const couplingFields = Array.from(
+    { length: 13 },
+    (_, index) => `  field${index}: Dependency${index};`,
+  ).join("\n");
+  const couplingSource = `${couplingImports}
+export class Coupled extends BaseClass implements Contract {
+  @Injectable()
+${couplingFields}
+  unimported: ExternalType;
+  run(value: Dependency0): Dependency1 {
+    return new Dependency2();
+  }
+}
+
+export const CommonJsDependency = require("./commonjs-dependency");
+module.exports = Coupled;
+`;
+  const couplingNegativeSource = `import type { TypeOnlyDependency } from "./type-only";
+
+interface CouplingInterface { run(value: string): number; }
+type CouplingType = { value: boolean };
+declare class AmbientCoupling { run(): void; }
+namespace CouplingNamespace { export class Nested { value: string = ""; } }
+
+export class IdiomaticCoupling {
+  value: string = "";
+  values: Array<string> = [];
+  run(value: number): number { return value; }
+}
+`;
   const decisionMetricsSource = `export function logicalNPath(value) {
   if (value && value) {}
   if (value && value) {}
@@ -560,6 +594,8 @@ export function catchNPath(value) {
   writeScanFixture("src/global-variable.ts", globalVariableTypeScriptSource);
   writeScanFixture("src/global-script-a.js", globalVariableScriptSource);
   writeScanFixture("src/global-script-b.js", globalVariableMutationSource);
+  writeScanFixture("src/coupling.ts", couplingSource);
+  writeScanFixture("src/coupling-negative.ts", couplingNegativeSource);
   writeScanFixture("src/decision-metrics.ts", decisionMetricsSource);
   writeScanFixture("excluded/complex.ts", complexSource);
   for (const directory of ["node_modules", ".git", "generated", "coverage", ".cache", "build", "dist", "output", ".output"]) {
@@ -836,6 +872,20 @@ test("design global-variable rule reports observed mutable module and static sta
   assert.match(result.stdout, /GlobalVariable \[priority 1\].*count/);
   assert.match(result.stdout, /GlobalVariable \[priority 1\].*sharedAcrossFiles/);
   assert.doesNotMatch(result.stdout, /ImportedType|importedValue|neverMutated|immutableState|ambientState|immutable|NeverMutated/);
+  assert.equal(result.stderr, "");
+});
+
+test("design coupling rule measures imports, types, heritage, decorators, and require", () => {
+  const result = runCli([
+    join(scanRoot, "src", "coupling.ts") + "," + join(scanRoot, "src", "coupling-negative.ts"),
+    "text",
+    "design",
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /CouplingBetweenObjects \[priority 2\].*class Coupled/);
+  assert.match(result.stdout, /coupling between objects value of (?:1[4-9]|[2-9][0-9])/);
+  assert.doesNotMatch(result.stdout, /IdiomaticCoupling|CouplingInterface|CouplingType|AmbientCoupling|CouplingNamespace/);
   assert.equal(result.stderr, "");
 });
 

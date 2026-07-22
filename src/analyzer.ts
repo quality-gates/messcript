@@ -34,6 +34,7 @@ import { findElseExpression } from "./rules/else-expression";
 import { findIfStatementAssignment } from "./rules/if-statement-assignment";
 import { findStaticAccess } from "./rules/static-access";
 import { findCountInLoopExpression } from "./rules/count-in-loop-expression";
+import { findCouplingBetweenObjects } from "./rules/coupling-between-objects";
 import { findDevelopmentCodeFragment } from "./rules/development-code-fragment";
 import { findEmptyCatchBlock } from "./rules/empty-catch-block";
 import { findExitExpression } from "./rules/exit-expression";
@@ -170,6 +171,7 @@ export function analyze(
           ...findDevelopmentCodeFragment(sourceFile),
           ...findEmptyCatchBlock(sourceFile),
         );
+        findings.push(...findCouplingBetweenObjects(sourceFile));
       }
     } catch (error) {
       errors.push({

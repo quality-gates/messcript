@@ -3,6 +3,7 @@ import ts from "typescript";
 import { test } from "node:test";
 import { calculateNPathComplexity } from "../dist/metrics/complexity.js";
 import { findGlobalVariable } from "../dist/rules/global-variable.js";
+import { findCouplingBetweenObjects } from "../dist/rules/coupling-between-objects.js";
 
 function functionBody(source) {
   const sourceFile = ts.createSourceFile("metric-fixture.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
@@ -32,4 +33,17 @@ test("GlobalVariable report-immutable includes otherwise quiet module bindings",
   );
   const findings = findGlobalVariable([sourceFile], true);
   assert.deepEqual(findings.map((finding) => finding.message.match(/state: (.+)\.$/)?.[1]), ["immutable", "quiet"]);
+});
+
+test("CouplingBetweenObjects reports the exact dependency count at its threshold", () => {
+  const sourceFile = ts.createSourceFile(
+    "coupling-metric.ts",
+    "class Exact { first: First; second: Second; third(value: Third): Fourth { return new Fifth(); } }",
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const finding = findCouplingBetweenObjects(sourceFile, 5).find((item) => item.context === "class Exact");
+  assert.ok(finding);
+  assert.match(finding.message, /value of 5/);
 });
