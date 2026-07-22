@@ -37,6 +37,7 @@ import { findCountInLoopExpression } from "./rules/count-in-loop-expression";
 import { findDevelopmentCodeFragment } from "./rules/development-code-fragment";
 import { findEmptyCatchBlock } from "./rules/empty-catch-block";
 import { findExitExpression } from "./rules/exit-expression";
+import { findGlobalVariable } from "./rules/global-variable";
 import { findGotoStatement } from "./rules/goto-statement";
 import { findUnusedFormalParameter } from "./rules/unused-formal-parameter";
 import { findUnusedLocalVariable } from "./rules/unused-local-variable";
@@ -75,6 +76,7 @@ export function analyze(
   }
 
   const findings: Finding[] = [];
+  const parsedSourceFiles: ts.SourceFile[] = [];
   const discovered = discoverSourceFiles(inputPaths, discoveryOptions);
   const errors: ProcessingError[] = discovered.errors.map((error) => ({
     path: error.path,
@@ -106,6 +108,7 @@ export function analyze(
       if (parseDiagnostics.length > 0) {
         continue;
       }
+      parsedSourceFiles.push(sourceFile);
       if (normalizedRulesets.includes("codesize")) {
         findings.push(
           ...findCyclomaticComplexity(sourceFile),
@@ -176,6 +179,10 @@ export function analyze(
         message: `Could not process ${path}: ${error instanceof Error ? error.message : "Unknown processing error"}`,
       });
     }
+  }
+
+  if (normalizedRulesets.includes("design")) {
+    findings.push(...findGlobalVariable(parsedSourceFiles));
   }
 
   findings.sort((left, right) => compareLocations(left, right) || left.ruleName.localeCompare(right.ruleName));

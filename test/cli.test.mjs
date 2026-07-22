@@ -440,6 +440,42 @@ export function designTypeNegative(items: { length: number }) {
   }
 }
 `;
+  const globalVariableTypeScriptSource = `import type { ImportedType } from "external";
+import importedValue from "external-value";
+
+export let mutableState = 0;
+export var assignedLater;
+export let objectState = { value: 0 };
+export let neverMutated = 0;
+export const immutableState = 0;
+declare let ambientState: number;
+
+export class GlobalState {
+  static count = 0;
+  static readonly immutable = 1;
+  static #privateCount = 0;
+
+  static increment() {
+    this.count += 1;
+    this.#privateCount++;
+  }
+}
+
+class NeverMutated {
+  static count = 0;
+}
+
+function mutateState() {
+  mutableState = 1;
+  assignedLater += 1;
+  objectState.value = 1;
+  GlobalState.count++;
+}
+`;
+  const globalVariableScriptSource = `var sharedAcrossFiles = 0;
+`;
+  const globalVariableMutationSource = `sharedAcrossFiles += 1;
+`;
   const decisionMetricsSource = `export function logicalNPath(value) {
   if (value && value) {}
   if (value && value) {}
@@ -521,6 +557,9 @@ export function catchNPath(value) {
   writeScanFixture("src/clean-code.js", cleanCodeJavaScriptSource);
   writeScanFixture("src/design.js", designSource);
   writeScanFixture("src/design.ts", designTypeScriptSource);
+  writeScanFixture("src/global-variable.ts", globalVariableTypeScriptSource);
+  writeScanFixture("src/global-script-a.js", globalVariableScriptSource);
+  writeScanFixture("src/global-script-b.js", globalVariableMutationSource);
   writeScanFixture("src/decision-metrics.ts", decisionMetricsSource);
   writeScanFixture("excluded/complex.ts", complexSource);
   for (const directory of ["node_modules", ".git", "generated", "coverage", ".cache", "build", "dist", "output", ".output"]) {
@@ -776,6 +815,27 @@ test("design rules cover executable control flow and keep goto inert", () => {
   assert.match(result.stdout, /DevelopmentCodeFragment \[priority 2\].*Development-only marker/);
   assert.match(result.stdout, /EmptyCatchBlock \[priority 2\].*empty catch blocks/);
   assert.doesNotMatch(result.stdout, /GotoStatement|DesignInterface|DesignFunction|AmbientDesign|designTypeNegative/);
+  assert.equal(result.stderr, "");
+});
+
+test("design global-variable rule reports observed mutable module and static state", () => {
+  const result = runCli([
+    [
+      join(scanRoot, "src", "global-variable.ts"),
+      join(scanRoot, "src", "global-script-a.js"),
+      join(scanRoot, "src", "global-script-b.js"),
+    ].join(","),
+    "text",
+    "design",
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /GlobalVariable \[priority 1\].*mutableState/);
+  assert.match(result.stdout, /GlobalVariable \[priority 1\].*assignedLater/);
+  assert.match(result.stdout, /GlobalVariable \[priority 1\].*objectState/);
+  assert.match(result.stdout, /GlobalVariable \[priority 1\].*count/);
+  assert.match(result.stdout, /GlobalVariable \[priority 1\].*sharedAcrossFiles/);
+  assert.doesNotMatch(result.stdout, /ImportedType|importedValue|neverMutated|immutableState|ambientState|immutable|NeverMutated/);
   assert.equal(result.stderr, "");
 });
 
