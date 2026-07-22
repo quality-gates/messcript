@@ -1,0 +1,27 @@
+{
+  "name": "messcript",
+  "version": "0.1.0",
+  "description": "An idiomatic JavaScript and TypeScript mess detector.",
+  "license": "MIT",
+  "type": "commonjs",
+  "bin": {
+    "messcript": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "check": "tsc --noEmit",
+    "prepack": "npm run build",
+    "test": "npm run build && node --test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.2"
+  }
+}
