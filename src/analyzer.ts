@@ -22,6 +22,11 @@ import { findLongVariable } from "./rules/long-variable";
 import { findShortClassName } from "./rules/short-class-name";
 import { findShortMethodName } from "./rules/short-method-name";
 import { findShortVariable } from "./rules/short-variable";
+import { findCamelCaseClassName } from "./rules/camel-case-class-name";
+import { findCamelCaseMethodName } from "./rules/camel-case-method-name";
+import { findCamelCaseParameterName } from "./rules/camel-case-parameter-name";
+import { findCamelCasePropertyName } from "./rules/camel-case-property-name";
+import { findCamelCaseVariableName } from "./rules/camel-case-variable-name";
 
 export type ProcessingError = {
   path: string;
@@ -42,7 +47,7 @@ export function analyze(
 ): AnalysisResult {
   const normalizedRulesets = [...new Set(rulesets.map((ruleset) => ruleset.toLowerCase()))];
   for (const ruleset of normalizedRulesets) {
-    if (ruleset !== "codesize" && ruleset !== "naming") {
+    if (ruleset !== "codesize" && ruleset !== "naming" && ruleset !== "controversial") {
       throw new Error(`Unknown ruleset: ${ruleset}`);
     }
   }
@@ -103,6 +108,15 @@ export function analyze(
           ...findConstantNamingConventions(sourceFile),
           ...findBooleanGetMethodName(sourceFile),
           ...findConstructorWithNameAsEnclosingClass(sourceFile),
+        );
+      }
+      if (normalizedRulesets.includes("controversial")) {
+        findings.push(
+          ...findCamelCaseClassName(sourceFile),
+          ...findCamelCaseMethodName(sourceFile),
+          ...findCamelCasePropertyName(sourceFile),
+          ...findCamelCaseParameterName(sourceFile),
+          ...findCamelCaseVariableName(sourceFile),
         );
       }
     } catch (error) {

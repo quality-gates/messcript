@@ -83,6 +83,12 @@ function addClassField(identifiers: NamedBinding[], field: ClassField, sourceFil
   }
 }
 
+function addPropertyName(identifiers: NamedBinding[], node: ts.PropertyDeclaration | ts.PropertySignature, sourceFile: ts.SourceFile): void {
+  if (ts.isIdentifier(node.name) || ts.isPrivateIdentifier(node.name)) {
+    addBinding(identifiers, node.name, `property ${node.name.getText(sourceFile)}`);
+  }
+}
+
 function addVariableDeclarations(identifiers: NamedBinding[], sourceFile: ts.SourceFile): void {
   function visit(node: ts.Node): void {
     if (ts.isVariableDeclaration(node)) {
@@ -92,6 +98,60 @@ function addVariableDeclarations(identifiers: NamedBinding[], sourceFile: ts.Sou
   }
 
   visit(sourceFile);
+}
+
+function deduplicateBindings(bindings: readonly NamedBinding[], sourceFile: ts.SourceFile): NamedBinding[] {
+  const seen = new Set<string>();
+  return bindings.filter((binding) => {
+    const key = `${binding.node.getStart(sourceFile)}:${binding.name}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+export function collectVariables(sourceFile: ts.SourceFile): NamedBinding[] {
+  const variables: NamedBinding[] = [];
+  addVariableDeclarations(variables, sourceFile);
+  return deduplicateBindings(variables, sourceFile);
+}
+
+export function collectParameters(sourceFile: ts.SourceFile): NamedBinding[] {
+  const parameters: NamedBinding[] = [];
+  function visit(node: ts.Node): void {
+    if (isFunctionLike(node)) {
+      addFunctionParameters(parameters, node);
+    }
+    if (
+      ts.isMethodSignature(node) ||
+      ts.isCallSignatureDeclaration(node) ||
+      ts.isConstructSignatureDeclaration(node) ||
+      ts.isFunctionTypeNode(node) ||
+      ts.isConstructorTypeNode(node)
+    ) {
+      for (const parameter of node.parameters) {
+        addBindingName(parameters, parameter.name, `parameter ${parameter.name.getText()}`);
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return deduplicateBindings(parameters, sourceFile);
+}
+
+export function collectProperties(sourceFile: ts.SourceFile): NamedBinding[] {
+  const properties: NamedBinding[] = [];
+  forEachClass(sourceFile, (node) => addClassFields(properties, node, sourceFile));
+  function visit(node: ts.Node): void {
+    if (ts.isPropertySignature(node)) {
+      addPropertyName(properties, node, sourceFile);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return deduplicateBindings(properties, sourceFile);
 }
 
 function addTypeParameters(identifiers: NamedBinding[], sourceFile: ts.SourceFile): void {
@@ -109,24 +169,12 @@ function addTypeParameters(identifiers: NamedBinding[], sourceFile: ts.SourceFil
 }
 
 export function collectBindings(sourceFile: ts.SourceFile): NamedBinding[] {
-  const identifiers: NamedBinding[] = [];
-  const seen = new Set<string>();
-  const add = (binding: NamedBinding): void => {
-    const key = `${binding.node.getStart(sourceFile)}:${binding.name}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      identifiers.push(binding);
-    }
-  };
-  const collected: NamedBinding[] = [];
-  addVariableDeclarations(collected, sourceFile);
-  addTypeParameters(collected, sourceFile);
-  forEachFunctionLike(sourceFile, (node) => addFunctionParameters(collected, node));
-  forEachClass(sourceFile, (node) => addClassFields(collected, node, sourceFile));
-  for (const binding of collected) {
-    add(binding);
-  }
-  return identifiers;
+  const typeParameters: NamedBinding[] = [];
+  addTypeParameters(typeParameters, sourceFile);
+  return deduplicateBindings(
+    [...collectVariables(sourceFile), ...collectParameters(sourceFile), ...collectProperties(sourceFile), ...typeParameters],
+    sourceFile,
+  );
 }
 
 function namedTypeName(node: NamedType, sourceFile: ts.SourceFile): string | undefined {

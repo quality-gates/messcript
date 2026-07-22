@@ -236,6 +236,45 @@ export function b() {}
 export const bad_js_constant = 1;
 export const A = () => null;
 `;
+  const controversialSource = `export class bad_class {
+  bad_property = 1;
+  #privateField = 0;
+  #bad_field = 1;
+  bad_method(bad_parameter, goodParameter, { bad_destructured_parameter }) {
+    const bad_variable = 1;
+    const goodVariable = 2;
+    return bad_variable + goodVariable + bad_parameter + goodParameter + bad_destructured_parameter;
+  }
+  #bad_method() {}
+  [computed_property]() {}
+  [computed_method]() {}
+}
+
+export interface bad_interface {
+  bad_property: string;
+  bad_method(bad_parameter: string): void;
+}
+type TypeAlias = {
+  bad_property: string;
+  bad_method(bad_parameter: string): void;
+};
+
+export class GoodClass {
+  goodProperty = 1;
+  goodMethod(goodParameter) { const goodVariable = goodParameter; return goodVariable; }
+  #privateField = 0;
+  [computed_property]() {}
+}
+`;
+  const controversialJavaScriptSource = `export class bad_js_class {
+  bad_js_property = 1;
+  bad_js_method(bad_js_parameter) {
+    const bad_js_variable = 1;
+    return bad_js_variable + bad_js_parameter;
+  }
+  [computed_js_property]() {}
+}
+`;
   const decisionMetricsSource = `export function logicalNPath(value) {
   if (value && value) {}
   if (value && value) {}
@@ -309,6 +348,8 @@ export function catchNPath(value) {
   writeScanFixture("src/classes.js", javascriptClassSource);
   writeScanFixture("src/naming.ts", namingSource);
   writeScanFixture("src/naming.js", javascriptNamingSource);
+  writeScanFixture("src/controversial.ts", controversialSource);
+  writeScanFixture("src/controversial.js", controversialJavaScriptSource);
   writeScanFixture("src/decision-metrics.ts", decisionMetricsSource);
   writeScanFixture("excluded/complex.ts", complexSource);
   for (const directory of ["node_modules", ".git", "generated", "coverage", ".cache", "build", "dist", "output", ".output"]) {
@@ -477,6 +518,31 @@ test("naming rules cover language roles and idiomatic names", () => {
   assert.doesNotMatch(result.stdout, /GOOD_CONSTANT|bad_local_constant|isReady|getNumber|callbackRunner|useThing|computedName|anotherVeryLongComputedNameThatShouldBeIgnored/);
   assert.doesNotMatch(result.stdout, /short names like i|short names like j|short names like x|short names like T/);
   assert.doesNotMatch(result.stdout, /short method names like A\(\)/);
+  assert.equal(result.stderr, "");
+});
+
+test("controversial rules distinguish camel-case roles and skip computed names", () => {
+  const result = runCli([
+    join(scanRoot, "src", "controversial.ts") + "," + join(scanRoot, "src", "controversial.js"),
+    "text",
+    "controversial",
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /CamelCaseClassName .*bad_class/);
+  assert.match(result.stdout, /CamelCaseClassName .*bad_interface/);
+  assert.match(result.stdout, /CamelCasePropertyName .*bad_property/);
+  assert.match(result.stdout, /CamelCasePropertyName .*bad_field/);
+  assert.match(result.stdout, /CamelCaseMethodName .*bad_method/);
+  assert.match(result.stdout, /CamelCaseParameterName .*bad_parameter/);
+  assert.match(result.stdout, /CamelCaseParameterName .*bad_destructured_parameter/);
+  assert.match(result.stdout, /CamelCaseVariableName .*bad_variable/);
+  assert.match(result.stdout, /CamelCaseClassName .*bad_js_class/);
+  assert.match(result.stdout, /CamelCasePropertyName .*bad_js_property/);
+  assert.match(result.stdout, /CamelCaseMethodName .*bad_js_method/);
+  assert.match(result.stdout, /CamelCaseParameterName .*bad_js_parameter/);
+  assert.match(result.stdout, /CamelCaseVariableName .*bad_js_variable/);
+  assert.doesNotMatch(result.stdout, /GoodClass|goodProperty|goodMethod|goodParameter|goodVariable|privateField|computed_property|computed_method|computed_js_property/);
   assert.equal(result.stderr, "");
 });
 
