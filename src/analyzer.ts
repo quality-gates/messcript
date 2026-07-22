@@ -33,6 +33,11 @@ import { findDuplicatedArrayKey } from "./rules/duplicated-array-key";
 import { findElseExpression } from "./rules/else-expression";
 import { findIfStatementAssignment } from "./rules/if-statement-assignment";
 import { findStaticAccess } from "./rules/static-access";
+import { findCountInLoopExpression } from "./rules/count-in-loop-expression";
+import { findDevelopmentCodeFragment } from "./rules/development-code-fragment";
+import { findEmptyCatchBlock } from "./rules/empty-catch-block";
+import { findExitExpression } from "./rules/exit-expression";
+import { findGotoStatement } from "./rules/goto-statement";
 import { findUnusedFormalParameter } from "./rules/unused-formal-parameter";
 import { findUnusedLocalVariable } from "./rules/unused-local-variable";
 import { findUnusedPrivateField } from "./rules/unused-private-field";
@@ -62,7 +67,8 @@ export function analyze(
       ruleset !== "naming" &&
       ruleset !== "controversial" &&
       ruleset !== "unusedcode" &&
-      ruleset !== "cleancode"
+      ruleset !== "cleancode" &&
+      ruleset !== "design"
     ) {
       throw new Error(`Unknown ruleset: ${ruleset}`);
     }
@@ -151,6 +157,15 @@ export function analyze(
           ...findIfStatementAssignment(sourceFile),
           ...findDuplicatedArrayKey(sourceFile),
           ...findStaticAccess(sourceFile),
+        );
+      }
+      if (normalizedRulesets.includes("design")) {
+        findings.push(
+          ...findExitExpression(sourceFile),
+          ...findGotoStatement(sourceFile),
+          ...findCountInLoopExpression(sourceFile),
+          ...findDevelopmentCodeFragment(sourceFile),
+          ...findEmptyCatchBlock(sourceFile),
         );
       }
     } catch (error) {

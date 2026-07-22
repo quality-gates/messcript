@@ -381,7 +381,7 @@ type CleanCodeType = { run(flag: boolean): void };
 declare class AmbientCleanCode { run(flag: boolean): void; }
 abstract class AbstractCleanCode { abstract run(flag: boolean): void; }
 `;
-  const cleanCodeJavaScriptSource = `export class CleanCodeJavaScript {
+const cleanCodeJavaScriptSource = `export class CleanCodeJavaScript {
   run(flag = true, value) {
     if (flag) return value;
     else return 0;
@@ -395,6 +395,50 @@ export function javascriptAssignment(input) {
 }
 
 export const javascriptObject = { "key": 1, key: 2, [dynamicKey]: 3, [dynamicKey]: 4 };
+`;
+  const designSource = `export function designRules(items, value) {
+  if (value === 0) {
+    process.exit(1);
+  }
+  for (let index = 0; index < items.length; index += 1) {
+    console.log(items[index]);
+  }
+  while (items.count() > 0) {
+    items.pop();
+  }
+  try {
+    return value;
+  } catch (error) {
+  }
+}
+
+// TODO: remove development marker
+export function designNegative(items) {
+  const count = items.length;
+  for (let index = 0; index < count; index += 1) {
+    return items[index];
+  }
+  try {
+    return items;
+  } catch (error) {
+    return error;
+  }
+}
+
+export function gotoIsHarmless() {
+  return "goto";
+}
+`;
+  const designTypeScriptSource = `interface DesignInterface { run(): void; }
+type DesignFunction = () => void;
+declare class AmbientDesign { run(): void; }
+
+export function designTypeNegative(items: { length: number }) {
+  const itemCount = items.length;
+  for (let index = 0; index < itemCount; index += 1) {
+    return index;
+  }
+}
 `;
   const decisionMetricsSource = `export function logicalNPath(value) {
   if (value && value) {}
@@ -475,6 +519,8 @@ export function catchNPath(value) {
   writeScanFixture("src/unused.js", unusedJavaScriptSource);
   writeScanFixture("src/clean-code.ts", cleanCodeSource);
   writeScanFixture("src/clean-code.js", cleanCodeJavaScriptSource);
+  writeScanFixture("src/design.js", designSource);
+  writeScanFixture("src/design.ts", designTypeScriptSource);
   writeScanFixture("src/decision-metrics.ts", decisionMetricsSource);
   writeScanFixture("excluded/complex.ts", complexSource);
   for (const directory of ["node_modules", ".git", "generated", "coverage", ".cache", "build", "dist", "output", ".output"]) {
@@ -712,6 +758,24 @@ test("cleancode rules cover executable JavaScript and TypeScript constructs cons
   assert.match(result.stdout, /StaticAccess \[priority 1\].*Logger/);
   assert.doesNotMatch(result.stdout, /\bCleanCodeInterface\b|\bCleanCodeType\b|\bAmbientCleanCode\b|\bAbstractCleanCode\b/);
   assert.doesNotMatch(result.stdout, /cleanNegative.*ElseExpression|anotherKey|dynamicKey/);
+  assert.equal(result.stderr, "");
+});
+
+test("design rules cover executable control flow and keep goto inert", () => {
+  const result = runCli([
+    join(scanRoot, "src", "design.js") + "," + join(scanRoot, "src", "design.ts"),
+    "text",
+    "design",
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /ExitExpression \[priority 1\].*exit expression/);
+  assert.match(result.stdout, /CountInLoopExpression \[priority 2\].*length.*for/);
+  assert.match(result.stdout, /CountInLoopExpression \[priority 2\].*count.*while/);
+  assert.match(result.stdout, /DevelopmentCodeFragment \[priority 2\].*console.log/);
+  assert.match(result.stdout, /DevelopmentCodeFragment \[priority 2\].*Development-only marker/);
+  assert.match(result.stdout, /EmptyCatchBlock \[priority 2\].*empty catch blocks/);
+  assert.doesNotMatch(result.stdout, /GotoStatement|DesignInterface|DesignFunction|AmbientDesign|designTypeNegative/);
   assert.equal(result.stderr, "");
 });
 
