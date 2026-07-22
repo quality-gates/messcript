@@ -14,6 +14,14 @@ import { findNPathComplexity } from "./rules/npath-complexity";
 import { findTooManyFields } from "./rules/too-many-fields";
 import { findTooManyMethods } from "./rules/too-many-methods";
 import { findTooManyPublicMethods } from "./rules/too-many-public-methods";
+import { findBooleanGetMethodName } from "./rules/boolean-get-method-name";
+import { findConstantNamingConventions } from "./rules/constant-naming-conventions";
+import { findConstructorWithNameAsEnclosingClass } from "./rules/constructor-with-name-as-enclosing-class";
+import { findLongClassName } from "./rules/long-class-name";
+import { findLongVariable } from "./rules/long-variable";
+import { findShortClassName } from "./rules/short-class-name";
+import { findShortMethodName } from "./rules/short-method-name";
+import { findShortVariable } from "./rules/short-variable";
 
 export type ProcessingError = {
   path: string;
@@ -34,7 +42,7 @@ export function analyze(
 ): AnalysisResult {
   const normalizedRulesets = [...new Set(rulesets.map((ruleset) => ruleset.toLowerCase()))];
   for (const ruleset of normalizedRulesets) {
-    if (ruleset !== "codesize") {
+    if (ruleset !== "codesize" && ruleset !== "naming") {
       throw new Error(`Unknown ruleset: ${ruleset}`);
     }
   }
@@ -71,18 +79,32 @@ export function analyze(
       if (parseDiagnostics.length > 0) {
         continue;
       }
-      findings.push(
-        ...findCyclomaticComplexity(sourceFile),
-        ...findNPathComplexity(sourceFile),
-        ...findExcessiveMethodLength(sourceFile),
-        ...findExcessiveParameterList(sourceFile),
-        ...findExcessiveClassLength(sourceFile),
-        ...findExcessivePublicCount(sourceFile),
-        ...findTooManyFields(sourceFile),
-        ...findTooManyMethods(sourceFile),
-        ...findTooManyPublicMethods(sourceFile),
-        ...findExcessiveClassComplexity(sourceFile),
-      );
+      if (normalizedRulesets.includes("codesize")) {
+        findings.push(
+          ...findCyclomaticComplexity(sourceFile),
+          ...findNPathComplexity(sourceFile),
+          ...findExcessiveMethodLength(sourceFile),
+          ...findExcessiveParameterList(sourceFile),
+          ...findExcessiveClassLength(sourceFile),
+          ...findExcessivePublicCount(sourceFile),
+          ...findTooManyFields(sourceFile),
+          ...findTooManyMethods(sourceFile),
+          ...findTooManyPublicMethods(sourceFile),
+          ...findExcessiveClassComplexity(sourceFile),
+        );
+      }
+      if (normalizedRulesets.includes("naming")) {
+        findings.push(
+          ...findShortClassName(sourceFile),
+          ...findLongClassName(sourceFile),
+          ...findShortVariable(sourceFile),
+          ...findLongVariable(sourceFile),
+          ...findShortMethodName(sourceFile),
+          ...findConstantNamingConventions(sourceFile),
+          ...findBooleanGetMethodName(sourceFile),
+          ...findConstructorWithNameAsEnclosingClass(sourceFile),
+        );
+      }
     } catch (error) {
       errors.push({
         path,

@@ -9,16 +9,31 @@ export type FunctionLike =
   | ts.MethodDeclaration
   | ts.SetAccessorDeclaration;
 
-export function isFunctionLikeWithBody(node: ts.Node): node is FunctionLike {
+export function isFunctionLike(node: ts.Node): node is FunctionLike {
   return (
-    (ts.isArrowFunction(node) && node.body !== undefined) ||
-    (ts.isConstructorDeclaration(node) && node.body !== undefined) ||
-    (ts.isFunctionDeclaration(node) && node.body !== undefined) ||
-    (ts.isFunctionExpression(node) && node.body !== undefined) ||
-    (ts.isGetAccessorDeclaration(node) && node.body !== undefined) ||
-    (ts.isMethodDeclaration(node) && node.body !== undefined) ||
-    (ts.isSetAccessorDeclaration(node) && node.body !== undefined)
+    ts.isArrowFunction(node) ||
+    ts.isConstructorDeclaration(node) ||
+    ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isGetAccessorDeclaration(node) ||
+    ts.isMethodDeclaration(node) ||
+    ts.isSetAccessorDeclaration(node)
   );
+}
+
+export function isFunctionLikeWithBody(node: ts.Node): node is FunctionLike {
+  return isFunctionLike(node) && node.body !== undefined;
+}
+
+export function forEachFunctionLike(sourceFile: ts.SourceFile, callback: (node: FunctionLike) => void): void {
+  function visit(node: ts.Node): void {
+    if (isFunctionLike(node)) {
+      callback(node);
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
 }
 
 export function forEachFunction(sourceFile: ts.SourceFile, callback: (node: FunctionLike) => void): void {
@@ -32,7 +47,7 @@ export function forEachFunction(sourceFile: ts.SourceFile, callback: (node: Func
   visit(sourceFile);
 }
 
-function getName(node: FunctionLike, sourceFile: ts.SourceFile): string | undefined {
+export function getFunctionName(node: FunctionLike, sourceFile: ts.SourceFile): string | undefined {
   if (!node.name) {
     if (ts.isArrowFunction(node) && ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)) {
       return node.parent.name.text;
@@ -44,7 +59,7 @@ function getName(node: FunctionLike, sourceFile: ts.SourceFile): string | undefi
 }
 
 export function getFunctionContext(node: FunctionLike, sourceFile: ts.SourceFile): string {
-  const name = getName(node, sourceFile);
+  const name = getFunctionName(node, sourceFile);
   if (ts.isConstructorDeclaration(node)) {
     return "constructor";
   }
@@ -59,4 +74,3 @@ export function getFunctionContext(node: FunctionLike, sourceFile: ts.SourceFile
   }
   return `function ${name ?? "anonymous"}()`;
 }
-

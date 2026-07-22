@@ -194,6 +194,48 @@ export const IdiomaticJavaScriptFile = class {
   set value(next) { this.#secret = next; }
 };
 `;
+  const namingSource = `export class X {
+  static readonly bad_constant = 1;
+  X() {}
+  getFlag(): boolean { return true; }
+  isReady(): boolean { return false; }
+  getNumber(): number { return 1; }
+  [computedName]() {}
+}
+
+export interface Q {}
+export interface ThisIsAnExcessivelyLongInterfaceNameThatNeedsRefactoring {}
+export class ThisIsAnExcessivelyLongClassNameThatNeedsRefactoring {}
+
+export function a() {}
+export function callbackRunner(cb, i, x, err, { short: b, index: j, error: problem }) {
+  const longVariableNameThatExceedsTheDefaultLimit = b;
+  const { value: c } = { value: 1 };
+  const bad_local_constant = 1;
+  const T = 1;
+  return cb || i || x || err || problem || longVariableNameThatExceedsTheDefaultLimit || c || T || bad_local_constant;
+}
+
+export const bad_constant_name = 1;
+export const GOOD_CONSTANT = 2;
+export const A = () => null;
+export function useThing() { return true; }
+type Box<T> = { value: T };
+class ComputedNames {
+  [computedName]() {}
+  [anotherVeryLongComputedNameThatShouldBeIgnored]() {}
+}
+`;
+  const javascriptNamingSource = `export class J {
+  #x = 0;
+  getFlag() { return !!this.#x; }
+  [computedName]() {}
+}
+
+export function b() {}
+export const bad_js_constant = 1;
+export const A = () => null;
+`;
   const decisionMetricsSource = `export function logicalNPath(value) {
   if (value && value) {}
   if (value && value) {}
@@ -265,6 +307,8 @@ export function catchNPath(value) {
   writeScanFixture("src/long.ts", longSource);
   writeScanFixture("src/classes.ts", classSource);
   writeScanFixture("src/classes.js", javascriptClassSource);
+  writeScanFixture("src/naming.ts", namingSource);
+  writeScanFixture("src/naming.js", javascriptNamingSource);
   writeScanFixture("src/decision-metrics.ts", decisionMetricsSource);
   writeScanFixture("excluded/complex.ts", complexSource);
   for (const directory of ["node_modules", ".git", "generated", "coverage", ".cache", "build", "dist", "output", ".output"]) {
@@ -405,6 +449,34 @@ test("class metrics cover JavaScript and TypeScript classes without declaration 
   assert.doesNotMatch(result.stdout, /IdiomaticJavaScriptFile/);
   assert.doesNotMatch(result.stdout, /OverloadDeclarations|AccessorHeavy/);
   assert.doesNotMatch(result.stdout, /NotAClass|TypeLiteral|AmbientDeclaration|AbstractDeclaration/);
+  assert.equal(result.stderr, "");
+});
+
+test("naming rules cover language roles and idiomatic names", () => {
+  const result = runCli([
+    join(scanRoot, "src", "naming.ts") + "," + join(scanRoot, "src", "naming.js"),
+    "text",
+    "naming",
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /ShortClassName .*short names like X/);
+  assert.match(result.stdout, /ShortClassName .*short names like Q/);
+  assert.match(result.stdout, /LongClassName .*ThisIsAnExcessivelyLongClassNameThatNeedsRefactoring/);
+  assert.match(result.stdout, /LongClassName .*ThisIsAnExcessivelyLongInterfaceNameThatNeedsRefactoring/);
+  assert.match(result.stdout, /ShortVariable .*short names like b/);
+  assert.match(result.stdout, /LongVariable .*longVariableNameThatExceedsTheDefaultLimit/);
+  assert.match(result.stdout, /ShortMethodName .*short method names like a\(\)/);
+  assert.match(result.stdout, /ConstantNamingConventions \[priority 4\].*bad_constant_name/);
+  assert.match(result.stdout, /ConstantNamingConventions \[priority 4\].*bad_constant/);
+  assert.match(result.stdout, /BooleanGetMethodName \[priority 4\].*getFlag\(\)/);
+  assert.match(result.stdout, /ConstructorWithNameAsEnclosingClass/);
+  assert.match(result.stdout, /ShortClassName .*short names like J/);
+  assert.match(result.stdout, /ShortMethodName .*short method names like b\(\)/);
+  assert.match(result.stdout, /ConstantNamingConventions .*bad_js_constant/);
+  assert.doesNotMatch(result.stdout, /GOOD_CONSTANT|bad_local_constant|isReady|getNumber|callbackRunner|useThing|computedName|anotherVeryLongComputedNameThatShouldBeIgnored/);
+  assert.doesNotMatch(result.stdout, /short names like i|short names like j|short names like x|short names like T/);
+  assert.doesNotMatch(result.stdout, /short method names like A\(\)/);
   assert.equal(result.stderr, "");
 });
 
