@@ -28,6 +28,11 @@ import { findCamelCaseMethodName } from "./rules/camel-case-method-name";
 import { findCamelCaseParameterName } from "./rules/camel-case-parameter-name";
 import { findCamelCasePropertyName } from "./rules/camel-case-property-name";
 import { findCamelCaseVariableName } from "./rules/camel-case-variable-name";
+import { findBooleanArgumentFlag } from "./rules/boolean-argument-flag";
+import { findDuplicatedArrayKey } from "./rules/duplicated-array-key";
+import { findElseExpression } from "./rules/else-expression";
+import { findIfStatementAssignment } from "./rules/if-statement-assignment";
+import { findStaticAccess } from "./rules/static-access";
 import { findUnusedFormalParameter } from "./rules/unused-formal-parameter";
 import { findUnusedLocalVariable } from "./rules/unused-local-variable";
 import { findUnusedPrivateField } from "./rules/unused-private-field";
@@ -52,7 +57,13 @@ export function analyze(
 ): AnalysisResult {
   const normalizedRulesets = [...new Set(rulesets.map((ruleset) => ruleset.toLowerCase()))];
   for (const ruleset of normalizedRulesets) {
-    if (ruleset !== "codesize" && ruleset !== "naming" && ruleset !== "controversial" && ruleset !== "unusedcode") {
+    if (
+      ruleset !== "codesize" &&
+      ruleset !== "naming" &&
+      ruleset !== "controversial" &&
+      ruleset !== "unusedcode" &&
+      ruleset !== "cleancode"
+    ) {
       throw new Error(`Unknown ruleset: ${ruleset}`);
     }
   }
@@ -131,6 +142,15 @@ export function analyze(
           ...findUnusedPrivateMethod(sourceFile, unused),
           ...findUnusedFormalParameter(sourceFile, unused),
           ...findUnusedLocalVariable(sourceFile, unused),
+        );
+      }
+      if (normalizedRulesets.includes("cleancode")) {
+        findings.push(
+          ...findBooleanArgumentFlag(sourceFile),
+          ...findElseExpression(sourceFile),
+          ...findIfStatementAssignment(sourceFile),
+          ...findDuplicatedArrayKey(sourceFile),
+          ...findStaticAccess(sourceFile),
         );
       }
     } catch (error) {

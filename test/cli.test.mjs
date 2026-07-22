@@ -333,6 +333,69 @@ declare class AmbientUnused {
   }
 }
 `;
+  const cleanCodeSource = `export class CleanCodeTypeScript {
+  public run(flag: boolean, value: number) {
+    if (flag) {
+      return value;
+    } else {
+      return 0;
+    }
+  }
+
+  public readUntil(input: string) {
+    let result: string | undefined;
+    while ((result = input)) {
+      return result;
+    }
+    do {
+      result = input;
+    } while ((result = input));
+    return result;
+  }
+
+  public duplicateKeys() {
+    return { alpha: 1, "alpha": 2, ["beta"]: 3, beta: 4, [dynamicKey]: 5, [dynamicKey]: 6 };
+  }
+}
+
+export function staticCall(enabled = false) {
+  if (enabled) {
+    return Logger.log("message");
+  }
+  return 0;
+}
+
+export function cleanNegative(value: number, enabled: boolean) {
+  if (value > 0) {
+    return enabled;
+  } else if (value < 0) {
+    return false;
+  }
+  return true;
+}
+
+const cleanObject = { [dynamicKey]: 1, [anotherKey]: 2 };
+
+interface CleanCodeInterface { run(flag: boolean): void; }
+type CleanCodeType = { run(flag: boolean): void };
+declare class AmbientCleanCode { run(flag: boolean): void; }
+abstract class AbstractCleanCode { abstract run(flag: boolean): void; }
+`;
+  const cleanCodeJavaScriptSource = `export class CleanCodeJavaScript {
+  run(flag = true, value) {
+    if (flag) return value;
+    else return 0;
+  }
+}
+
+export function javascriptAssignment(input) {
+  let result;
+  if ((result = input)) return result;
+  return Logger.log("message");
+}
+
+export const javascriptObject = { "key": 1, key: 2, [dynamicKey]: 3, [dynamicKey]: 4 };
+`;
   const decisionMetricsSource = `export function logicalNPath(value) {
   if (value && value) {}
   if (value && value) {}
@@ -410,6 +473,8 @@ export function catchNPath(value) {
   writeScanFixture("src/controversial.js", controversialJavaScriptSource);
   writeScanFixture("src/unused.ts", unusedSource);
   writeScanFixture("src/unused.js", unusedJavaScriptSource);
+  writeScanFixture("src/clean-code.ts", cleanCodeSource);
+  writeScanFixture("src/clean-code.js", cleanCodeJavaScriptSource);
   writeScanFixture("src/decision-metrics.ts", decisionMetricsSource);
   writeScanFixture("excluded/complex.ts", complexSource);
   for (const directory of ["node_modules", ".git", "generated", "coverage", ".cache", "build", "dist", "output", ".output"]) {
@@ -628,6 +693,25 @@ test("unusedcode rules resolve lexical references without declaration certainty"
   assert.match(result.stdout, /UnusedFormalParameter .*unusedParameter/);
   assert.match(result.stdout, /UnusedLocalVariable .*neverUsedLocal/);
   assert.doesNotMatch(result.stdout, /AmbientUnused|such as '#usedField'|such as '#usedPrivate'|such as 'usedField'|such as 'usedPrivate'|such as 'usedMethod'|such as 'overload'|such as 'parameterProperty'|such as 'parameterField'|such as 'usedParameter'|such as '_ignoredParameter'|such as '_ignoredClosureParameter'|such as 'capturedByClosure'|such as 'captured'|such as 'usedDestructured'|such as 'recursive'/);
+  assert.equal(result.stderr, "");
+});
+
+test("cleancode rules cover executable JavaScript and TypeScript constructs conservatively", () => {
+  const result = runCli([
+    join(scanRoot, "src", "clean-code.ts") + "," + join(scanRoot, "src", "clean-code.js"),
+    "text",
+    "cleancode",
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /BooleanArgumentFlag \[priority 1\].*boolean flag argument flag/);
+  assert.match(result.stdout, /ElseExpression \[priority 1\].*uses an else expression/);
+  assert.match(result.stdout, /IfStatementAssignment \[priority 1\].*assigning values/);
+  assert.match(result.stdout, /DuplicatedArrayKey \[priority 2\].*alpha/);
+  assert.match(result.stdout, /DuplicatedArrayKey \[priority 2\].*beta/);
+  assert.match(result.stdout, /StaticAccess \[priority 1\].*Logger/);
+  assert.doesNotMatch(result.stdout, /\bCleanCodeInterface\b|\bCleanCodeType\b|\bAmbientCleanCode\b|\bAbstractCleanCode\b/);
+  assert.doesNotMatch(result.stdout, /cleanNegative.*ElseExpression|anotherKey|dynamicKey/);
   assert.equal(result.stderr, "");
 });
 
