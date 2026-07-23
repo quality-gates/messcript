@@ -440,6 +440,57 @@ export function designTypeNegative(items: { length: number }) {
   }
 }
 `;
+  const cohesionTypeScriptSource = `export class DisjointTypeScript {
+  private left = 0;
+  private right = 0;
+  addLeft() { this.left += 1; }
+  addRight() { this.right += 1; }
+}
+
+export class CohesiveTypeScript {
+  private left = 0;
+  private right = 0;
+  addLeft() { this.left += 1; }
+  addRight() { this.right += 1; }
+  leftValue() { return this.left + 1; }
+  rightValue() { return this.right + 1; }
+  total() { return this.leftValue() + this.rightValue(); }
+}
+
+export class AccessorTypeScript {
+  private host = "";
+  private port = 0;
+  get hostName() { return this.host; }
+  set hostName(value) { this.host = value; }
+  get portNumber() { return this.port; }
+  set portNumber(value) { this.port = value; }
+}
+
+interface CohesionInterface { run(): void; }
+declare class AmbientCohesion { run(): void; }
+class OverloadCohesion {
+  run(value: string): string;
+  run(value: number): string;
+  run(value: string | number) { return String(value); }
+}
+`;
+  const cohesionJavaScriptSource = `export class DisjointJavaScript {
+  #left = 0;
+  #right = 0;
+  addLeft() { this.#left += 1; }
+  addRight() { this.#right += 1; }
+}
+
+export const CohesiveJavaScript = class {
+  #left = 0;
+  #right = 0;
+  addLeft() { this.#left += 1; }
+  addRight() { this.#right += 1; }
+  leftValue() { return this.#left + 1; }
+  rightValue() { return this.#right + 1; }
+  total() { return this.leftValue() + this.rightValue(); }
+};
+`;
   const globalVariableTypeScriptSource = `import type { ImportedType } from "external";
 import importedValue from "external-value";
 
@@ -591,6 +642,8 @@ export function catchNPath(value) {
   writeScanFixture("src/clean-code.js", cleanCodeJavaScriptSource);
   writeScanFixture("src/design.js", designSource);
   writeScanFixture("src/design.ts", designTypeScriptSource);
+  writeScanFixture("src/cohesion.ts", cohesionTypeScriptSource);
+  writeScanFixture("src/cohesion.js", cohesionJavaScriptSource);
   writeScanFixture("src/global-variable.ts", globalVariableTypeScriptSource);
   writeScanFixture("src/global-script-a.js", globalVariableScriptSource);
   writeScanFixture("src/global-script-b.js", globalVariableMutationSource);
@@ -886,6 +939,20 @@ test("design coupling rule measures imports, types, heritage, decorators, and re
   assert.match(result.stdout, /CouplingBetweenObjects \[priority 2\].*class Coupled/);
   assert.match(result.stdout, /coupling between objects value of (?:1[4-9]|[2-9][0-9])/);
   assert.doesNotMatch(result.stdout, /IdiomaticCoupling|CouplingInterface|CouplingType|AmbientCoupling|CouplingNamespace/);
+  assert.equal(result.stderr, "");
+});
+
+test("design cohesion rule covers JavaScript and TypeScript classes", () => {
+  const result = runCli([
+    join(scanRoot, "src", "cohesion.ts") + "," + join(scanRoot, "src", "cohesion.js"),
+    "text",
+    "design",
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /LackOfCohesionOfMethods \[priority 3\].*class DisjointTypeScript.*value of 2/);
+  assert.match(result.stdout, /LackOfCohesionOfMethods \[priority 3\].*class DisjointJavaScript.*value of 2/);
+  assert.doesNotMatch(result.stdout, /CohesiveTypeScript|CohesiveJavaScript|AccessorTypeScript|CohesionInterface|AmbientCohesion|OverloadCohesion/);
   assert.equal(result.stderr, "");
 });
 

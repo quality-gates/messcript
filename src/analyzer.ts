@@ -44,6 +44,7 @@ import { findUnusedFormalParameter } from "./rules/unused-formal-parameter";
 import { findUnusedLocalVariable } from "./rules/unused-local-variable";
 import { findUnusedPrivateField } from "./rules/unused-private-field";
 import { findUnusedPrivateMethod } from "./rules/unused-private-method";
+import { findLackOfCohesionOfMethods } from "./rules/lack-of-cohesion-of-methods";
 
 export type ProcessingError = {
   path: string;
@@ -172,6 +173,7 @@ export function analyze(
           ...findEmptyCatchBlock(sourceFile),
         );
         findings.push(...findCouplingBetweenObjects(sourceFile));
+        findings.push(...findLackOfCohesionOfMethods(sourceFile));
       }
     } catch (error) {
       errors.push({
