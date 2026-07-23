@@ -18,7 +18,12 @@ export function isBooleanType(type: ts.TypeNode | undefined): boolean {
     return isBooleanType(type.type);
   }
   if (ts.isUnionTypeNode(type)) {
-    return type.types.every((member) => isBooleanType(member) || member.kind === ts.SyntaxKind.UndefinedKeyword || member.kind === ts.SyntaxKind.NullKeyword);
+    return type.types.every(
+      (member) =>
+        isBooleanType(member) ||
+        member.kind === ts.SyntaxKind.UndefinedKeyword ||
+        (ts.isLiteralTypeNode(member) && member.literal.kind === ts.SyntaxKind.NullKeyword),
+    );
   }
   return false;
 }

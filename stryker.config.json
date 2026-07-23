@@ -13,7 +13,8 @@
   "tap": {
     "testFiles": [
       "test/cli.test.mjs",
-      "test/metrics.test.mjs"
+      "test/metrics.test.mjs",
+      "test/ast-metrics.test.mjs"
     ]
   },
   "coverageAnalysis": "perTest",
