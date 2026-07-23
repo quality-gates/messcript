@@ -4,6 +4,13 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
 import { analyze } from "./analyzer";
+import {
+  formatAnsi,
+  formatGithub,
+  formatGitlab,
+  formatHtml,
+  type ColorMode,
+} from "./reporters/human";
 import { formatStructured } from "./reporters/structured";
 import { formatText } from "./reporters/text";
 import { applyRuleFilters, loadRulesets } from "./rulesets";
@@ -53,7 +60,7 @@ Options:
       --disable <rules>              Remove loaded rules
       --ignore-tests                 Exclude conventional test files
       --strict                       Include suppressed findings
-      --color <auto|always|never>    Select terminal color behavior
+      --color <auto|always|never>    Text color: auto on TTY, always, or never
       --verbose                      Include diagnostic details
       --ignore-errors-on-exit        Return success despite processing errors
       --ignore-violations-on-exit    Return success despite findings
@@ -83,6 +90,7 @@ type ParsedArguments = {
   verbose: boolean;
   strict: boolean;
   reportFile?: string;
+  color: ColorMode;
   suffixes?: string[];
   exclusions?: string[];
   ignoreTests: boolean;
@@ -124,6 +132,14 @@ function parsePriority(optionName: string, value: string): number {
   return priority;
 }
 
+function parseColor(value: string): ColorMode {
+  const color = value.toLowerCase();
+  if (color === "auto" || color === "always" || color === "never") {
+    return color;
+  }
+  throw new CliError(`--color expects auto, always, or never, received '${value}'.`);
+}
+
 function parseArguments(argv: readonly string[]): ParsedArguments {
   const positional: string[] = [];
   const suffixes: string[] = [];
@@ -137,6 +153,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
   let verbose = false;
   let strict = false;
   let reportFile: string | undefined;
+  let color: ColorMode = "auto";
   let minimumPriority: number | undefined;
   let maximumPriority: number | undefined;
   const enable: string[] = [];
@@ -176,6 +193,8 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
       }
       if (name === "--report-file" || name === "--reportfile") {
         reportFile = optionValue;
+      } else if (name === "--color") {
+        color = parseColor(optionValue);
       } else if (name === "--suffixes") {
         suffixesProvided = true;
         suffixes.push(...splitNonEmpty(optionValue));
@@ -229,6 +248,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
       verbose,
       strict,
       reportFile,
+      color,
     };
   }
 
@@ -263,6 +283,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
     verbose,
     strict,
     reportFile,
+    color,
     suffixes: suffixesProvided ? suffixes : undefined,
     exclusions,
     ignoreTests,
@@ -287,7 +308,7 @@ export function runCli(argv: readonly string[], io: CliIo): number {
     }
 
     const format = parsedArguments.format?.toLowerCase();
-    if (!format || !["text", "json", "xml", "checkstyle", "sarif"].includes(format)) {
+    if (!format || !["text", "json", "xml", "checkstyle", "sarif", "html", "ansi", "github", "gitlab"].includes(format)) {
       throw new CliError(`Unknown format: ${parsedArguments.format}`);
     }
 
@@ -313,12 +334,25 @@ export function runCli(argv: readonly string[], io: CliIo): number {
       ignoreTests: parsedArguments.ignoreTests,
       strict: parsedArguments.strict,
     });
-    const report = format === "text"
-      ? formatText(result.findings, result.errors)
-      : formatStructured(format, result.findings, result.errors, {
+    const useColor = parsedArguments.color === "always" ||
+      (!parsedArguments.reportFile && parsedArguments.color === "auto" && Boolean((io.stdout as Writable & { isTTY?: boolean }).isTTY));
+    let report: string;
+    if (format === "text") {
+      report = useColor ? formatAnsi(result.findings, result.errors) : formatText(result.findings, result.errors);
+    } else if (format === "ansi") {
+      report = formatAnsi(result.findings, result.errors);
+    } else if (format === "html") {
+      report = formatHtml(result.findings, result.errors);
+    } else if (format === "github") {
+      report = formatGithub(result.findings, result.errors);
+    } else if (format === "gitlab") {
+      report = formatGitlab(result.findings, result.errors);
+    } else {
+      report = formatStructured(format, result.findings, result.errors, {
         name: "messcript",
         version: packageMetadata.version,
       });
+    }
     if (parsedArguments.reportFile) {
       writeFileSync(parsedArguments.reportFile, report, "utf8");
     } else {

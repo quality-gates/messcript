@@ -887,6 +887,82 @@ test("XML, Checkstyle, SARIF, and report files preserve the report contract", ()
   assert.ok(filedReport.findings.length > 0);
 });
 
+test("HTML, ANSI, GitHub, and GitLab reports preserve locations and escaping", () => {
+  const source = join(scanRoot, "src", "ampersand&.ts");
+  const broken = join(scanRoot, "src", "broken.ts");
+  const html = runCli([source + "," + broken, "html", "codesize", "--only", "CyclomaticComplexity"]);
+  const ansi = runCli([source, "ansi", "codesize", "--only", "CyclomaticComplexity", "--color", "never"]);
+  const textAlways = runCli([source, "text", "codesize", "--only", "CyclomaticComplexity", "--color=always"]);
+  const textNever = runCli([source, "text", "codesize", "--only", "CyclomaticComplexity", "--color=never"]);
+  const github = runCli([source + "," + broken, "github", "codesize", "--only", "CyclomaticComplexity"]);
+  const gitlab = runCli([source + "," + broken, "gitlab", "codesize", "--only", "CyclomaticComplexity"]);
+  const clean = runCli([join(fixturesRoot, "mixed"), "html", "codesize"]);
+  const cleanAnsi = runCli([join(fixturesRoot, "mixed"), "ansi", "codesize"]);
+  const cleanGithub = runCli([join(fixturesRoot, "mixed"), "github", "codesize"]);
+  const cleanGitlab = runCli([join(fixturesRoot, "mixed"), "gitlab", "codesize"]);
+  const strictHtml = runCli([
+    join(scanRoot, "src", "suppressed-only.ts"),
+    "html",
+    "codesize",
+    "--only",
+    "CyclomaticComplexity",
+    "--strict",
+  ]);
+  const strict = runCli([
+    join(scanRoot, "src", "suppressed-only.ts"),
+    "gitlab",
+    "codesize",
+    "--only",
+    "CyclomaticComplexity",
+    "--strict",
+  ]);
+
+  assert.equal(html.status, 1);
+  assert.match(html.stdout, /^<!DOCTYPE html>/);
+  assert.match(html.stdout, /ampersand&amp;\.ts/);
+  assert.match(html.stdout, /Processing errors/);
+  assert.equal(html.stderr, "");
+
+  assert.equal(ansi.status, 2);
+  assert.match(ansi.stdout, /\u001b\[33m/);
+  assert.equal(ansi.stderr, "");
+  assert.equal(textAlways.status, 2);
+  assert.match(textAlways.stdout, /\u001b\[33m/);
+  assert.equal(textNever.status, 2);
+  assert.doesNotMatch(textNever.stdout, /\u001b\[/);
+
+  assert.equal(github.status, 1);
+  assert.match(github.stdout, /^::warning /m);
+  assert.match(github.stdout, /line=1,col=1/);
+  assert.match(github.stdout, /title=CyclomaticComplexity \[priority 3\]/);
+  assert.match(github.stdout, /context%3A/);
+  assert.match(github.stdout, /::error /);
+  assert.match(github.stdout, /broken\.ts%3A/);
+  assert.equal(github.stderr, "");
+
+  assert.equal(gitlab.status, 1);
+  const gitlabReport = JSON.parse(gitlab.stdout);
+  assert.ok(gitlabReport.some((entry) => entry.check_name === "CyclomaticComplexity"));
+  assert.ok(gitlabReport.some((entry) => entry.check_name === "ProcessingError"));
+  const gitlabFinding = gitlabReport.find((entry) => entry.check_name === "CyclomaticComplexity");
+  assert.equal(gitlabFinding.location.lines.begin, 1);
+  assert.equal(gitlabFinding.severity, "major");
+  assert.match(Buffer.from(gitlabFinding.fingerprint, "hex").toString("utf8"), /:1:1:CyclomaticComplexity:/);
+
+  assert.equal(clean.status, 0);
+  assert.match(clean.stdout, /messcript report/);
+  assert.equal(cleanAnsi.status, 0);
+  assert.equal(cleanAnsi.stdout, "");
+  assert.equal(cleanGithub.status, 0);
+  assert.equal(cleanGithub.stdout, "");
+  assert.equal(cleanGitlab.status, 0);
+  assert.deepEqual(JSON.parse(cleanGitlab.stdout), []);
+  assert.equal(strictHtml.status, 2);
+  assert.match(strictHtml.stdout, /suppressed/);
+  assert.equal(strict.status, 2);
+  assert.equal(JSON.parse(strict.stdout)[0].suppressed, true);
+});
+
 test("CyclomaticComplexity reports a stable text finding", () => {
   const result = runCli([join(fixturesRoot, "complex.ts"), "text", "codesize"]);
 
