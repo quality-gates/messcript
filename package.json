@@ -19,7 +19,7 @@
     "check": "tsc --noEmit",
     "mutation": "stryker run && node scripts/covered-msi.mjs coverage/mutation/mutation.json",
     "prepack": "npm run build",
-    "test": "npm run build && node --test test/cli.test.mjs test/metrics.test.mjs test/ast-metrics.test.mjs test/reporters.test.mjs test/naming-boolean.test.mjs test/package-smoke.test.mjs"
+    "test": "npm run build && node --test test/cli.test.mjs test/metrics.test.mjs test/ast-metrics.test.mjs test/reporters.test.mjs test/naming-boolean.test.mjs test/unused.test.mjs test/package-smoke.test.mjs"
   },
   "dependencies": {
     "typescript": "^5.9.2"

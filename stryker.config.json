@@ -16,7 +16,8 @@
       "test/metrics.test.mjs",
       "test/ast-metrics.test.mjs",
       "test/reporters.test.mjs",
-      "test/naming-boolean.test.mjs"
+      "test/naming-boolean.test.mjs",
+      "test/unused.test.mjs"
     ]
   },
   "coverageAnalysis": "perTest",
