@@ -44,6 +44,36 @@ before(() => {
   const complexSource = readFileSync(join(fixturesRoot, "complex.ts"), "utf8");
   const malformedSource = readFileSync(join(fixturesRoot, "malformed.ts"), "utf8");
   const customSource = complexSource.replace("value: number", "value").replace("): number", ")");
+  const policySource = `export function policy(value: number): number {
+  const qz = value;
+  const descriptiveVariableName = value;
+  return qz + descriptiveVariableName;
+}
+`;
+  const typescriptPolicySource = `declare namespace Ambient {
+  type Value = string;
+}
+
+interface Contract {
+  run(value: string): string;
+}
+
+enum Status { Ready, Done }
+
+abstract class AbstractContract {
+  abstract run(value: string): string;
+}
+
+class OverloadedContract implements Contract {
+  constructor(public readonly value: string) {}
+  run(value: string): string;
+  run(value: number): string;
+  run(value: string | number): string { return String(value); }
+}
+
+import type { ExternalType } from "missing-dependency";
+export type Alias = ExternalType | Ambient.Value;
+`;
   const suppressionSource = `// messcript-disable-next-line CyclomaticComplexity
 ${complexSource}
 // eslint-disable-next-line CyclomaticComplexity
@@ -695,6 +725,8 @@ export function catchNPath(value) {
   };
 
   writeScanFixture("src/main.ts", complexSource);
+  writeScanFixture("src/policy.ts", policySource);
+  writeScanFixture("src/typescript-policy.ts", typescriptPolicySource);
   writeScanFixture("src/ampersand&.ts", complexSource);
   writeScanFixture("src/suppressions.ts", suppressionSource);
   writeScanFixture("src/suppressed-only.ts", suppressedOnlySource);
@@ -961,6 +993,39 @@ test("HTML, ANSI, GitHub, and GitLab reports preserve locations and escaping", (
   assert.match(strictHtml.stdout, /suppressed/);
   assert.equal(strict.status, 2);
   assert.equal(JSON.parse(strict.stdout)[0].suppressed, true);
+});
+
+test("recommended language policies tune defaults and opinionated opt-ins", () => {
+  const input = join(scanRoot, "src", "policy.ts");
+  const typescriptInput = join(scanRoot, "src", "typescript-policy.ts");
+  const javascript = runCli([input, "text", "javascript", "--only", "LongVariable"]);
+  const typescript = runCli([input, "text", "typescript", "--only", "LongVariable"]);
+  const component = runCli([input, "text", "naming", "--only", "LongVariable"]);
+  const opinionated = runCli([input, "text", "opinionated", "--only", "ShortVariable"]);
+  const combined = runCli([input, "text", "javascript,opinionated", "--only", "ShortVariable"]);
+  const absent = runCli([input, "text", "javascript", "--enable", "ShortVariable"]);
+  const typescriptExceptions = runCli([
+    typescriptInput,
+    "text",
+    "typescript",
+    "--only",
+    "CyclomaticComplexity,ExcessiveParameterList,ExcessiveMethodLength",
+  ]);
+
+  assert.equal(javascript.status, 0);
+  assert.equal(javascript.stdout, "");
+  assert.equal(typescript.status, 0);
+  assert.equal(typescript.stdout, "");
+  assert.equal(component.status, 2);
+  assert.match(component.stdout, /LongVariable/);
+  assert.equal(opinionated.status, 2);
+  assert.match(opinionated.stdout, /ShortVariable/);
+  assert.equal(combined.status, 2);
+  assert.equal((combined.stdout.match(/ShortVariable/g) ?? []).length, 1);
+  assert.equal(absent.status, 1);
+  assert.match(absent.stderr, /not present/);
+  assert.equal(typescriptExceptions.status, 0);
+  assert.equal(typescriptExceptions.stdout, "");
 });
 
 test("CyclomaticComplexity reports a stable text finding", () => {

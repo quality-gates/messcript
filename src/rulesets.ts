@@ -4,6 +4,7 @@ import {
   canonicalPropertyName,
   componentRulesets,
   getRuleDefinition,
+  languagePolicies,
   type RuleProperties,
   type RuleSelection,
 } from "./rules/catalog";
@@ -359,7 +360,16 @@ function expandBuiltIn(
   exclusions: ReadonlySet<string>,
 ): void {
   for (const ruleName of componentRulesets[name] ?? []) {
-    addRule(state, ruleName, meta, exclusions);
+    const policyMeta = (name === "javascript" || name === "typescript") && ruleName.toLowerCase() === "longvariable"
+      ? {
+        ...meta,
+        properties: {
+          maximum: String(name === "javascript" ? languagePolicies.javascript.longVariableMaximum : languagePolicies.typescript.longVariableMaximum),
+          ...meta.properties,
+        },
+      }
+      : meta;
+    addRule(state, ruleName, policyMeta, exclusions);
   }
 }
 

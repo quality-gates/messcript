@@ -163,7 +163,7 @@ const definitions: RuleDefinition[] = [
 
 const definitionsByName = new Map(definitions.map((definition) => [definition.name.toLowerCase(), definition]));
 
-export const componentRulesets: Readonly<Record<string, readonly string[]>> = {
+const componentRulesetBase: Readonly<Record<string, readonly string[]>> = {
   codesize: [
     "CyclomaticComplexity", "NPathComplexity", "ExcessiveMethodLength", "ExcessiveClassLength",
     "ExcessiveParameterList", "ExcessivePublicCount", "TooManyFields", "TooManyMethods",
@@ -182,6 +182,32 @@ export const componentRulesets: Readonly<Record<string, readonly string[]>> = {
   controversial: [
     "CamelCaseClassName", "CamelCaseMethodName", "CamelCasePropertyName", "CamelCaseParameterName", "CamelCaseVariableName",
   ],
+};
+
+const opinionatedRules = [
+  "ShortVariable", "UnusedFormalParameter", "BooleanArgumentFlag", "ElseExpression",
+  "StaticAccess", "CountInLoopExpression", "ExitExpression",
+] as const;
+
+export const typescriptPolicyExceptions = [
+  "declarations", "overloads", "accessibility", "parameter-properties",
+  "enums", "namespaces", "type-only",
+] as const;
+
+const recommendedRules = Object.values(componentRulesetBase)
+  .flat()
+  .filter((ruleName) => !opinionatedRules.some((excluded) => excluded.toLowerCase() === ruleName.toLowerCase()));
+
+export const languagePolicies = {
+  javascript: { rules: recommendedRules, longVariableMaximum: 35, exceptions: [] as const },
+  typescript: { rules: recommendedRules, longVariableMaximum: 35, exceptions: typescriptPolicyExceptions },
+} as const;
+
+export const componentRulesets: Readonly<Record<string, readonly string[]>> = {
+  ...componentRulesetBase,
+  javascript: languagePolicies.javascript.rules,
+  typescript: languagePolicies.typescript.rules,
+  opinionated: opinionatedRules,
 };
 
 export function getRuleDefinition(name: string): RuleDefinition | undefined {
