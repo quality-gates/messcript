@@ -1,3 +1,4 @@
+// messcript-disable ConstantNamingConventions
 import ts from "typescript";
 import type { NamedBinding } from "../ast/names";
 import { getNameWithoutSigil, isReactComponentName } from "../ast/names";

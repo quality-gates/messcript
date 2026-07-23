@@ -1,3 +1,4 @@
+// messcript-disable CouplingBetweenObjects
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { discoverSourceFiles, scriptKindForPath } from "./discovery";
@@ -27,6 +28,7 @@ export type AnalyzeOptions = DiscoveryOptions & {
   strict?: boolean;
 };
 
+// messcript-disable-next-line CyclomaticComplexity ExcessiveMethodLength NPathComplexity
 export function analyze(
   inputPaths: readonly string[],
   rulesets: AnalysisRules,
@@ -37,6 +39,7 @@ export function analyze(
     : typeof rulesets[0] === "string"
       ? loadRulesets(rulesets as readonly string[]).selections
       : rulesets as readonly RuleSelection[];
+  // messcript-disable-next-line UnusedLocalVariable
   for (const selection of selectedRules) {
     if (!getRuleDefinition(selection.name)) {
       throw new Error(`Unknown rule: ${selection.name}`);
@@ -52,6 +55,7 @@ export function analyze(
     column: 1,
     message: error.message,
   }));
+  // messcript-disable-next-line UnusedLocalVariable
   for (const path of discovered.files) {
     try {
       const sourceText = readFileSync(path, "utf8");

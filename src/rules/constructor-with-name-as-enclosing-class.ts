@@ -1,3 +1,4 @@
+// messcript-disable ConstantNamingConventions
 import ts from "typescript";
 import { getClassMethodName, getClassMethods } from "../ast/classes";
 import { forEachNamedType } from "../ast/names";

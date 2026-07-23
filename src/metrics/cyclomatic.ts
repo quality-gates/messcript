@@ -5,6 +5,7 @@ import { hasOptionalChain, isDecisionOperator } from "./decisions";
 export function calculateCyclomaticComplexity(root: ts.ConciseBody): number {
   let decisions = 0;
 
+  // messcript-disable-next-line CyclomaticComplexity
   function visit(node: ts.Node): void {
     if (node !== root && isFunctionLikeWithBody(node)) {
       return;

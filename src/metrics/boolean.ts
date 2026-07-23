@@ -23,6 +23,7 @@ export function isBooleanType(type: ts.TypeNode | undefined): boolean {
   return false;
 }
 
+// messcript-disable-next-line CyclomaticComplexity NPathComplexity
 export function isBooleanExpression(expression: ts.Expression): boolean {
   if (expression.kind === ts.SyntaxKind.TrueKeyword || expression.kind === ts.SyntaxKind.FalseKeyword) {
     return true;

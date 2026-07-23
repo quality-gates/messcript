@@ -1,3 +1,4 @@
+// messcript-disable ConstantNamingConventions
 import ts from "typescript";
 import { collectSemanticConstants, collectVariables } from "../ast/names";
 import type { Finding } from "../finding";

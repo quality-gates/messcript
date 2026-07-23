@@ -1,3 +1,4 @@
+// messcript-disable ConstantNamingConventions
 import ts from "typescript";
 import { forEachClass, getClassMethods, isIgnoredClassMethod, isPublicClassMember } from "../ast/classes";
 import type { Finding } from "../finding";

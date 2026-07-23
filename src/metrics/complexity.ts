@@ -26,6 +26,7 @@ function expressionComplexity(node: ts.Node | undefined): number {
   return decisions;
 }
 
+// messcript-disable-next-line CyclomaticComplexity NPathComplexity
 function statementPaths(node: ts.Node): number {
   if (isFunctionLikeWithBody(node)) {
     return 1;

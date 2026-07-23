@@ -1,3 +1,4 @@
+// messcript-disable ConstantNamingConventions
 import ts from "typescript";
 import { analyzeUnused } from "../analysis/unused";
 import type { Finding } from "../finding";

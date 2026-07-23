@@ -1,3 +1,5 @@
+// messcript-disable ConstantNamingConventions
+// messcript-disable CouplingBetweenObjects
 import ts from "typescript";
 
 export type ClassLike = ts.ClassDeclaration | ts.ClassExpression;

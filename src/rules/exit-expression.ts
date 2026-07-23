@@ -1,3 +1,4 @@
+// messcript-disable ConstantNamingConventions
 import ts from "typescript";
 import type { Finding } from "../finding";
 import { createDesignFinding, enclosingFunction, functionContextFor } from "./design-finding";

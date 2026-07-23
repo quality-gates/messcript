@@ -1,3 +1,5 @@
+// messcript-disable ConstantNamingConventions
+// messcript-disable CouplingBetweenObjects
 import ts from "typescript";
 import { forEachClass, getClassContext } from "../ast/classes";
 import type { ClassLike } from "../ast/classes";
@@ -39,6 +41,7 @@ function entityNameText(node: ts.EntityName | ts.Expression, sourceFile: ts.Sour
   return undefined;
 }
 
+// messcript-disable-next-line CyclomaticComplexity NPathComplexity
 function addImportDependencies(sourceFile: ts.SourceFile, dependencies: Set<string>): void {
   for (const statement of sourceFile.statements) {
     if (ts.isImportDeclaration(statement)) {
@@ -77,6 +80,7 @@ function addImportDependencies(sourceFile: ts.SourceFile, dependencies: Set<stri
   }
 }
 
+// messcript-disable-next-line CyclomaticComplexity
 function collectTypeDependencies(node: ts.Node | undefined, sourceFile: ts.SourceFile, dependencies: Set<string>, ownName?: string): void {
   if (!node) {
     return;
@@ -145,6 +149,7 @@ function collectClassDependencies(node: ClassLike, sourceFile: ts.SourceFile): S
   for (const heritage of node.heritageClauses ?? []) {
     collectTypeDependencies(heritage, sourceFile, dependencies, ownName);
   }
+  // messcript-disable-next-line CyclomaticComplexity
   function visit(member: ts.Node): void {
     if (member !== node && (ts.isClassDeclaration(member) || ts.isClassExpression(member))) {
       return;
@@ -186,6 +191,7 @@ function collectModuleDependencies(sourceFile: ts.SourceFile): Set<string> {
     ts.forEachChild(node, collectLocalNames);
   }
   collectLocalNames(sourceFile);
+  // messcript-disable-next-line CyclomaticComplexity
   function visit(node: ts.Node): void {
     if (ts.isTypeReferenceNode(node)) {
       const name = entityNameText(node.typeName, sourceFile);

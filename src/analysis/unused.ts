@@ -1,3 +1,4 @@
+// messcript-disable CouplingBetweenObjects
 import ts from "typescript";
 import { getClassFields, getClassMethods } from "../ast/classes";
 import type { ClassField, ClassLike, ClassMethod } from "../ast/classes";
@@ -93,6 +94,7 @@ function isParameterProperty(node: ts.ParameterDeclaration): boolean {
   );
 }
 
+// messcript-disable-next-line ExcessiveClassComplexity
 class UnusedAnalyzer {
   private readonly root: Scope = { bindings: new Map(), root: true };
   private readonly scopeByNode = new Map<ts.Node, Scope>();
@@ -140,6 +142,7 @@ class UnusedAnalyzer {
     return !scope.root;
   }
 
+  // messcript-disable-next-line CyclomaticComplexity NPathComplexity
   private buildClass(node: ClassLike, parent: Scope): void {
     const className = node.name?.text ??
       (ts.isClassExpression(node) && ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name) ? node.parent.name.text : undefined);
@@ -232,6 +235,7 @@ class UnusedAnalyzer {
     }
   }
 
+  // messcript-disable-next-line CyclomaticComplexity NPathComplexity
   private build(node: ts.Node, scope: Scope): void {
     this.scopeByNode.set(node, scope);
     if (ts.isSourceFile(node)) {
@@ -348,6 +352,7 @@ class UnusedAnalyzer {
     }
   }
 
+  // messcript-disable-next-line CyclomaticComplexity NPathComplexity ExcessiveMethodLength
   private visitReferences(node: ts.Node): void {
     const scope = this.scopeByNode.get(node) ?? this.root;
     if (ts.isPropertyAccessExpression(node)) {

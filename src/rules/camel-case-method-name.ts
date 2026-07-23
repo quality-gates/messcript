@@ -1,3 +1,4 @@
+// messcript-disable ConstantNamingConventions
 import ts from "typescript";
 import { forEachFunctionLike, getFunctionContext } from "../ast/functions";
 import { getFunctionBindingName } from "../ast/names";

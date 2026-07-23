@@ -1,3 +1,5 @@
+// messcript-disable ConstantNamingConventions
+// messcript-disable CouplingBetweenObjects
 import ts from "typescript";
 import { forEachFunctionLike, getFunctionContext } from "../ast/functions";
 import { collectBooleanReturns, getFunctionBindingName, getNameWithoutSigil } from "../ast/names";

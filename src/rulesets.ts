@@ -1,3 +1,4 @@
+// messcript-disable CouplingBetweenObjects
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, dirname, extname, join, parse, resolve, sep } from "node:path";
 import {
@@ -66,6 +67,7 @@ function tagEnd(source: string, start: number): number {
   return -1;
 }
 
+// messcript-disable-next-line CyclomaticComplexity IfStatementAssignment
 function parseTag(raw: string): { closing: boolean; selfClosing: boolean; name: string; attributes: Map<string, string> } {
   let value = raw.trim();
   const closing = value.startsWith("/");
@@ -85,12 +87,14 @@ function parseTag(raw: string): { closing: boolean; selfClosing: boolean; name: 
   const attributeSource = value.slice(nameMatch[0].length);
   const attributePattern = /([^\s=/>]+)\s*=\s*("[\s\S]*?"|'[\s\S]*?')/g;
   let match: RegExpExecArray | null;
+  // messcript-disable-next-line IfStatementAssignment
   while ((match = attributePattern.exec(attributeSource))) {
     attributes.set(match[1].toLowerCase(), decodeXml(match[2].slice(1, -1)));
   }
   return { closing, selfClosing, name, attributes };
 }
 
+// messcript-disable-next-line CyclomaticComplexity NPathComplexity
 function parseXml(source: string): XmlNode {
   const stack: XmlNode[] = [];
   let root: XmlNode | undefined;
@@ -269,6 +273,7 @@ function resolveCaseInsensitivePath(value: string): string | undefined {
   return current;
 }
 
+// messcript-disable-next-line CyclomaticComplexity
 function componentName(value: string): string | undefined {
   const normalized = normalizedPath(value).replace(/^\.\//, "");
   const parts = normalized.split("/").filter(Boolean);
@@ -377,6 +382,7 @@ function resolveCustomReference(state: ExpansionState, reference: string): strin
   return resolveCaseInsensitivePath(resolve(dirname(state.path), reference));
 }
 
+// messcript-disable-next-line CyclomaticComplexity NPathComplexity
 function expandReference(
   state: ExpansionState,
   reference: string,

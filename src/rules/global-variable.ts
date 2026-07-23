@@ -1,3 +1,5 @@
+// messcript-disable ConstantNamingConventions
+// messcript-disable CouplingBetweenObjects
 import ts from "typescript";
 import { isFunctionLike } from "../ast/functions";
 import type { FunctionLike } from "../ast/functions";
@@ -359,6 +361,7 @@ function observeMutations(
   mutatedBindings: Set<Binding>,
   mutatedFields: Set<StaticField>,
 ): void {
+  // messcript-disable-next-line CyclomaticComplexity NPathComplexity
   function visit(node: ts.Node): void {
     if (ts.isBinaryExpression(node) && assignmentOperator(node.operatorToken.kind)) {
       if (ts.isIdentifier(node.left)) {

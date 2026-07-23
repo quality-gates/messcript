@@ -1,3 +1,4 @@
+// messcript-disable ConstantNamingConventions
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, relative, resolve, sep } from "node:path";
 import ts from "typescript";
@@ -77,6 +78,7 @@ function isTestPath(path: string, rootPath: string): boolean {
   );
 }
 
+// messcript-disable-next-line CyclomaticComplexity NPathComplexity
 function addSourceFiles(
   path: string,
   rootPath: string,

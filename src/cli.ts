@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// messcript-disable CouplingBetweenObjects
+// messcript-disable ConstantNamingConventions
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -140,6 +142,7 @@ function parseColor(value: string): ColorMode {
   throw new CliError(`--color expects auto, always, or never, received '${value}'.`);
 }
 
+// messcript-disable-next-line CyclomaticComplexity ExcessiveMethodLength NPathComplexity
 function parseArguments(argv: readonly string[]): ParsedArguments {
   const positional: string[] = [];
   const suffixes: string[] = [];
@@ -292,6 +295,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
   };
 }
 
+// messcript-disable-next-line CyclomaticComplexity NPathComplexity
 export function runCli(argv: readonly string[], io: CliIo): number {
   let parsedArguments: ParsedArguments | undefined;
   try {

@@ -1,3 +1,5 @@
+// messcript-disable ConstantNamingConventions
+// messcript-disable CouplingBetweenObjects
 import ts from "typescript";
 import {
   getClassFields,
@@ -86,6 +88,7 @@ function literalMemberName(node: ts.Expression, sourceFile: ts.SourceFile): stri
   return undefined;
 }
 
+// messcript-disable-next-line CyclomaticComplexity
 function directReceiverMember(
   node: ts.Expression,
   sourceFile: ts.SourceFile,
@@ -116,6 +119,7 @@ function directReceiverMember(
   return undefined;
 }
 
+// messcript-disable-next-line CyclomaticComplexity
 function directFieldAccess(
   expression: ts.Expression,
   methodScope: Scope,
@@ -249,6 +253,7 @@ function indexMethods(
   return { methods, byKey };
 }
 
+// messcript-disable-next-line ExcessiveMethodLength
 function collectUses(
   method: Method,
   fields: ReadonlyMap<string, Field>,
@@ -287,6 +292,7 @@ function collectUses(
     }
   }
 
+  // messcript-disable-next-line CyclomaticComplexity NPathComplexity
   function visit(node: ts.Node): void {
     if (node !== method.node && (ts.isClassDeclaration(node) || ts.isClassExpression(node))) {
       return;

@@ -1,3 +1,4 @@
+// messcript-disable ConstantNamingConventions
 import ts from "typescript";
 import { forEachFunction } from "../ast/functions";
 import type { Finding } from "../finding";

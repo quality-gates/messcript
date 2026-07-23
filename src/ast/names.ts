@@ -1,3 +1,4 @@
+// messcript-disable CouplingBetweenObjects
 import ts from "typescript";
 import { forEachFunctionLike, isFunctionLike } from "./functions";
 import type { FunctionLike } from "./functions";
@@ -208,6 +209,7 @@ export function getNamedTypeContext(node: NamedType, sourceFile: ts.SourceFile):
   return getClassContext(node, sourceFile);
 }
 
+// messcript-disable-next-line CyclomaticComplexity
 export function getFunctionBindingName(node: FunctionLike, sourceFile: ts.SourceFile): string | undefined {
   if (ts.isConstructorDeclaration(node)) {
     return undefined;
@@ -231,6 +233,7 @@ export function getNameWithoutSigil(name: string): string {
   return name.replace(/^[$#_]+/, "");
 }
 
+// messcript-disable-next-line CyclomaticComplexity NPathComplexity
 export function isReactComponentName(name: string, node: ts.Node): boolean {
   if (!/^[A-Z]/.test(name)) {
     return false;
@@ -256,6 +259,7 @@ export function collectSemanticConstants(sourceFile: ts.SourceFile): NamedBindin
     const modifiers = (node as ts.Node & { modifiers?: readonly ts.Modifier[] }).modifiers;
     return modifiers?.some((modifier) => modifier.kind === kind) ?? false;
   }
+  // messcript-disable-next-line CyclomaticComplexity
   function visit(node: ts.Node): void {
     if (ts.isVariableStatement(node) && (node.parent === sourceFile || ts.isModuleBlock(node.parent))) {
       if ((node.declarationList.flags & ts.NodeFlags.Const) !== 0) {

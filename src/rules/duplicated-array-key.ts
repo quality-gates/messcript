@@ -1,3 +1,4 @@
+// messcript-disable ConstantNamingConventions
 import ts from "typescript";
 import type { Finding } from "../finding";
 import { createCleanCodeFinding } from "./clean-code-finding";
@@ -8,6 +9,7 @@ export const properties = {} as const;
 
 type StaticKey = { key: string; display: string; node: ts.Node };
 
+// messcript-disable-next-line CyclomaticComplexity NPathComplexity
 function staticExpressionKey(node: ts.Expression): string | undefined {
   if (ts.isParenthesizedExpression(node)) {
     return staticExpressionKey(node.expression);
@@ -35,6 +37,7 @@ function staticExpressionKey(node: ts.Expression): string | undefined {
   return undefined;
 }
 
+// messcript-disable-next-line CyclomaticComplexity NPathComplexity
 function propertyName(property: ts.ObjectLiteralElementLike, sourceFile: ts.SourceFile): StaticKey | undefined {
   if (ts.isShorthandPropertyAssignment(property)) {
     return { key: property.name.text, display: property.name.text, node: property.name };

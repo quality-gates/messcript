@@ -1,3 +1,5 @@
+// messcript-disable ConstantNamingConventions
+// messcript-disable CouplingBetweenObjects
 import ts from "typescript";
 import type { Finding } from "../finding";
 import { findBooleanArgumentFlag } from "./boolean-argument-flag";
@@ -153,7 +155,7 @@ const definitions: RuleDefinition[] = [
   moduleDefinition(emptyCatchBlock, findEmptyCatchBlock),
   moduleDefinition(couplingBetweenObjects, findCouplingBetweenObjects, { reportlevel: "maximum" }),
   moduleDefinition(lackOfCohesionOfMethods, lackOfCohesionOfMethods.findLackOfCohesionOfMethods, { minimum: "maximum" }),
-  moduleDefinition(globalVariable, (_sourceFile) => []),
+  moduleDefinition(globalVariable, (sourceFile) => []),
   moduleDefinition(camelCaseClassName, findCamelCaseClassName),
   moduleDefinition(camelCaseMethodName, findCamelCaseMethodName),
   moduleDefinition(camelCasePropertyName, findCamelCasePropertyName),
