@@ -1,50 +1,12 @@
 import { readFileSync } from "node:fs";
 import ts from "typescript";
-import { analyzeUnused } from "./analysis/unused";
 import { discoverSourceFiles, scriptKindForPath } from "./discovery";
 import type { DiscoveryOptions } from "./discovery";
 import type { Finding } from "./finding";
 import { compareLocations } from "./location";
-import { findCyclomaticComplexity } from "./rules/cyclomatic-complexity";
-import { findExcessiveClassComplexity } from "./rules/excessive-class-complexity";
-import { findExcessiveClassLength } from "./rules/excessive-class-length";
-import { findExcessiveMethodLength } from "./rules/excessive-method-length";
-import { findExcessiveParameterList } from "./rules/excessive-parameter-list";
-import { findExcessivePublicCount } from "./rules/excessive-public-count";
-import { findNPathComplexity } from "./rules/npath-complexity";
-import { findTooManyFields } from "./rules/too-many-fields";
-import { findTooManyMethods } from "./rules/too-many-methods";
-import { findTooManyPublicMethods } from "./rules/too-many-public-methods";
-import { findBooleanGetMethodName } from "./rules/boolean-get-method-name";
-import { findConstantNamingConventions } from "./rules/constant-naming-conventions";
-import { findConstructorWithNameAsEnclosingClass } from "./rules/constructor-with-name-as-enclosing-class";
-import { findLongClassName } from "./rules/long-class-name";
-import { findLongVariable } from "./rules/long-variable";
-import { findShortClassName } from "./rules/short-class-name";
-import { findShortMethodName } from "./rules/short-method-name";
-import { findShortVariable } from "./rules/short-variable";
-import { findCamelCaseClassName } from "./rules/camel-case-class-name";
-import { findCamelCaseMethodName } from "./rules/camel-case-method-name";
-import { findCamelCaseParameterName } from "./rules/camel-case-parameter-name";
-import { findCamelCasePropertyName } from "./rules/camel-case-property-name";
-import { findCamelCaseVariableName } from "./rules/camel-case-variable-name";
-import { findBooleanArgumentFlag } from "./rules/boolean-argument-flag";
-import { findDuplicatedArrayKey } from "./rules/duplicated-array-key";
-import { findElseExpression } from "./rules/else-expression";
-import { findIfStatementAssignment } from "./rules/if-statement-assignment";
-import { findStaticAccess } from "./rules/static-access";
-import { findCountInLoopExpression } from "./rules/count-in-loop-expression";
-import { findCouplingBetweenObjects } from "./rules/coupling-between-objects";
-import { findDevelopmentCodeFragment } from "./rules/development-code-fragment";
-import { findEmptyCatchBlock } from "./rules/empty-catch-block";
-import { findExitExpression } from "./rules/exit-expression";
-import { findGlobalVariable } from "./rules/global-variable";
-import { findGotoStatement } from "./rules/goto-statement";
-import { findUnusedFormalParameter } from "./rules/unused-formal-parameter";
-import { findUnusedLocalVariable } from "./rules/unused-local-variable";
-import { findUnusedPrivateField } from "./rules/unused-private-field";
-import { findUnusedPrivateMethod } from "./rules/unused-private-method";
-import { findLackOfCohesionOfMethods } from "./rules/lack-of-cohesion-of-methods";
+import { getRuleDefinition, runGlobalVariable, runRule } from "./rules/catalog";
+import type { RuleSelection } from "./rules/catalog";
+import { loadRulesets } from "./rulesets";
 
 export type ProcessingError = {
   path: string;
@@ -58,22 +20,21 @@ export type AnalysisResult = {
   errors: ProcessingError[];
 };
 
+export type AnalysisRules = readonly string[] | readonly RuleSelection[];
+
 export function analyze(
   inputPaths: readonly string[],
-  rulesets: readonly string[],
+  rulesets: AnalysisRules,
   discoveryOptions: DiscoveryOptions = {},
 ): AnalysisResult {
-  const normalizedRulesets = [...new Set(rulesets.map((ruleset) => ruleset.toLowerCase()))];
-  for (const ruleset of normalizedRulesets) {
-    if (
-      ruleset !== "codesize" &&
-      ruleset !== "naming" &&
-      ruleset !== "controversial" &&
-      ruleset !== "unusedcode" &&
-      ruleset !== "cleancode" &&
-      ruleset !== "design"
-    ) {
-      throw new Error(`Unknown ruleset: ${ruleset}`);
+  const selectedRules: readonly RuleSelection[] = rulesets.length === 0
+    ? []
+    : typeof rulesets[0] === "string"
+      ? loadRulesets(rulesets as readonly string[]).selections
+      : rulesets as readonly RuleSelection[];
+  for (const selection of selectedRules) {
+    if (!getRuleDefinition(selection.name)) {
+      throw new Error(`Unknown rule: ${selection.name}`);
     }
   }
 
@@ -111,69 +72,14 @@ export function analyze(
         continue;
       }
       parsedSourceFiles.push(sourceFile);
-      if (normalizedRulesets.includes("codesize")) {
-        findings.push(
-          ...findCyclomaticComplexity(sourceFile),
-          ...findNPathComplexity(sourceFile),
-          ...findExcessiveMethodLength(sourceFile),
-          ...findExcessiveParameterList(sourceFile),
-          ...findExcessiveClassLength(sourceFile),
-          ...findExcessivePublicCount(sourceFile),
-          ...findTooManyFields(sourceFile),
-          ...findTooManyMethods(sourceFile),
-          ...findTooManyPublicMethods(sourceFile),
-          ...findExcessiveClassComplexity(sourceFile),
-        );
-      }
-      if (normalizedRulesets.includes("naming")) {
-        findings.push(
-          ...findShortClassName(sourceFile),
-          ...findLongClassName(sourceFile),
-          ...findShortVariable(sourceFile),
-          ...findLongVariable(sourceFile),
-          ...findShortMethodName(sourceFile),
-          ...findConstantNamingConventions(sourceFile),
-          ...findBooleanGetMethodName(sourceFile),
-          ...findConstructorWithNameAsEnclosingClass(sourceFile),
-        );
-      }
-      if (normalizedRulesets.includes("controversial")) {
-        findings.push(
-          ...findCamelCaseClassName(sourceFile),
-          ...findCamelCaseMethodName(sourceFile),
-          ...findCamelCasePropertyName(sourceFile),
-          ...findCamelCaseParameterName(sourceFile),
-          ...findCamelCaseVariableName(sourceFile),
-        );
-      }
-      if (normalizedRulesets.includes("unusedcode")) {
-        const unused = analyzeUnused(sourceFile);
-        findings.push(
-          ...findUnusedPrivateField(sourceFile, unused),
-          ...findUnusedPrivateMethod(sourceFile, unused),
-          ...findUnusedFormalParameter(sourceFile, unused),
-          ...findUnusedLocalVariable(sourceFile, unused),
-        );
-      }
-      if (normalizedRulesets.includes("cleancode")) {
-        findings.push(
-          ...findBooleanArgumentFlag(sourceFile),
-          ...findElseExpression(sourceFile),
-          ...findIfStatementAssignment(sourceFile),
-          ...findDuplicatedArrayKey(sourceFile),
-          ...findStaticAccess(sourceFile),
-        );
-      }
-      if (normalizedRulesets.includes("design")) {
-        findings.push(
-          ...findExitExpression(sourceFile),
-          ...findGotoStatement(sourceFile),
-          ...findCountInLoopExpression(sourceFile),
-          ...findDevelopmentCodeFragment(sourceFile),
-          ...findEmptyCatchBlock(sourceFile),
-        );
-        findings.push(...findCouplingBetweenObjects(sourceFile));
-        findings.push(...findLackOfCohesionOfMethods(sourceFile));
+      for (const selection of selectedRules) {
+        if (selection.name.toLowerCase() === "globalvariable") {
+          continue;
+        }
+        const definition = getRuleDefinition(selection.name);
+        if (definition) {
+          findings.push(...runRule(definition, selection, sourceFile));
+        }
       }
     } catch (error) {
       errors.push({
@@ -185,8 +91,14 @@ export function analyze(
     }
   }
 
-  if (normalizedRulesets.includes("design")) {
-    findings.push(...findGlobalVariable(parsedSourceFiles));
+  for (const selection of selectedRules) {
+    if (selection.name.toLowerCase() !== "globalvariable") {
+      continue;
+    }
+    const definition = getRuleDefinition(selection.name);
+    if (definition) {
+      findings.push(...runGlobalVariable(definition, selection, parsedSourceFiles));
+    }
   }
 
   findings.sort((left, right) => compareLocations(left, right) || left.ruleName.localeCompare(right.ruleName));

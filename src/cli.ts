@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { Writable } from "node:stream";
 import { analyze } from "./analyzer";
 import { formatText } from "./reporters/text";
+import { applyRuleFilters, loadRulesets } from "./rulesets";
 
 const packageMetadata = JSON.parse(
   readFileSync(join(__dirname, "..", "package.json"), "utf8"),
@@ -72,6 +73,12 @@ type ParsedArguments = {
   paths?: string[];
   format?: string;
   rulesets?: string[];
+  minimumPriority?: number;
+  maximumPriority?: number;
+  enable?: string[];
+  only?: string[];
+  disable?: string[];
+  verbose: boolean;
   suffixes?: string[];
   exclusions?: string[];
   ignoreTests: boolean;
@@ -102,7 +109,15 @@ function splitOption(argument: string): { name: string; value?: string } {
 }
 
 function splitNonEmpty(value: string): string[] {
-  return value.split(",").filter((part) => part.length > 0);
+  return value.split(",").map((part) => part.trim()).filter((part) => part.length > 0);
+}
+
+function parsePriority(optionName: string, value: string): number {
+  const priority = Number(value);
+  if (!Number.isInteger(priority) || priority < 1 || priority > 5) {
+    throw new CliError(`${optionName} expects a priority between 1 and 5, received '${value}'.`);
+  }
+  return priority;
 }
 
 function parseArguments(argv: readonly string[]): ParsedArguments {
@@ -115,6 +130,12 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
   let ignoreTests = false;
   let ignoreErrorsOnExit = false;
   let ignoreViolationsOnExit = false;
+  let verbose = false;
+  let minimumPriority: number | undefined;
+  let maximumPriority: number | undefined;
+  const enable: string[] = [];
+  const only: string[] = [];
+  const disable: string[] = [];
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -152,6 +173,16 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
         suffixes.push(...splitNonEmpty(optionValue));
       } else if (name === "--exclude") {
         exclusions.push(...splitNonEmpty(optionValue));
+      } else if (name === "--minimum-priority") {
+        minimumPriority = parsePriority(name, optionValue);
+      } else if (name === "--maximum-priority") {
+        maximumPriority = parsePriority(name, optionValue);
+      } else if (name === "--enable") {
+        enable.push(...splitNonEmpty(optionValue));
+      } else if (name === "--only") {
+        only.push(...splitNonEmpty(optionValue));
+      } else if (name === "--disable") {
+        disable.push(...splitNonEmpty(optionValue));
       }
       continue;
     }
@@ -166,6 +197,8 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
         ignoreErrorsOnExit = true;
       } else if (name === "--ignore-violations-on-exit") {
         ignoreViolationsOnExit = true;
+      } else if (name === "--verbose") {
+        verbose = true;
       }
       continue;
     }
@@ -177,7 +210,14 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
     if (positional.length > 0) {
       throw new CliError(`Unexpected positional argument: ${positional[0]}`, ignoreErrorsOnExit);
     }
-    return { showHelp, showVersion, ignoreTests, ignoreErrorsOnExit, ignoreViolationsOnExit };
+    return {
+      showHelp,
+      showVersion,
+      ignoreTests,
+      ignoreErrorsOnExit,
+      ignoreViolationsOnExit,
+      verbose,
+    };
   }
 
   if (positional.length < 3) {
@@ -203,6 +243,12 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
     paths,
     format: positional[1],
     rulesets,
+    minimumPriority,
+    maximumPriority,
+    enable,
+    only,
+    disable,
+    verbose,
     suffixes: suffixesProvided ? suffixes : undefined,
     exclusions,
     ignoreTests,
@@ -230,7 +276,23 @@ export function runCli(argv: readonly string[], io: CliIo): number {
       throw new CliError(`Unknown format: ${parsedArguments.format}`);
     }
 
-    const result = analyze(parsedArguments.paths ?? [], parsedArguments.rulesets ?? [], {
+    const loadedRulesets = applyRuleFilters(
+      loadRulesets(parsedArguments.rulesets ?? []),
+      {
+        minimumPriority: parsedArguments.minimumPriority,
+        maximumPriority: parsedArguments.maximumPriority,
+        enable: parsedArguments.enable,
+        only: parsedArguments.only,
+        disable: parsedArguments.disable,
+      },
+    );
+    if (parsedArguments.verbose) {
+      for (const warning of loadedRulesets.warnings) {
+        writeLine(io.stderr, `Warning: ${warning}`);
+      }
+    }
+
+    const result = analyze(parsedArguments.paths ?? [], loadedRulesets.selections, {
       suffixes: parsedArguments.suffixes,
       exclusions: parsedArguments.exclusions,
       ignoreTests: parsedArguments.ignoreTests,

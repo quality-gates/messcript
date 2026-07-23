@@ -617,6 +617,58 @@ export function catchNPath(value) {
   return value;
 }
 `;
+  const focusedRuleset = `<?xml version="1.0"?>
+<ruleset name="focused">
+  <rule ref="rulesets/codesize.xml">
+    <exclude name="NPathComplexity" />
+    <priority>2</priority>
+    <properties><property name="maximum" value="1" /></properties>
+  </rule>
+  <rule ref="rulesets/naming.xml/LongVariable">
+    <priority>1</priority>
+    <properties><property name="maximum" value="12" /></properties>
+  </rule>
+</ruleset>
+`;
+  const nestedRuleset = `<ruleset name="nested">
+  <ruleset name="Naming"><exclude name="ShortClassName" /></ruleset>
+</ruleset>
+`;
+  const shortReferenceRuleset = `<ruleset name="short-reference">
+  <rule ref="CoDeSiZe"><exclude name="NPathComplexity" /></rule>
+  <ruleset ref="nAmInG"><exclude name="ShortClassName" /></ruleset>
+</ruleset>
+`;
+  const nestedFileRuleset = `<ruleset name="nested-file">
+  <rule ref="./ChIlD.XML" />
+</ruleset>
+`;
+  const childRuleset = `<ruleset name="child">
+  <rule ref="NaMiNg/LongVariable" />
+</ruleset>
+`;
+  const unknownReferenceRuleset = `<ruleset name="warning-only">
+  <rule ref="rulesets/codesize.xml/NoSuchRule" />
+  <rule ref="rulesets/codesize.xml/CyclomaticComplexity" />
+</ruleset>
+`;
+  const unknownPathReferenceRuleset = `<ruleset name="unknown-path">
+  <rule ref="rulesets/missing.xml/LongVariable" />
+  <rule ref="rulesets/codesize.xml/CyclomaticComplexity" />
+</ruleset>
+`;
+  const unknownDirectRuleRuleset = `<ruleset name="invalid">
+  <rule name="NoSuchRule" />
+</ruleset>
+`;
+  const duplicateRuleset = `<ruleset name="duplicate">
+  <rule ref="rulesets/codesize.xml" />
+  <rule name="cyclomaticcomplexity">
+    <priority>1</priority>
+    <properties><property name="maximum" value="100" /></properties>
+  </rule>
+</ruleset>
+`;
   const writeScanFixture = (relativePath, contents) => {
     const path = join(scanRoot, relativePath);
     mkdirSync(dirname(path), { recursive: true });
@@ -650,6 +702,15 @@ export function catchNPath(value) {
   writeScanFixture("src/coupling.ts", couplingSource);
   writeScanFixture("src/coupling-negative.ts", couplingNegativeSource);
   writeScanFixture("src/decision-metrics.ts", decisionMetricsSource);
+  writeScanFixture("rulesets/focused.xml", focusedRuleset);
+  writeScanFixture("rulesets/nested.xml", nestedRuleset);
+  writeScanFixture("rulesets/short-reference.xml", shortReferenceRuleset);
+  writeScanFixture("rulesets/nested-file.xml", nestedFileRuleset);
+  writeScanFixture("rulesets/child.xml", childRuleset);
+  writeScanFixture("rulesets/unknown-reference.xml", unknownReferenceRuleset);
+  writeScanFixture("rulesets/unknown-path-reference.xml", unknownPathReferenceRuleset);
+  writeScanFixture("rulesets/unknown-direct.xml", unknownDirectRuleRuleset);
+  writeScanFixture("rulesets/duplicate.xml", duplicateRuleset);
   writeScanFixture("excluded/complex.ts", complexSource);
   for (const directory of ["node_modules", ".git", "generated", "coverage", ".cache", "build", "dist", "output", ".output"]) {
     writeScanFixture(`${directory}/ignored.ts`, complexSource);
@@ -954,6 +1015,176 @@ test("design cohesion rule covers JavaScript and TypeScript classes", () => {
   assert.match(result.stdout, /LackOfCohesionOfMethods \[priority 3\].*class DisjointJavaScript.*value of 2/);
   assert.doesNotMatch(result.stdout, /CohesiveTypeScript|CohesiveJavaScript|AccessorTypeScript|CohesionInterface|AmbientCohesion|OverloadCohesion/);
   assert.equal(result.stderr, "");
+});
+
+test("custom rulesets compose references, exclusions, priorities, and properties", () => {
+  const result = runCli([
+    join(scanRoot, "src", "naming.ts") + "," + join(fixturesRoot, "complex.ts"),
+    "text",
+    join(scanRoot, "rulesets", "focused.xml"),
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /CyclomaticComplexity \[priority 2\].*threshold is 1/);
+  assert.match(result.stdout, /LongVariable \[priority 1\].*longVariableNameThatExceedsTheDefaultLimit.*under 12/);
+  assert.doesNotMatch(result.stdout, /NPathComplexity/);
+  assert.equal(result.stderr, "");
+});
+
+test("ruleset names and nested exclusions are case-insensitive", () => {
+  const builtIn = runCli([join(fixturesRoot, "complex.ts"), "text", "CoDeSiZe"]);
+  const combined = runCli([
+    join(scanRoot, "src", "naming.ts") + "," + join(fixturesRoot, "complex.ts"),
+    "text",
+    "codesize,naming",
+  ]);
+  const nested = runCli([join(scanRoot, "src", "naming.ts"), "text", join(scanRoot, "rulesets", "nested.xml")]);
+
+  assert.equal(builtIn.status, 2);
+  assert.equal(combined.status, 2);
+  assert.equal(nested.status, 2);
+  assert.match(combined.stdout, /CyclomaticComplexity/);
+  assert.match(combined.stdout, /ShortMethodName|ShortVariable/);
+  assert.doesNotMatch(nested.stdout, /ShortClassName/);
+  assert.match(nested.stdout, /LongClassName|ShortMethodName|LongVariable/);
+  assert.equal(builtIn.stderr, "");
+  assert.equal(nested.stderr, "");
+});
+
+test("short built-in and nested custom-file references resolve case-insensitively", () => {
+  const short = runCli([
+    join(fixturesRoot, "complex.ts"),
+    "text",
+    join(scanRoot, "rulesets", "short-reference.xml"),
+  ]);
+  const nested = runCli([
+    join(scanRoot, "src", "naming.ts"),
+    "text",
+    join(scanRoot, "RULESETS", "NESTED-FILE.XML"),
+  ]);
+
+  assert.equal(short.status, 2);
+  assert.match(short.stdout, /CyclomaticComplexity/);
+  assert.doesNotMatch(short.stdout, /NPathComplexity|ShortClassName/);
+  assert.equal(nested.status, 2);
+  assert.match(nested.stdout, /LongVariable/);
+  assert.equal(nested.stderr, "");
+});
+
+test("duplicate rules collapse and later explicit overrides win", () => {
+  const result = runCli([
+    join(fixturesRoot, "complex.ts"),
+    "text",
+    join(scanRoot, "rulesets", "duplicate.xml"),
+    "--only",
+    "CyclomaticComplexity",
+  ]);
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "");
+});
+
+test("only, enable, disable, and priority filters select loaded rules", () => {
+  const only = runCli([
+    join(scanRoot, "src", "npath.ts"),
+    "text",
+    "codesize",
+    "--only",
+    "NPathComplexity",
+  ]);
+  const disabled = runCli([
+    join(fixturesRoot, "complex.ts"),
+    "text",
+    "codesize",
+    "--only",
+    "CyclomaticComplexity",
+    "--disable",
+    "CyclomaticComplexity",
+  ]);
+  const priority = runCli([
+    join(scanRoot, "src", "naming.ts"),
+    "text",
+    join(scanRoot, "rulesets", "focused.xml"),
+    "--minimum-priority",
+    "1",
+  ]);
+  const absent = runCli([
+    join(fixturesRoot, "complex.ts"),
+    "text",
+    "codesize",
+    "--enable",
+    "LongVariable",
+  ]);
+  const invalidPriority = runCli([
+    join(fixturesRoot, "complex.ts"),
+    "text",
+    "codesize",
+    "--minimum-priority",
+    "0",
+  ]);
+
+  assert.equal(only.status, 2);
+  assert.match(only.stdout, /NPathComplexity/);
+  assert.doesNotMatch(only.stdout, /CyclomaticComplexity|Excessive/);
+  assert.equal(disabled.status, 0);
+  assert.equal(disabled.stdout, "");
+  assert.equal(priority.status, 2);
+  assert.match(priority.stdout, /LongVariable \[priority 1\]/);
+  assert.doesNotMatch(priority.stdout, /CyclomaticComplexity/);
+  assert.equal(absent.status, 1);
+  assert.match(absent.stderr, /Requested rule 'longvariable' is not present/);
+  assert.equal(invalidPriority.status, 1);
+  assert.match(invalidPriority.stderr, /expects a priority between 1 and 5/);
+});
+
+test("unknown references warn only in verbose mode while unknown direct rules fail", () => {
+  const quiet = runCli([
+    join(fixturesRoot, "complex.ts"),
+    "text",
+    join(scanRoot, "rulesets", "unknown-reference.xml"),
+  ]);
+  const verbose = runCli([
+    join(fixturesRoot, "complex.ts"),
+    "text",
+    join(scanRoot, "rulesets", "unknown-reference.xml"),
+    "--verbose",
+  ]);
+  const direct = runCli([
+    join(fixturesRoot, "complex.ts"),
+    "text",
+    join(scanRoot, "rulesets", "unknown-direct.xml"),
+  ]);
+
+  assert.equal(quiet.status, 2);
+  assert.match(quiet.stdout, /CyclomaticComplexity/);
+  assert.equal(quiet.stderr, "");
+  assert.equal(verbose.status, 2);
+  assert.match(verbose.stderr, /Warning: Unknown referenced rule 'NoSuchRule'/);
+  assert.equal(direct.status, 1);
+  assert.equal(direct.stdout, "");
+  assert.match(direct.stderr, /Unknown rule 'NoSuchRule'/);
+});
+
+test("unknown ruleset paths are warnings and never substitute a known rule", () => {
+  const quiet = runCli([
+    join(scanRoot, "src", "naming.ts") + "," + join(fixturesRoot, "complex.ts"),
+    "text",
+    join(scanRoot, "rulesets", "unknown-path-reference.xml"),
+  ]);
+  const verbose = runCli([
+    join(scanRoot, "src", "naming.ts") + "," + join(fixturesRoot, "complex.ts"),
+    "text",
+    join(scanRoot, "rulesets", "unknown-path-reference.xml"),
+    "--verbose",
+  ]);
+
+  assert.equal(quiet.status, 2);
+  assert.match(quiet.stdout, /CyclomaticComplexity/);
+  assert.doesNotMatch(quiet.stdout, /LongVariable/);
+  assert.equal(quiet.stderr, "");
+  assert.equal(verbose.status, 2);
+  assert.match(verbose.stderr, /Unknown referenced rule 'LongVariable'/);
 });
 
 test("a missing input is an operational error", () => {
