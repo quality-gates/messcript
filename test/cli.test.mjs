@@ -693,6 +693,29 @@ export function catchNPath(value) {
   </rule>
 </ruleset>
 `;
+  const xmlFeaturesRuleset = `<?xml version="1.0"?>
+<!-- comments and declarations are allowed -->
+<!DOCTYPE ruleset>
+<ruleset name="xml-features">
+  <rule name="CyclomaticComplexity" priority="3">
+    <property><name><![CDATA[reportlevel]]></name><value><![CDATA[1]]></value></property>
+  </rule>
+</ruleset>
+`;
+  const malformedRuleset = `<ruleset><rule name="CyclomaticComplexity"></ruleset>`;
+  const wrongRootRuleset = `<configuration />`;
+  const sameLocationRuleset = `<ruleset name="same-location">
+  <rule name="CyclomaticComplexity"><property name="reportlevel" value="1" /></rule>
+  <rule name="NPathComplexity"><property name="minimum" value="1" /></rule>
+</ruleset>
+`;
+  const templateSuppressionSource = `const literal = "// messcript-disable CyclomaticComplexity";
+const template = \`value \${/* messcript-disable-next-line CyclomaticComplexity */ "value"}\`;
+// messcript-disable-next-line CyclomaticComplexity
+function hidden(value) { if (value) return 1; return 0; }
+function visible(value) { if (value) return 1; return 0; }
+`;
+  const sameLocationSource = "function same(value) { if (value) return 1; return 0; }\n";
   const writeScanFixture = (relativePath, contents) => {
     const path = join(scanRoot, relativePath);
     mkdirSync(dirname(path), { recursive: true });
@@ -741,6 +764,13 @@ export function catchNPath(value) {
   writeScanFixture("rulesets/unknown-path-reference.xml", unknownPathReferenceRuleset);
   writeScanFixture("rulesets/unknown-direct.xml", unknownDirectRuleRuleset);
   writeScanFixture("rulesets/duplicate.xml", duplicateRuleset);
+  writeScanFixture("rulesets/xml-features.xml", xmlFeaturesRuleset);
+  writeScanFixture("rulesets/malformed.xml", malformedRuleset);
+  writeScanFixture("rulesets/wrong-root.xml", wrongRootRuleset);
+  writeScanFixture("rulesets/same-location.xml", sameLocationRuleset);
+  writeScanFixture("src/template-suppression.ts", templateSuppressionSource);
+  writeScanFixture("src/same-location.ts", sameLocationSource);
+  writeScanFixture("src/readme.txt", "not source");
   writeScanFixture("excluded/complex.ts", complexSource);
   for (const directory of ["node_modules", ".git", "generated", "coverage", ".cache", "build", "dist", "output", ".output"]) {
     writeScanFixture(`${directory}/ignored.ts`, complexSource);
@@ -1521,6 +1551,54 @@ test("unknown ruleset paths are warnings and never substitute a known rule", () 
   assert.match(verbose.stderr, /Unknown referenced rule 'LongVariable'/);
 });
 
+test("ruleset XML boundaries and malformed roots remain observable through the CLI", () => {
+  const source = join(fixturesRoot, "complex.ts");
+  const features = runCli([source, "text", join(scanRoot, "rulesets", "xml-features.xml")]);
+  const malformed = runCli([source, "text", join(scanRoot, "rulesets", "malformed.xml")]);
+  const wrongRoot = runCli([source, "text", join(scanRoot, "rulesets", "wrong-root.xml")]);
+
+  assert.equal(features.status, 2);
+  assert.match(features.stdout, /CyclomaticComplexity \[priority 3\].*threshold is 1/);
+  assert.equal(features.stderr, "");
+  assert.equal(malformed.status, 1);
+  assert.equal(malformed.stdout, "");
+  assert.match(malformed.stderr, /XML closing tag does not match/);
+  assert.equal(wrongRoot.status, 1);
+  assert.equal(wrongRoot.stdout, "");
+  assert.match(wrongRoot.stderr, /must have a ruleset root element/);
+});
+
+test("analysis orders same-location findings deterministically", () => {
+  const result = runCli([
+    join(scanRoot, "src", "same-location.ts"),
+    "text",
+    join(scanRoot, "rulesets", "same-location.xml"),
+  ]);
+  const lines = result.stdout.trim().split("\n");
+
+  assert.equal(result.status, 2);
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /:1:1: CyclomaticComplexity /);
+  assert.match(lines[1], /:1:1: NPathComplexity /);
+  assert.equal(result.stderr, "");
+});
+
+test("suppression scanning ignores directive-looking strings and scans template expressions", () => {
+  const input = join(scanRoot, "src", "template-suppression.ts");
+  const ruleset = join(scanRoot, "rulesets", "xml-features.xml");
+  const normal = runCli([input, "text", ruleset]);
+  const strict = runCli([input, "text", ruleset, "--strict"]);
+
+  assert.equal(normal.status, 2);
+  assert.equal((normal.stdout.match(/CyclomaticComplexity/g) ?? []).length, 1);
+  assert.doesNotMatch(normal.stdout, /hidden\(\)/);
+  assert.match(normal.stdout, /visible\(\)/);
+  assert.equal(strict.status, 2);
+  assert.equal((strict.stdout.match(/CyclomaticComplexity/g) ?? []).length, 2);
+  assert.match(strict.stdout, /\[suppressed\].*function hidden\(\)/);
+  assert.equal(strict.stderr, "");
+});
+
 test("a missing input is an operational error", () => {
   const result = runCli([join(fixturesRoot, "missing.ts"), "text", "codesize"]);
 
@@ -1570,6 +1648,14 @@ test("suffix overrides and path exclusions control discovery", () => {
   assert.equal(excluded.status, 1);
   assert.equal(excluded.stderr, "");
   assert.doesNotMatch(excluded.stdout, /excluded[\\/]complex\.ts/);
+});
+
+test("a non-source file input is a clean discovery boundary", () => {
+  const result = runCli([join(scanRoot, "src", "readme.txt"), "text", "codesize"]);
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "");
 });
 
 test("exit-ignore flags change only status, not report content", () => {
