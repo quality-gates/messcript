@@ -7,6 +7,7 @@ import { compareLocations } from "./location";
 import { getRuleDefinition, runGlobalVariable, runRule } from "./rules/catalog";
 import type { RuleSelection } from "./rules/catalog";
 import { loadRulesets } from "./rulesets";
+import { applySuppressions } from "./suppressions";
 
 export type ProcessingError = {
   path: string;
@@ -22,10 +23,14 @@ export type AnalysisResult = {
 
 export type AnalysisRules = readonly string[] | readonly RuleSelection[];
 
+export type AnalyzeOptions = DiscoveryOptions & {
+  strict?: boolean;
+};
+
 export function analyze(
   inputPaths: readonly string[],
   rulesets: AnalysisRules,
-  discoveryOptions: DiscoveryOptions = {},
+  discoveryOptions: AnalyzeOptions = {},
 ): AnalysisResult {
   const selectedRules: readonly RuleSelection[] = rulesets.length === 0
     ? []
@@ -100,6 +105,25 @@ export function analyze(
       findings.push(...runGlobalVariable(definition, selection, parsedSourceFiles));
     }
   }
+
+  const sourceFilesByPath = new Map(parsedSourceFiles.map((sourceFile) => [sourceFile.fileName, sourceFile]));
+  const findingsByPath = new Map<string, Finding[]>();
+  for (const finding of findings) {
+    const entries = findingsByPath.get(finding.path) ?? [];
+    entries.push(finding);
+    findingsByPath.set(finding.path, entries);
+  }
+  const visibleFindings: Finding[] = [];
+  for (const [path, entries] of findingsByPath) {
+    const sourceFile = sourceFilesByPath.get(path);
+    visibleFindings.push(
+      ...(sourceFile
+        ? applySuppressions(sourceFile, entries, discoveryOptions.strict ?? false)
+        : entries),
+    );
+  }
+  findings.length = 0;
+  findings.push(...visibleFindings);
 
   findings.sort((left, right) => compareLocations(left, right) || left.ruleName.localeCompare(right.ruleName));
   errors.sort(compareLocations);

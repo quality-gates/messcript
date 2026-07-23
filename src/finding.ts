@@ -6,4 +6,5 @@ export type Finding = {
   priority: number;
   message: string;
   context: string;
+  suppressed?: boolean;
 };

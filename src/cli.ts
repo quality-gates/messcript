@@ -79,6 +79,7 @@ type ParsedArguments = {
   only?: string[];
   disable?: string[];
   verbose: boolean;
+  strict: boolean;
   suffixes?: string[];
   exclusions?: string[];
   ignoreTests: boolean;
@@ -131,6 +132,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
   let ignoreErrorsOnExit = false;
   let ignoreViolationsOnExit = false;
   let verbose = false;
+  let strict = false;
   let minimumPriority: number | undefined;
   let maximumPriority: number | undefined;
   const enable: string[] = [];
@@ -199,6 +201,8 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
         ignoreViolationsOnExit = true;
       } else if (name === "--verbose") {
         verbose = true;
+      } else if (name === "--strict") {
+        strict = true;
       }
       continue;
     }
@@ -217,6 +221,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
       ignoreErrorsOnExit,
       ignoreViolationsOnExit,
       verbose,
+      strict,
     };
   }
 
@@ -249,6 +254,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
     only,
     disable,
     verbose,
+    strict,
     suffixes: suffixesProvided ? suffixes : undefined,
     exclusions,
     ignoreTests,
@@ -296,6 +302,7 @@ export function runCli(argv: readonly string[], io: CliIo): number {
       suffixes: parsedArguments.suffixes,
       exclusions: parsedArguments.exclusions,
       ignoreTests: parsedArguments.ignoreTests,
+      strict: parsedArguments.strict,
     });
     io.stdout.write(formatText(result.findings, result.errors));
     if (result.errors.length > 0 && !parsedArguments.ignoreErrorsOnExit) {

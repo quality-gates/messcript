@@ -8,7 +8,7 @@ export function formatText(findings: readonly Finding[], errors: readonly Proces
       path: finding.path,
       line: finding.line,
       column: finding.column,
-      text: `${finding.path}:${finding.line}:${finding.column}: ${finding.ruleName} [priority ${finding.priority}] ${finding.message} (context: ${finding.context})`,
+      text: `${finding.path}:${finding.line}:${finding.column}: ${finding.ruleName} [priority ${finding.priority}]${finding.suppressed ? " [suppressed]" : ""} ${finding.message} (context: ${finding.context})`,
     })),
     ...errors.map((error) => ({
       path: error.path,

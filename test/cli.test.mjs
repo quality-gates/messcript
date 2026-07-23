@@ -44,6 +44,25 @@ before(() => {
   const complexSource = readFileSync(join(fixturesRoot, "complex.ts"), "utf8");
   const malformedSource = readFileSync(join(fixturesRoot, "malformed.ts"), "utf8");
   const customSource = complexSource.replace("value: number", "value").replace("): number", ")");
+  const suppressionSource = `// messcript-disable-next-line CyclomaticComplexity
+${complexSource}
+// eslint-disable-next-line CyclomaticComplexity
+${complexSource.replace("complex(", "complexAgain(")}`;
+  const suppressedOnlySource = `// messcript-disable-next-line CyclomaticComplexity
+${complexSource}`;
+  const regionSuppressionSource = `// messcript-disable CyclomaticComplexity
+${complexSource.replace("complex(", "complexOne(")}
+// messcript-disable CyclomaticComplexity, npathcomplexity
+${complexSource.replace("complex(", "complexTwo(")}
+// messcript-enable NPathComplexity
+// messcript-enable CyclomaticComplexity
+${complexSource.replace("complex(", "complexThree(")}
+// messcript-enable CyclomaticComplexity
+${complexSource.replace("complex(", "complexFour(")}
+// messcript-disable-next-line
+// eslint-disable-next-line CyclomaticComplexity
+${complexSource.replace("complex(", "complexFive(")}
+export const veryLongVariableNameThatTriggersLongVariable = 1;`;
   const npathSource = `export function npathExample(value: number): number {
   if (value > 0) value += 1;
   if (value > 1) value += 1;
@@ -676,6 +695,9 @@ export function catchNPath(value) {
   };
 
   writeScanFixture("src/main.ts", complexSource);
+  writeScanFixture("src/suppressions.ts", suppressionSource);
+  writeScanFixture("src/suppressed-only.ts", suppressedOnlySource);
+  writeScanFixture("src/region-suppressions.ts", regionSuppressionSource);
   writeScanFixture("src/main.test.ts", complexSource);
   writeScanFixture("src/custom.source", customSource);
   writeScanFixture("src/broken.ts", malformedSource);
@@ -799,6 +821,43 @@ test("CyclomaticComplexity reports a stable text finding", () => {
   assert.match(result.stdout, /function complex\(\)/);
   assert.match(result.stdout, /Cyclomatic Complexity of 13/);
   assert.equal(result.stderr, "");
+});
+
+test("named disable-next-line suppressions are omitted unless strict", () => {
+  const input = join(scanRoot, "src", "suppressions.ts");
+  const onlyInput = join(scanRoot, "src", "suppressed-only.ts");
+  const normal = runCli([input, "text", "codesize"]);
+  const strict = runCli([input, "text", "codesize", "--strict"]);
+  const clean = runCli([onlyInput, "text", "codesize", "--only", "CyclomaticComplexity"]);
+  const strictClean = runCli([onlyInput, "text", "codesize", "--only", "CyclomaticComplexity", "--strict"]);
+
+  assert.equal(normal.status, 2);
+  assert.equal((normal.stdout.match(/CyclomaticComplexity/g) ?? []).length, 1);
+  assert.doesNotMatch(normal.stdout, /suppressed/);
+  assert.equal(strict.status, 2);
+  assert.equal((strict.stdout.match(/CyclomaticComplexity/g) ?? []).length, 2);
+  assert.match(strict.stdout, /CyclomaticComplexity \[priority 3\] \[suppressed\]/);
+  assert.equal(strict.stderr, "");
+  assert.equal(clean.status, 0);
+  assert.equal(clean.stdout, "");
+  assert.equal(strictClean.status, 2);
+  assert.match(strictClean.stdout, /suppressed-only\.ts:2:1: CyclomaticComplexity \[priority 3\] \[suppressed\]/);
+});
+
+test("nested named regions preserve unrelated findings and malformed directives", () => {
+  const input = join(scanRoot, "src", "region-suppressions.ts");
+  const normal = runCli([input, "text", "codesize,naming"]);
+  const strict = runCli([input, "text", "codesize,naming", "--strict"]);
+
+  assert.equal(normal.status, 2);
+  assert.equal((normal.stdout.match(/CyclomaticComplexity/g) ?? []).length, 2);
+  assert.match(normal.stdout, /LongVariable/);
+  assert.doesNotMatch(normal.stdout, /suppressed/);
+  assert.equal(strict.status, 2);
+  assert.equal((strict.stdout.match(/CyclomaticComplexity/g) ?? []).length, 5);
+  assert.equal((strict.stdout.match(/\[suppressed\]/g) ?? []).length, 4);
+  assert.match(strict.stdout, /LongVariable/);
+  assert.equal(strict.stderr, "");
 });
 
 test("function metrics report exact positive values and ignore idiomatic parameters", () => {
