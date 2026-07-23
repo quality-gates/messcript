@@ -287,3 +287,84 @@ class JavaScriptService extends Base {
   assert.equal(findLackOfCohesionOfMethods(file).length, 0);
   cohesionProperties.maximum = 1;
 });
+
+test("coupling ignores the complete built-in type vocabulary", () => {
+  const file = sourceFile(`
+class BuiltinTypes {
+  use(
+    anyValue: any, bigintValue: bigint, booleanValue: boolean, neverValue: never,
+    nullValue: null, numberValue: number, objectValue: object, stringValue: string,
+    symbolValue: symbol, undefinedValue: undefined, unknownValue: unknown, voidValue: void,
+    arrayValue: Array<number>, asyncIterableValue: AsyncIterable<number>, bigIntValue: BigInt,
+    booleanObject: Boolean, dateValue: Date, errorValue: Error, functionValue: Function,
+    iterableValue: Iterable<number>, iteratorValue: Iterator<number>, mapValue: Map<string, number>,
+    mathValue: Math, numberObject: Number, objectObject: Object, promiseValue: Promise<number>,
+    readonlyArrayValue: ReadonlyArray<number>, readonlyMapValue: ReadonlyMap<string, number>,
+    readonlySetValue: ReadonlySet<number>, recordValue: Record<string, number>, regexpValue: RegExp,
+    setValue: Set<number>, stringObject: String, symbolObject: Symbol, weakMapValue: WeakMap<object, object>,
+    weakSetValue: WeakSet<object>, constructorParameters: ConstructorParameters<typeof BuiltinTypes>,
+    excludeValue: Exclude<string, number>, extractValue: Extract<string, string>, instanceType: InstanceType<typeof BuiltinTypes>,
+    nonNullableValue: NonNullable<string | null>, omitValue: Omit<object, "value">, partialValue: Partial<object>,
+    parametersValue: Parameters<() => void>, pickValue: Pick<object, "value">, requiredValue: Required<object>,
+    returnTypeValue: ReturnType<() => void>, thisParameterType: ThisParameterType<() => void>, thisTypeValue: ThisType<object>,
+  ): void {}
+}
+`);
+
+  assert.deepEqual(findCouplingBetweenObjects(file, 1), []);
+});
+
+test("global-variable analysis observes declaration and mutation forms", () => {
+  const file = sourceFile(`
+let scalar = 0;
+let array = [];
+let object = {};
+let unassigned;
+let [first, second] = array;
+let { property } = object;
+scalar = 1;
+scalar += 1;
+scalar -= 1;
+scalar *= 1;
+scalar /= 1;
+scalar %= 1;
+scalar **= 1;
+scalar <<= 1;
+scalar >>= 1;
+scalar >>>= 1;
+scalar &= 1;
+scalar |= 1;
+scalar ^= 1;
+scalar ||= 1;
+scalar &&= 1;
+scalar ??= 1;
+scalar++;
+++scalar;
+array.add(1); array.delete(1); array.fill(1); array.pop(); array.push(1); array.reverse();
+array.set(1); array.shift(); array.sort(); array.splice(0); array.unshift(1);
+Object.assign(object, {});
+class StaticState {
+  static mutable = 0;
+  static readonly immutable = 0;
+  static #privateValue = 0;
+  static update() {
+    this.mutable += 1;
+    this.#privateValue++;
+    StaticState.mutable++;
+  }
+}
+`);
+  const findings = findGlobalVariable([file]);
+  const messagesFound = messages(findings);
+  assert.ok(messagesFound.some((message) => /scalar/.test(message)));
+  assert.ok(messagesFound.some((message) => /array/.test(message)));
+  assert.ok(messagesFound.some((message) => /object/.test(message)));
+  assert.ok(messagesFound.some((message) => /static mutable state: mutable/.test(message)));
+  assert.ok(messagesFound.some((message) => /privateValue/.test(message)));
+
+  const immutable = findGlobalVariable([file], true);
+  assert.ok(immutable.length > findings.length);
+  assert.ok(messages(immutable).some((message) => /unassigned/.test(message)));
+  assert.ok(messages(immutable).some((message) => /first/.test(message)));
+  assert.ok(messages(immutable).some((message) => /property/.test(message)));
+});

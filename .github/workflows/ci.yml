@@ -32,3 +32,31 @@ jobs:
 
       - name: Dogfood the recommended TypeScript policy
         run: node dist/cli.js src text typescript --ignore-tests
+
+  mutation-main:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.11.0
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run the production mutation quality gate
+        run: npm run mutation -- --minimum 74.4
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report
+          path: coverage/mutation/mutation.json
+          if-no-files-found: error
