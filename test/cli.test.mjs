@@ -695,6 +695,7 @@ export function catchNPath(value) {
   };
 
   writeScanFixture("src/main.ts", complexSource);
+  writeScanFixture("src/ampersand&.ts", complexSource);
   writeScanFixture("src/suppressions.ts", suppressionSource);
   writeScanFixture("src/suppressed-only.ts", suppressedOnlySource);
   writeScanFixture("src/region-suppressions.ts", regionSuppressionSource);
@@ -811,6 +812,79 @@ test("a clean mixed-source directory exits successfully", () => {
   assert.equal(result.status, 0);
   assert.equal(result.stdout, "");
   assert.equal(result.stderr, "");
+});
+
+test("JSON reports include metadata, findings, and processing errors", () => {
+  const result = runCli([
+    join(scanRoot, "src", "main.ts") + "," + join(scanRoot, "src", "broken.ts"),
+    "json",
+    "codesize",
+  ]);
+
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr, "");
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.tool, { name: "messcript", version: "0.1.0" });
+  assert.ok(report.findings.some((finding) => finding.ruleName === "CyclomaticComplexity"));
+  assert.ok(report.errors.some((error) => error.path.endsWith("broken.ts")));
+  assert.equal(report.findings[0].suppressed, false);
+});
+
+test("XML, Checkstyle, SARIF, and report files preserve the report contract", () => {
+  const source = join(scanRoot, "src", "main.ts");
+  const broken = join(scanRoot, "src", "broken.ts");
+  const escapedPath = join(scanRoot, "src", "ampersand&.ts");
+  const xml = runCli([source, "xml", "codesize", "--only", "CyclomaticComplexity"]);
+  const escapedXml = runCli([escapedPath, "xml", "codesize", "--only", "CyclomaticComplexity"]);
+  const checkstyle = runCli([source + "," + broken, "checkstyle", "codesize"]);
+  const sarif = runCli([
+    join(scanRoot, "src", "suppressed-only.ts"),
+    "sarif",
+    "codesize",
+    "--only",
+    "CyclomaticComplexity",
+    "--strict",
+  ]);
+  const ordered = runCli([source + "," + escapedPath, "json", "codesize", "--only", "CyclomaticComplexity"]);
+  const reversed = runCli([escapedPath + "," + source, "json", "codesize", "--only", "CyclomaticComplexity"]);
+  const reportFile = join(workspaceRoot, "report.json");
+  writeFileSync(reportFile, "stale report");
+  const filed = runCli([source, "json", "codesize", "--only", "CyclomaticComplexity", "--reportfile", reportFile]);
+
+  assert.equal(xml.status, 2);
+  assert.match(xml.stdout, /^<\?xml version="1\.0" encoding="UTF-8"\?>/);
+  assert.match(xml.stdout, /<messcript version="0\.1\.0">/);
+  assert.match(xml.stdout, /<finding[^>]+ruleName="CyclomaticComplexity"/);
+  assert.equal(xml.stderr, "");
+  assert.match(escapedXml.stdout, /ampersand&amp;\.ts/);
+
+  assert.equal(checkstyle.status, 1);
+  assert.match(checkstyle.stdout, /^<checkstyle tool="messcript" version="0\.1\.0">/);
+  assert.match(checkstyle.stdout, /source="messcript\.CyclomaticComplexity"/);
+  assert.match(checkstyle.stdout, /context="function complex\(\)"/);
+  assert.match(checkstyle.stdout, /source="messcript\.ProcessingError"/);
+  assert.equal(checkstyle.stderr, "");
+
+  assert.equal(sarif.status, 2);
+  const sarifReport = JSON.parse(sarif.stdout);
+  assert.equal(sarifReport.version, "2.1.0");
+  assert.equal(sarifReport.runs[0].tool.driver.name, "messcript");
+  assert.equal(sarifReport.runs[0].results[0].ruleId, "CyclomaticComplexity");
+  assert.equal(sarifReport.runs[0].results[0].properties.suppressed, true);
+  assert.deepEqual(sarifReport.runs[0].results[0].suppressions, [{ kind: "inSource" }]);
+  assert.equal(sarifReport.runs[0].results[0].locations[0].physicalLocation.region.startLine, 2);
+  assert.equal(sarif.stderr, "");
+
+  assert.equal(ordered.status, 2);
+  assert.equal(reversed.status, 2);
+  assert.equal(ordered.stdout, reversed.stdout);
+
+  assert.equal(filed.status, 2);
+  assert.equal(filed.stdout, "");
+  assert.equal(filed.stderr, "");
+  const filedReport = JSON.parse(readFileSync(reportFile, "utf8"));
+  assert.equal(filedReport.tool.name, "messcript");
+  assert.ok(filedReport.findings.length > 0);
 });
 
 test("CyclomaticComplexity reports a stable text finding", () => {

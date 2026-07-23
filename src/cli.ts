@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
 import { analyze } from "./analyzer";
+import { formatStructured } from "./reporters/structured";
 import { formatText } from "./reporters/text";
 import { applyRuleFilters, loadRulesets } from "./rulesets";
 
@@ -18,6 +19,7 @@ const valueOptions = new Set([
   "--minimum-priority",
   "--maximum-priority",
   "--report-file",
+  "--reportfile",
   "--suffixes",
   "--exclude",
   "--enable",
@@ -43,7 +45,7 @@ Options:
   -v, --version                      Show the package version
       --minimum-priority <priority>  Select findings at or above a priority
       --maximum-priority <priority>  Select findings at or below a priority
-      --report-file <path>           Write the report to a file
+      --reportfile <path>             Write the report to a file
       --suffixes <list>              Override source suffixes
       --exclude <paths>              Exclude paths from discovery
       --enable <rules>               Add loaded rules
@@ -80,6 +82,7 @@ type ParsedArguments = {
   disable?: string[];
   verbose: boolean;
   strict: boolean;
+  reportFile?: string;
   suffixes?: string[];
   exclusions?: string[];
   ignoreTests: boolean;
@@ -133,6 +136,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
   let ignoreViolationsOnExit = false;
   let verbose = false;
   let strict = false;
+  let reportFile: string | undefined;
   let minimumPriority: number | undefined;
   let maximumPriority: number | undefined;
   const enable: string[] = [];
@@ -170,7 +174,9 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
       if (optionValue === undefined) {
         throw new CliError(`Missing value for option: ${name}`, ignoreErrorsOnExit);
       }
-      if (name === "--suffixes") {
+      if (name === "--report-file" || name === "--reportfile") {
+        reportFile = optionValue;
+      } else if (name === "--suffixes") {
         suffixesProvided = true;
         suffixes.push(...splitNonEmpty(optionValue));
       } else if (name === "--exclude") {
@@ -222,6 +228,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
       ignoreViolationsOnExit,
       verbose,
       strict,
+      reportFile,
     };
   }
 
@@ -255,6 +262,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
     disable,
     verbose,
     strict,
+    reportFile,
     suffixes: suffixesProvided ? suffixes : undefined,
     exclusions,
     ignoreTests,
@@ -278,7 +286,8 @@ export function runCli(argv: readonly string[], io: CliIo): number {
       return 0;
     }
 
-    if (parsedArguments.format?.toLowerCase() !== "text") {
+    const format = parsedArguments.format?.toLowerCase();
+    if (!format || !["text", "json", "xml", "checkstyle", "sarif"].includes(format)) {
       throw new CliError(`Unknown format: ${parsedArguments.format}`);
     }
 
@@ -304,7 +313,17 @@ export function runCli(argv: readonly string[], io: CliIo): number {
       ignoreTests: parsedArguments.ignoreTests,
       strict: parsedArguments.strict,
     });
-    io.stdout.write(formatText(result.findings, result.errors));
+    const report = format === "text"
+      ? formatText(result.findings, result.errors)
+      : formatStructured(format, result.findings, result.errors, {
+        name: "messcript",
+        version: packageMetadata.version,
+      });
+    if (parsedArguments.reportFile) {
+      writeFileSync(parsedArguments.reportFile, report, "utf8");
+    } else {
+      io.stdout.write(report);
+    }
     if (result.errors.length > 0 && !parsedArguments.ignoreErrorsOnExit) {
       return 1;
     }
