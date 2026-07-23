@@ -33,6 +33,20 @@ npx messcript src json javascript --reportfile messcript.json
 npx messcript src sarif typescript --minimum-priority 3
 ```
 
+## Mutation testing
+
+Run the reproducible production mutation suite with:
+
+```sh
+npm run mutation
+```
+
+Stryker mutates only `src/**/*.ts`, runs the existing Node test files, and writes
+the machine-readable report to `coverage/mutation/mutation.json`. The command
+also prints the covered mutation score (covered-MSI) and counts for killed,
+survived, uncovered, and timed-out mutants. Generated mutation output is
+ignored by Git.
+
 ### Options
 
 | Option | Meaning |
