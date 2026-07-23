@@ -14,7 +14,8 @@
     "testFiles": [
       "test/cli.test.mjs",
       "test/metrics.test.mjs",
-      "test/ast-metrics.test.mjs"
+      "test/ast-metrics.test.mjs",
+      "test/reporters.test.mjs"
     ]
   },
   "coverageAnalysis": "perTest",

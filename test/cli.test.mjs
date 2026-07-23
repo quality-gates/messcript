@@ -801,6 +801,103 @@ test("help does not hide an extra positional argument", () => {
   assert.equal(result.stdout, "");
 });
 
+test("successful help, version, option boundaries, and parser-error exit handling", () => {
+  const help = runCli(["--help"]);
+  assert.equal(help.status, 0);
+  assert.match(help.stdout, /^Usage: messcript <paths> <format> <ruleset/);
+  assert.match(help.stdout, /--color <auto\|always\|never>/);
+  assert.match(help.stdout, /Exit codes:/);
+  assert.equal(help.stderr, "");
+  const shortHelp = runCli(["-h"]);
+  assert.equal(shortHelp.status, 0);
+  assert.equal(shortHelp.stdout, help.stdout);
+
+  const version = runCli(["-v"]);
+  assert.equal(version.status, 0);
+  assert.equal(version.stdout, "messcript 0.1.0\n");
+  assert.equal(version.stderr, "");
+  const longVersion = runCli(["--version"]);
+  assert.equal(longVersion.status, 0);
+  assert.equal(longVersion.stdout, version.stdout);
+
+  const source = join(fixturesRoot, "complex.ts");
+  const defaultText = runCli([source, "text", "codesize"]);
+  const direct = runCli([source, "text", "codesize", "--only", "CyclomaticComplexity"]);
+  const trimmed = runCli([source, "text", "codesize", "--only", ", CyclomaticComplexity, "]);
+  assert.equal(trimmed.status, direct.status);
+  assert.equal(trimmed.stdout, direct.stdout);
+
+  const missingValue = runCli([source, "text", "codesize", "--only"]);
+  assert.equal(missingValue.status, 1);
+  assert.match(missingValue.stderr, /Missing value for option: --only/);
+  const invalidColor = runCli([source, "text", "codesize", "--color", "sometimes"]);
+  assert.equal(invalidColor.status, 1);
+  assert.match(invalidColor.stderr, /--color expects auto, always, or never/);
+  const autoColor = runCli([source, "text", "codesize", "--color", "auto"]);
+  assert.equal(autoColor.status, defaultText.status);
+  assert.equal(autoColor.stdout, defaultText.stdout);
+  const ttyStdout = captureOutput();
+  ttyStdout.stream.isTTY = true;
+  const ttyStderr = captureOutput();
+  const ttyStatus = runCliInProcess([source, "text", "codesize", "--color", "auto"], {
+    stdout: ttyStdout.stream,
+    stderr: ttyStderr.stream,
+  });
+  assert.equal(ttyStatus, 2);
+  assert.match(ttyStdout.read(), /\u001b\[33m/);
+  const autoReportFile = join(workspaceRoot, "auto-color.txt");
+  const autoFile = runCli([source, "text", "codesize", "--color", "auto", "--report-file", autoReportFile]);
+  assert.equal(autoFile.status, 2);
+  assert.doesNotMatch(readFileSync(autoReportFile, "utf8"), /\u001b\[/);
+  const ttyReportFile = join(workspaceRoot, "tty-auto-color.txt");
+  const ttyFileStdout = captureOutput();
+  ttyFileStdout.stream.isTTY = true;
+  const ttyFileStderr = captureOutput();
+  const ttyFileStatus = runCliInProcess([source, "text", "codesize", "--color", "auto", "--report-file", ttyReportFile], {
+    stdout: ttyFileStdout.stream,
+    stderr: ttyFileStderr.stream,
+  });
+  assert.equal(ttyFileStatus, 2);
+  assert.doesNotMatch(readFileSync(ttyReportFile, "utf8"), /\u001b\[/);
+  const neverTtyStdout = captureOutput();
+  neverTtyStdout.stream.isTTY = true;
+  const neverTtyStderr = captureOutput();
+  const neverTtyStatus = runCliInProcess([source, "text", "codesize", "--color", "never"], {
+    stdout: neverTtyStdout.stream,
+    stderr: neverTtyStderr.stream,
+  });
+  assert.equal(neverTtyStatus, 2);
+  assert.doesNotMatch(neverTtyStdout.read(), /\u001b\[/);
+  const booleanValue = runCli([source, "text", "codesize", "--strict=true"]);
+  assert.equal(booleanValue.status, 1);
+  assert.match(booleanValue.stderr, /Option does not accept a value: --strict/);
+  const emptyPath = runCli([",,", "text", "codesize"]);
+  assert.equal(emptyPath.status, 1);
+  assert.match(emptyPath.stderr, /At least one input path is required/);
+  const optionFollowedByOption = runCli([source, "text", "codesize", "--only", "--strict"]);
+  assert.equal(optionFollowedByOption.status, 1);
+  assert.match(optionFollowedByOption.stderr, /Missing value for option: --only/);
+  const validMaximumPriority = runCli([source, "text", "codesize", "--maximum-priority", "1"]);
+  assert.equal(validMaximumPriority.status, direct.status);
+  const validMaximumPriorityFive = runCli([source, "text", "codesize", "--maximum-priority", "5"]);
+  assert.equal(validMaximumPriorityFive.status, 0);
+  const invalidMaximumPriority = runCli([source, "text", "codesize", "--maximum-priority", "6"]);
+  assert.equal(invalidMaximumPriority.status, 1);
+  assert.match(invalidMaximumPriority.stderr, /expects a priority between 1 and 5/);
+  const fourPositionals = runCli([source, "text", "codesize", "extra"]);
+  assert.equal(fourPositionals.status, 1);
+  assert.match(fourPositionals.stderr, /Unexpected positional argument: extra/);
+  const emptyRuleset = runCli([source, "text", ",,"]);
+  assert.equal(emptyRuleset.status, 1);
+  assert.match(emptyRuleset.stderr, /At least one ruleset is required/);
+  const unknownFormat = runCli([source, "not-a-format", "codesize"]);
+  assert.equal(unknownFormat.status, 1);
+  assert.match(unknownFormat.stderr, /Unknown format: not-a-format/);
+  const ignoredParserError = runCli(["--ignore-errors-on-exit", "--not-a-real-option"]);
+  assert.equal(ignoredParserError.status, 0);
+  assert.match(ignoredParserError.stderr, /Unknown option: --not-a-real-option/);
+});
+
 test("a clean mixed-source directory exits successfully", () => {
   const result = runCli([join(fixturesRoot, "mixed"), "text", "codesize"]);
 
@@ -1470,6 +1567,8 @@ test("suffix overrides and path exclusions control discovery", () => {
   assert.equal(customSuffix.status, 2);
   assert.match(customSuffix.stdout, /custom\.source/);
   assert.doesNotMatch(customSuffix.stdout, /main\.ts|main\.test\.ts/);
+  assert.equal(excluded.status, 1);
+  assert.equal(excluded.stderr, "");
   assert.doesNotMatch(excluded.stdout, /excluded[\\/]complex\.ts/);
 });
 
