@@ -10,6 +10,12 @@
     "typescript"
   ],
   "tsconfigFile": "tsconfig.json",
+  "tap": {
+    "testFiles": [
+      "test/cli.test.mjs",
+      "test/metrics.test.mjs"
+    ]
+  },
   "coverageAnalysis": "perTest",
   "reporters": [
     "clear-text",
