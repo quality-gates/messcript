@@ -1,10 +1,19 @@
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
-import {
-  buildStrykerMutateArgs,
-  listChangedProductionFiles,
-} from "./changed-production-files.mjs";
+import { listChangedProductionFiles } from "./changed-production-files.mjs";
+
+/**
+ * @param {readonly string[]} productionFiles
+ * @returns {string[]}
+ */
+export function buildStrykerMutateArgs(productionFiles) {
+  if (productionFiles.length === 0) {
+    throw new Error("no production files to mutate");
+  }
+
+  return ["run", "--incremental", "--mutate", productionFiles.join(",")];
+}
 
 /**
  * @param {string[]} argv

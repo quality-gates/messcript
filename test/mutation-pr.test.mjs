@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  buildStrykerMutateArgs,
   listChangedProductionFiles,
   parseNameOnlyDiff,
   selectProductionSourceFiles,
 } from "../scripts/changed-production-files.mjs";
-import { parseMutationPrArgs, runMutationPr } from "../scripts/mutation-pr.mjs";
+import {
+  buildStrykerMutateArgs,
+  parseMutationPrArgs,
+  runMutationPr,
+} from "../scripts/mutation-pr.mjs";
 
 test("selectProductionSourceFiles keeps only src TypeScript production files", () => {
   assert.deepEqual(
@@ -61,20 +64,19 @@ test("buildStrykerMutateArgs refuses an empty production set", () => {
   assert.throws(() => buildStrykerMutateArgs([]), /no production/);
 });
 
-test("buildStrykerMutateArgs forces incremental mutation for the exact file set", () => {
+test("buildStrykerMutateArgs uses incremental mode for the exact file set", () => {
   assert.deepEqual(buildStrykerMutateArgs(["src/cli.ts", "src/rules/unused.ts"]), [
     "run",
     "--incremental",
-    "--force",
     "--mutate",
     "src/cli.ts,src/rules/unused.ts",
   ]);
 });
 
 test("parseMutationPrArgs reads base and optional minimum", () => {
-  assert.deepEqual(parseMutationPrArgs(["--base", "origin/main", "--minimum", "74.4"]), {
+  assert.deepEqual(parseMutationPrArgs(["--base", "origin/main", "--minimum", "80"]), {
     base: "origin/main",
-    minimum: 74.4,
+    minimum: 80,
   });
 });
 
@@ -82,7 +84,7 @@ test("runMutationPr skips Stryker when no production files changed", () => {
   const commands = [];
   const result = runMutationPr({
     base: "origin/main",
-    minimum: 74.4,
+    minimum: 80,
     listFiles: () => [],
     runCommand: (command, args) => {
       commands.push([command, ...args]);
@@ -99,7 +101,7 @@ test("runMutationPr mutates only the changed production files then checks covere
   const commands = [];
   const result = runMutationPr({
     base: "origin/main",
-    minimum: 74.4,
+    minimum: 80,
     listFiles: () => ["src/cli.ts"],
     runCommand: (command, args) => {
       commands.push([command, ...args]);
@@ -113,7 +115,6 @@ test("runMutationPr mutates only the changed production files then checks covere
     "stryker",
     "run",
     "--incremental",
-    "--force",
     "--mutate",
     "src/cli.ts",
   ]);
@@ -122,6 +123,6 @@ test("runMutationPr mutates only the changed production files then checks covere
     "scripts/covered-msi.mjs",
     "coverage/mutation/mutation.json",
     "--minimum",
-    "74.4",
+    "80",
   ]);
 });

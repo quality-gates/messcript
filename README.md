@@ -47,7 +47,7 @@ also prints the covered mutation score (covered-MSI) and counts for killed,
 survived, uncovered, and timed-out mutants. Generated mutation output is
 ignored by Git.
 
-Pull-request CI mutates only production files changed against the PR base:
+Pull-request CI mutates only production files changed against `origin/main`:
 
 ```sh
 npm run mutation:pr -- --base origin/main

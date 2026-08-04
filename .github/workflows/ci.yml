@@ -81,8 +81,11 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Fetch origin/main for the production diff
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
+
       - name: Run mutation testing on changed production code
-        run: npm run mutation:pr -- --base "${{ github.event.pull_request.base.sha }}" --minimum 74.4
+        run: npm run mutation:pr -- --base origin/main --minimum 80
 
       - name: Upload mutation report
         if: success() || failure()
