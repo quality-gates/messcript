@@ -47,6 +47,15 @@ also prints the covered mutation score (covered-MSI) and counts for killed,
 survived, uncovered, and timed-out mutants. Generated mutation output is
 ignored by Git.
 
+Pull-request CI mutates only production files changed against the PR base:
+
+```sh
+npm run mutation:pr -- --base origin/main --minimum 74.4
+```
+
+If the PR does not change any `src/**/*.ts` files, that job skips mutation
+testing successfully. Main-branch CI still runs the full production suite.
+
 ### Options
 
 | Option | Meaning |
