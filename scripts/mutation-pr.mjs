@@ -12,7 +12,14 @@ export function buildStrykerMutateArgs(productionFiles) {
     throw new Error("no production files to mutate");
   }
 
-  return ["run", "--incremental", "--mutate", productionFiles.join(",")];
+  return [
+    "run",
+    "--incremental",
+    "--incrementalFile",
+    "coverage/mutation/stryker-incremental.json",
+    "--mutate",
+    productionFiles.join(","),
+  ];
 }
 
 /**
@@ -69,7 +76,12 @@ export function runMutationPr({
     return { skipped: false, files, status: stryker.status ?? 1 };
   }
 
-  const scoreArgs = ["scripts/covered-msi.mjs", "coverage/mutation/mutation.json"];
+  const scoreArgs = [
+    "scripts/covered-msi.mjs",
+    "coverage/mutation/mutation.json",
+    "--only",
+    files.join(","),
+  ];
   if (minimum !== undefined) {
     scoreArgs.push("--minimum", String(minimum));
   }

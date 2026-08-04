@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import {
   listChangedProductionFiles,
@@ -10,6 +14,7 @@ import {
   parseMutationPrArgs,
   runMutationPr,
 } from "../scripts/mutation-pr.mjs";
+import { coveredMsiFromReport } from "../scripts/covered-msi.mjs";
 
 test("selectProductionSourceFiles keeps only src TypeScript production files", () => {
   assert.deepEqual(
@@ -64,10 +69,12 @@ test("buildStrykerMutateArgs refuses an empty production set", () => {
   assert.throws(() => buildStrykerMutateArgs([]), /no production/);
 });
 
-test("buildStrykerMutateArgs uses incremental mode for the exact file set", () => {
+test("buildStrykerMutateArgs uses incremental mode with a coverage-local incremental file", () => {
   assert.deepEqual(buildStrykerMutateArgs(["src/cli.ts", "src/rules/unused.ts"]), [
     "run",
     "--incremental",
+    "--incrementalFile",
+    "coverage/mutation/stryker-incremental.json",
     "--mutate",
     "src/cli.ts,src/rules/unused.ts",
   ]);
@@ -77,6 +84,27 @@ test("parseMutationPrArgs reads base and optional minimum", () => {
   assert.deepEqual(parseMutationPrArgs(["--base", "origin/main", "--minimum", "80"]), {
     base: "origin/main",
     minimum: 80,
+  });
+});
+
+test("coveredMsiFromReport scores only the requested production files", () => {
+  const report = {
+    files: {
+      "src/cli.ts": {
+        mutants: [{ status: "Killed" }, { status: "Survived" }],
+      },
+      "src/other.ts": {
+        mutants: [{ status: "Survived" }, { status: "Survived" }, { status: "Survived" }],
+      },
+    },
+  };
+
+  assert.deepEqual(coveredMsiFromReport(report, ["src/cli.ts"]), {
+    coveredMsi: 50,
+    killed: 1,
+    survived: 1,
+    noCoverage: 0,
+    timeout: 0,
   });
 });
 
@@ -97,7 +125,7 @@ test("runMutationPr skips Stryker when no production files changed", () => {
   assert.deepEqual(commands, []);
 });
 
-test("runMutationPr mutates only the changed production files then checks covered-MSI", () => {
+test("runMutationPr mutates only the changed production files then checks scoped covered-MSI", () => {
   const commands = [];
   const result = runMutationPr({
     base: "origin/main",
@@ -115,6 +143,8 @@ test("runMutationPr mutates only the changed production files then checks covere
     "stryker",
     "run",
     "--incremental",
+    "--incrementalFile",
+    "coverage/mutation/stryker-incremental.json",
     "--mutate",
     "src/cli.ts",
   ]);
@@ -122,7 +152,36 @@ test("runMutationPr mutates only the changed production files then checks covere
   assert.deepEqual(commands[1].slice(1), [
     "scripts/covered-msi.mjs",
     "coverage/mutation/mutation.json",
+    "--only",
+    "src/cli.ts",
     "--minimum",
     "80",
   ]);
+});
+
+test("covered-msi CLI --only ignores out-of-scope files in the report", () => {
+  const dir = mkdtempSync(join(tmpdir(), "covered-msi-"));
+  try {
+    const reportPath = join(dir, "mutation.json");
+    writeFileSync(
+      reportPath,
+      JSON.stringify({
+        files: {
+          "src/cli.ts": { mutants: [{ status: "Killed" }] },
+          "src/other.ts": { mutants: [{ status: "Survived" }] },
+        },
+      }),
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      ["scripts/covered-msi.mjs", reportPath, "--only", "src/cli.ts", "--minimum", "80"],
+      { encoding: "utf8" },
+    );
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /covered-MSI=100\.00%/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

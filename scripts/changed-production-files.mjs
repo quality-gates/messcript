@@ -22,19 +22,18 @@ export function parseNameOnlyDiff(stdout) {
 }
 
 /**
- * @param {{ base: string, head?: string, gitDiff?: (args: string[]) => string }} options
+ * @param {{ base: string, gitDiff?: (args: string[]) => string }} options
  * @returns {string[]}
  */
 export function listChangedProductionFiles({
   base,
-  head = "HEAD",
   gitDiff = (args) => execFileSync("git", args, { encoding: "utf8" }),
 }) {
   const stdout = gitDiff([
     "diff",
     "--name-only",
     "--diff-filter=ACMR",
-    `${base}...${head}`,
+    `${base}...HEAD`,
     "--",
     "src/",
   ]);
