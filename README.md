@@ -50,11 +50,13 @@ ignored by Git.
 Pull-request CI mutates only production files changed against the PR base:
 
 ```sh
-npm run mutation:pr -- --base origin/main --minimum 74.4
+npm run mutation:pr -- --base origin/main
 ```
 
-If the PR does not change any `src/**/*.ts` files, that job skips mutation
-testing successfully. Main-branch CI still runs the full production suite.
+Pass `--minimum <n>` when you want the script to fail below a covered-MSI
+floor (CI does). If the PR does not change any `src/**/*.ts` files, that job
+skips mutation testing successfully. Main-branch CI still runs the full
+production suite.
 
 ### Options
 
