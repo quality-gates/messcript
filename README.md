@@ -6,9 +6,14 @@ or requiring a project configuration file.
 
 ## Install
 
+Clone the repo, build it, and run the compiled CLI directly:
+
 ```sh
-npm install --save-dev messcript
-npx messcript --help
+git clone https://github.com/quality-gates/messcript.git
+cd messcript
+npm ci
+npm run build
+node dist/cli.js --help
 ```
 
 The package executable is `messcript`; its version comes from `package.json`.
