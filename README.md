@@ -6,8 +6,8 @@ or requiring a project configuration file.
 
 ## Install
 
-`messcript` is not yet published to the npm registry. We're working on npm
-package publishing, so for now this command is not available:
+npm package publishing is in progress. Until that lands, use one of the
+verified install paths below:
 
 ```sh
 npm install --save-dev messcript
