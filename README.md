@@ -6,9 +6,34 @@ or requiring a project configuration file.
 
 ## Install
 
+`messcript` is not currently published to the npm registry, so this does **not**
+work:
+
 ```sh
 npm install --save-dev messcript
-npx messcript --help
+```
+
+GitHub and other git-based npm installs are also currently unreliable here:
+with current npm versions they can install a dangling `messcript` binary or no
+binary at all when the package is consumed directly from git.
+
+The verified path today is to clone the repo, build it, and run the compiled
+CLI directly:
+
+```sh
+git clone https://github.com/quality-gates/messcript.git
+cd messcript
+npm ci
+npm run build
+node dist/cli.js --help
+```
+
+If you need an installable artifact, a locally packed tarball also works:
+
+```sh
+npm pack
+npm install -g ./messcript-*.tgz
+messcript --help
 ```
 
 The package executable is `messcript`; its version comes from `package.json`.
