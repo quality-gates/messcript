@@ -6,9 +6,11 @@ import {
   componentRulesets,
   getRuleDefinition,
   languagePolicies,
+  validateSelectionProperties,
   type RuleProperties,
   type RuleSelection,
 } from "./rules/catalog";
+import { IgnorePatternError } from "./rules/ignore-pattern";
 
 type XmlNode = {
   name: string;
@@ -353,9 +355,19 @@ function addRule(state: ExpansionState, ruleName: string, meta: SelectionMeta, e
     return;
   }
   const value = selection(definition.name, state.rulesetName, meta);
-  if (value) {
-    state.selections.push(value);
+  if (!value) {
+    return;
   }
+  try {
+    validateSelectionProperties(value);
+  } catch (error) {
+    const message = error instanceof IgnorePatternError || error instanceof Error
+      ? error.message
+      : "Invalid rule property";
+    state.errors.push(`${message} (rule '${definition.name}' in '${state.path}').`);
+    return;
+  }
+  state.selections.push(value);
 }
 
 function expandBuiltIn(

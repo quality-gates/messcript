@@ -3,6 +3,7 @@
 import ts from "typescript";
 import type { Finding } from "../finding";
 import { findBooleanArgumentFlag } from "./boolean-argument-flag";
+import { validateIgnorePatternProperty } from "./ignore-pattern";
 import { findBooleanGetMethodName } from "./boolean-get-method-name";
 import { findCamelCaseClassName } from "./camel-case-class-name";
 import { findCamelCaseMethodName } from "./camel-case-method-name";
@@ -242,7 +243,11 @@ function withConfiguredProperties<T>(definition: RuleDefinition, properties: Rul
     const canonical = canonicalPropertyName(definition.name, name);
     const actual = Object.keys(runtime).find((key) => key.toLowerCase() === canonical.toLowerCase());
     if (actual) {
-      runtime[actual] = propertyValue(value, runtime[actual]);
+      const nextValue = propertyValue(value, runtime[actual]);
+      if (typeof nextValue === "string") {
+        validateIgnorePatternProperty(actual, nextValue);
+      }
+      runtime[actual] = nextValue;
     }
   }
   try {
@@ -251,6 +256,13 @@ function withConfiguredProperties<T>(definition: RuleDefinition, properties: Rul
     for (const [key, value] of original) {
       runtime[key] = value;
     }
+  }
+}
+
+/** Validate selection properties that must be safe before analysis. */
+export function validateSelectionProperties(selection: RuleSelection): void {
+  for (const [name, value] of Object.entries(selection.properties)) {
+    validateIgnorePatternProperty(name, value);
   }
 }
 

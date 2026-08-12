@@ -14,13 +14,14 @@ before(() => {
   consumerRoot = mkdtempSync(join(tmpdir(), "messcript-acceptance-"));
   const packageDestination = join(consumerRoot, "package");
   mkdirSync(packageDestination);
-  const packed = JSON.parse(
+  const packedRaw = JSON.parse(
     execFileSync(
       "npm",
       ["pack", "--json", "--loglevel", "silent", "--pack-destination", packageDestination],
       { cwd: repoRoot, encoding: "utf8" },
     ),
   );
+  const packed = Array.isArray(packedRaw) ? packedRaw : Object.values(packedRaw);
   const packageTarball = join(packageDestination, packed[0].filename);
 
   execFileSync("npm", ["init", "--yes", "--scope", "acceptance"], {

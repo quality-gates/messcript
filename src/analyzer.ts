@@ -86,8 +86,18 @@ export function analyze(
           continue;
         }
         const definition = getRuleDefinition(selection.name);
-        if (definition) {
+        if (!definition) {
+          continue;
+        }
+        try {
           findings.push(...runRule(definition, selection, sourceFile));
+        } catch (error) {
+          errors.push({
+            path,
+            line: 1,
+            column: 1,
+            message: `Could not run rule ${selection.name} on ${path}: ${error instanceof Error ? error.message : "Unknown rule error"}`,
+          });
         }
       }
     } catch (error) {
@@ -105,8 +115,18 @@ export function analyze(
       continue;
     }
     const definition = getRuleDefinition(selection.name);
-    if (definition) {
+    if (!definition) {
+      continue;
+    }
+    try {
       findings.push(...runGlobalVariable(definition, selection, parsedSourceFiles));
+    } catch (error) {
+      errors.push({
+        path: parsedSourceFiles[0]?.fileName ?? selectedRules[0]?.name ?? "globalvariable",
+        line: 1,
+        column: 1,
+        message: `Could not run rule ${selection.name}: ${error instanceof Error ? error.message : "Unknown rule error"}`,
+      });
     }
   }
 

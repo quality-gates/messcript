@@ -10,6 +10,7 @@ import {
   functionImage,
   isPublicFunction,
 } from "./clean-code-finding";
+import { compileIgnorePattern, testIgnorePattern } from "./ignore-pattern";
 
 export const ruleName = "BooleanArgumentFlag";
 export const priority = 1;
@@ -69,7 +70,7 @@ function booleanBindingIdentifiers(name: ts.BindingName, initializer: ts.Express
   return identifiers;
 }
 
-function isIgnored(node: ts.Node, sourceFile: ts.SourceFile): boolean {
+function isIgnored(node: ts.Node, sourceFile: ts.SourceFile, ignoreRegex: RegExp | undefined): boolean {
   const owner = enclosingClass(node);
   if (owner && properties.exceptions.split(",").map((value) => value.trim()).includes(owner.name?.text ?? "")) {
     return true;
@@ -77,13 +78,14 @@ function isIgnored(node: ts.Node, sourceFile: ts.SourceFile): boolean {
   const methodName = ts.isFunctionLike(node) && node.name && !ts.isComputedPropertyName(node.name)
     ? node.name.getText(sourceFile)
     : "";
-  return properties.ignorepattern.length > 0 && new RegExp(properties.ignorepattern).test(methodName);
+  return testIgnorePattern(ignoreRegex, methodName);
 }
 
 export function findBooleanArgumentFlag(sourceFile: ts.SourceFile): Finding[] {
+  const ignoreRegex = compileIgnorePattern(properties.ignorepattern);
   const findings: Finding[] = [];
   forEachFunction(sourceFile, (node) => {
-    if (!isPublicFunction(node, sourceFile) || isIgnored(node, sourceFile)) {
+    if (!isPublicFunction(node, sourceFile) || isIgnored(node, sourceFile, ignoreRegex)) {
       return;
     }
     for (const parameter of node.parameters) {
