@@ -1,8 +1,10 @@
 // messcript-disable ConstantNamingConventions
+// messcript-disable CouplingBetweenObjects
 import ts from "typescript";
 import { forEachFunction } from "../ast/functions";
 import type { Finding } from "../finding";
 import { className, createCleanCodeFinding, enclosingClass, functionContext, functionName } from "./clean-code-finding";
+import { compileIgnorePattern, testIgnorePattern } from "./ignore-pattern";
 
 export const ruleName = "StaticAccess";
 export const priority = 1;
@@ -12,16 +14,13 @@ function exceptionNames(): Set<string> {
   return new Set(properties.exceptions.split(",").map((value) => value.trim()).filter(Boolean));
 }
 
-function isIgnoredMethod(name: string): boolean {
-  return properties.ignorepattern.length > 0 && new RegExp(properties.ignorepattern).test(name);
-}
-
 export function findStaticAccess(sourceFile: ts.SourceFile): Finding[] {
   const findings: Finding[] = [];
   const exceptions = exceptionNames();
+  const ignoreRegex = compileIgnorePattern(properties.ignorepattern);
   forEachFunction(sourceFile, (node) => {
     const methodName = functionName(node, sourceFile);
-    if (isIgnoredMethod(methodName)) {
+    if (testIgnorePattern(ignoreRegex, methodName)) {
       return;
     }
     const ownClass = enclosingClass(node);

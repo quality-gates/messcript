@@ -5,13 +5,17 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import {
+  buildMutateEntries,
   listChangedProductionFiles,
+  mergeLineRanges,
   parseNameOnlyDiff,
+  parseUnifiedDiffRanges,
   selectProductionSourceFiles,
 } from "../scripts/changed-production-files.mjs";
 import {
   buildStrykerMutateArgs,
   parseMutationPrArgs,
+  productionFilesFromMutateEntries,
   runMutationPr,
 } from "../scripts/mutation-pr.mjs";
 import { coveredMsiFromReport } from "../scripts/covered-msi.mjs";
@@ -114,6 +118,7 @@ test("runMutationPr skips Stryker when no production files changed", () => {
     base: "origin/main",
     minimum: 80,
     listFiles: () => [],
+    listMutateEntries: () => [],
     runCommand: (command, args) => {
       commands.push([command, ...args]);
       return { status: 0, stdout: "", stderr: "" };
@@ -131,6 +136,7 @@ test("runMutationPr mutates only the changed production files then checks scoped
     base: "origin/main",
     minimum: 80,
     listFiles: () => ["src/cli.ts"],
+    listMutateEntries: () => ["src/cli.ts"],
     runCommand: (command, args) => {
       commands.push([command, ...args]);
       return { status: 0, stdout: "", stderr: "" };
@@ -154,6 +160,102 @@ test("runMutationPr mutates only the changed production files then checks scoped
     "coverage/mutation/mutation.json",
     "--only",
     "src/cli.ts",
+    "--minimum",
+    "80",
+  ]);
+});
+
+
+test("parseUnifiedDiffRanges reads added line spans from U0 hunks", () => {
+  const diff = [
+    "diff --git a/src/cli.ts b/src/cli.ts",
+    "--- a/src/cli.ts",
+    "+++ b/src/cli.ts",
+    "@@ -10,0 +11,2 @@",
+    "+one",
+    "+two",
+    "@@ -40 +42 @@",
+    "+three",
+    "diff --git a/src/new.ts b/src/new.ts",
+    "--- /dev/null",
+    "+++ b/src/new.ts",
+    "@@ -0,0 +1,3 @@",
+    "+a",
+    "+b",
+    "+c",
+  ].join("\n");
+
+  const ranges = parseUnifiedDiffRanges(diff);
+  assert.deepEqual(ranges.get("src/cli.ts"), [
+    { start: 11, end: 12 },
+    { start: 42, end: 42 },
+  ]);
+  assert.deepEqual(ranges.get("src/new.ts"), [{ start: 1, end: 3 }]);
+});
+
+test("mergeLineRanges collapses overlapping and adjacent spans", () => {
+  assert.deepEqual(
+    mergeLineRanges([
+      { start: 10, end: 12 },
+      { start: 13, end: 15 },
+      { start: 20, end: 21 },
+      { start: 19, end: 19 },
+    ]),
+    [
+      { start: 10, end: 15 },
+      { start: 19, end: 21 },
+    ],
+  );
+});
+
+test("buildMutateEntries uses full files when ranges are missing and ranges when present", () => {
+  assert.deepEqual(
+    buildMutateEntries(
+      ["src/new.ts", "src/cli.ts"],
+      new Map([
+        ["src/cli.ts", [{ start: 11, end: 12 }, { start: 40, end: 40 }]],
+      ]),
+    ),
+    ["src/new.ts", "src/cli.ts:11-12", "src/cli.ts:40-40"],
+  );
+});
+
+test("productionFilesFromMutateEntries strips range suffixes", () => {
+  assert.deepEqual(
+    productionFilesFromMutateEntries(["src/cli.ts:11-12", "src/cli.ts:40-40", "src/new.ts"]),
+    ["src/cli.ts", "src/new.ts"],
+  );
+});
+
+test("runMutationPr mutates ranged entries then scores the underlying production files", () => {
+  const commands = [];
+  const result = runMutationPr({
+    base: "origin/main",
+    minimum: 80,
+    listFiles: () => ["src/cli.ts"],
+    listMutateEntries: () => ["src/cli.ts:10-20", "src/rules/unused.ts"],
+    runCommand: (command, args) => {
+      commands.push([command, ...args]);
+      return { status: 0, stdout: "", stderr: "" };
+    },
+  });
+
+  assert.equal(result.skipped, false);
+  assert.equal(result.status, 0);
+  assert.deepEqual(commands[0], [
+    "stryker",
+    "run",
+    "--incremental",
+    "--incrementalFile",
+    "coverage/mutation/stryker-incremental.json",
+    "--mutate",
+    "src/cli.ts:10-20,src/rules/unused.ts",
+  ]);
+  assert.deepEqual(commands[1].slice(1), [
+    "scripts/covered-msi.mjs",
+    "coverage/mutation/mutation.json",
+    "--only",
+    "src/cli.ts,src/rules/unused.ts",
     "--minimum",
     "80",
   ]);
