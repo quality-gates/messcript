@@ -2,9 +2,9 @@
 // messcript-disable CouplingBetweenObjects
 // messcript-disable ConstantNamingConventions
 
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { writeFileSync } from "node:fs";
 import type { Writable } from "node:stream";
+import packageMetadata from "../package.json";
 import { analyze } from "./analyzer";
 import {
   formatAnsi,
@@ -16,10 +16,6 @@ import {
 import { formatStructured } from "./reporters/structured";
 import { formatText } from "./reporters/text";
 import { applyRuleFilters, loadRulesets } from "./rulesets";
-
-const packageMetadata = JSON.parse(
-  readFileSync(join(__dirname, "..", "package.json"), "utf8"),
-) as { version: string };
 
 const usage = "Usage: messcript <paths> <format> <ruleset[,ruleset...]> [options]";
 const requiredArguments = "<paths> <format> <ruleset[,ruleset...]>";
@@ -373,7 +369,7 @@ export function runCli(argv: readonly string[], io: CliIo): number {
   }
 }
 
-if (require.main === module) {
+if (require.cache && require.main === module) {
   process.exitCode = runCli(process.argv.slice(2), {
     stdout: process.stdout,
     stderr: process.stderr,
