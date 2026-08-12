@@ -25,12 +25,16 @@ type CacheEntry = { readonly regex: RegExp } | { readonly error: IgnorePatternEr
 
 const compileCache = new Map<string, CacheEntry>();
 
-function asIgnorePatternError(message: string): IgnorePatternError {
-  return new IgnorePatternError(message);
-}
-
 function syntaxErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Invalid regular expression";
+}
+
+function isTimedOut(result: ReturnType<typeof spawnSync>): boolean {
+  return (
+    result.status === null ||
+    result.signal === "SIGTERM" ||
+    Boolean(result.error && "code" in result.error && result.error.code === "ETIMEDOUT")
+  );
 }
 
 /**
@@ -56,29 +60,21 @@ try {
     timeout: safetyTimeoutMs,
   });
 
-  if (result.error && "code" in result.error && result.error.code === "ETIMEDOUT") {
-    throw asIgnorePatternError(
-      "ignorepattern is too expensive to evaluate (possible ReDoS).",
-    );
-  }
-  if (result.signal === "SIGTERM" || result.status === null) {
-    throw asIgnorePatternError(
-      "ignorepattern is too expensive to evaluate (possible ReDoS).",
-    );
-  }
-  if (result.status === 2) {
-    throw asIgnorePatternError(`Invalid ignorepattern: ${pattern}`);
+  if (isTimedOut(result)) {
+    throw new IgnorePatternError("ignorepattern is too expensive to evaluate (possible ReDoS).");
   }
   if (result.status !== 0) {
-    throw asIgnorePatternError(
-      `ignorepattern failed safety evaluation with exit status ${String(result.status)}.`,
+    throw new IgnorePatternError(
+      result.status === 2
+        ? `Invalid ignorepattern: ${pattern}`
+        : `ignorepattern failed safety evaluation with exit status ${String(result.status)}.`,
     );
   }
 }
 
 function compileUncached(pattern: string): RegExp {
   if (pattern.length > maxIgnorePatternLength) {
-    throw asIgnorePatternError(
+    throw new IgnorePatternError(
       `ignorepattern exceeds maximum length of ${maxIgnorePatternLength}.`,
     );
   }
@@ -87,7 +83,7 @@ function compileUncached(pattern: string): RegExp {
   try {
     regex = new RegExp(pattern);
   } catch (error) {
-    throw asIgnorePatternError(`Invalid ignorepattern: ${syntaxErrorMessage(error)}`);
+    throw new IgnorePatternError(`Invalid ignorepattern: ${syntaxErrorMessage(error)}`);
   }
 
   assertPatternIsCheap(pattern);
@@ -118,7 +114,7 @@ export function compileIgnorePattern(pattern: string): RegExp | undefined {
   } catch (error) {
     const ignoreError = error instanceof IgnorePatternError
       ? error
-      : asIgnorePatternError(syntaxErrorMessage(error));
+      : new IgnorePatternError(syntaxErrorMessage(error));
     compileCache.set(pattern, { error: ignoreError });
     throw ignoreError;
   }
@@ -129,10 +125,10 @@ export function testIgnorePattern(regex: RegExp | undefined, name: string): bool
   if (!regex) {
     return false;
   }
-  const subject = name.length > maxIgnoreSubjectLength
-    ? name.slice(0, maxIgnoreSubjectLength)
-    : name;
-  return regex.test(subject);
+  if (name.length <= maxIgnoreSubjectLength) {
+    return regex.test(name);
+  }
+  return regex.test(name.slice(0, maxIgnoreSubjectLength));
 }
 
 /** True when the property name configures a method-name ignore regex. */

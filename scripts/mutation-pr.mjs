@@ -1,14 +1,17 @@
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
-import { listChangedProductionFiles } from "./changed-production-files.mjs";
+import {
+  listChangedProductionFiles,
+  listChangedProductionMutateEntries,
+} from "./changed-production-files.mjs";
 
 /**
- * @param {readonly string[]} productionFiles
+ * @param {readonly string[]} mutateEntries
  * @returns {string[]}
  */
-export function buildStrykerMutateArgs(productionFiles) {
-  if (productionFiles.length === 0) {
+export function buildStrykerMutateArgs(mutateEntries) {
+  if (mutateEntries.length === 0) {
     throw new Error("no production files to mutate");
   }
 
@@ -18,7 +21,7 @@ export function buildStrykerMutateArgs(productionFiles) {
     "--incrementalFile",
     "coverage/mutation/stryker-incremental.json",
     "--mutate",
-    productionFiles.join(","),
+    mutateEntries.join(","),
   ];
 }
 
@@ -45,10 +48,21 @@ export function parseMutationPrArgs(argv) {
 }
 
 /**
+ * Strip optional `:start-end` mutation ranges for covered-MSI --only scoping.
+ *
+ * @param {readonly string[]} mutateEntries
+ * @returns {string[]}
+ */
+export function productionFilesFromMutateEntries(mutateEntries) {
+  return [...new Set(mutateEntries.map((entry) => entry.replace(/:\d+-\d+$/, "")))];
+}
+
+/**
  * @param {{
  *   base: string,
  *   minimum?: number,
  *   listFiles?: (options: { base: string }) => string[],
+ *   listMutateEntries?: (options: { base: string }) => string[],
  *   runCommand?: (command: string, args: string[]) => { status: number | null, stdout: string, stderr: string },
  * }} options
  * @returns {{ skipped: boolean, files: string[], status: number }}
@@ -57,21 +71,28 @@ export function runMutationPr({
   base,
   minimum,
   listFiles = listChangedProductionFiles,
+  listMutateEntries = listChangedProductionMutateEntries,
   runCommand = (command, args) =>
     spawnSync(command, args, { encoding: "utf8", stdio: "inherit" }),
 }) {
-  const files = listFiles({ base });
+  const mutateEntries = listMutateEntries({ base });
+  const files =
+    mutateEntries.length > 0
+      ? productionFilesFromMutateEntries(mutateEntries)
+      : listFiles({ base });
 
-  if (files.length === 0) {
+  if (mutateEntries.length === 0) {
     console.log(
       `No changed production source files vs ${base}; skipping mutation testing.`,
     );
     return { skipped: true, files, status: 0 };
   }
 
-  console.log(`Mutating changed production files:\n${files.map((file) => `  ${file}`).join("\n")}`);
+  console.log(
+    `Mutating changed production code:\n${mutateEntries.map((entry) => `  ${entry}`).join("\n")}`,
+  );
 
-  const stryker = runCommand("stryker", buildStrykerMutateArgs(files));
+  const stryker = runCommand("stryker", buildStrykerMutateArgs(mutateEntries));
   if ((stryker.status ?? 1) !== 0) {
     return { skipped: false, files, status: stryker.status ?? 1 };
   }

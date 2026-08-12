@@ -1,14 +1,25 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { Writable } from "node:stream";
 import { after, before, test } from "node:test";
+import ts from "typescript";
 import { runCli } from "../dist/cli.js";
 import { analyze } from "../dist/analyzer.js";
 import { loadRulesets, RulesetError } from "../dist/rulesets.js";
+import {
+  IgnorePatternError,
+  compileIgnorePattern,
+  isIgnorePatternProperty,
+  maxIgnorePatternLength,
+  maxIgnoreSubjectLength,
+  testIgnorePattern,
+  validateIgnorePatternProperty,
+} from "../dist/rules/ignore-pattern.js";
+import { getRuleDefinition, runRule, validateSelectionProperties } from "../dist/rules/catalog.js";
 
 let workspace;
 
@@ -30,7 +41,6 @@ function run(args) {
   return { status, stdout: stdout.read(), stderr: stderr.read() };
 }
 
-/** CLI in a child process so a hang becomes a failed assertion, not a stuck suite. */
 function runCliTimed(args, timeoutMs = 2000) {
   const started = performance.now();
   const result = spawnSync(process.execPath, ["dist/cli.js", ...args], {
@@ -69,6 +79,10 @@ function writeRuleset(name, xml) {
   return path;
 }
 
+function sourceFileFrom(path) {
+  return ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+}
+
 test("nested-quantifier ignorepattern is rejected before analysis and does not hang", () => {
   const source = writeSource(
     "redos.ts",
@@ -89,7 +103,7 @@ test("nested-quantifier ignorepattern is rejected before analysis and does not h
 
   assert.equal(result.timedOut, false, "CLI hung on nested-quantifier ignorepattern");
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /ignorepattern/i);
+  assert.match(result.stderr, /too expensive|ignorepattern/i);
   assert.equal(result.stdout, "");
   assert.ok(result.elapsedMs < 2000, `expected fast rejection, took ${result.elapsedMs.toFixed(0)}ms`);
 });
@@ -114,7 +128,7 @@ test("alternation ReDoS ignorepattern is rejected before analysis and does not h
 
   assert.equal(result.timedOut, false, "CLI hung on alternation ignorepattern");
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /ignorepattern/i);
+  assert.match(result.stderr, /too expensive|ignorepattern/i);
   assert.ok(result.elapsedMs < 2000, `expected fast rejection, took ${result.elapsedMs.toFixed(0)}ms`);
 });
 
@@ -144,7 +158,8 @@ export function run(flag: boolean): number {
 
   const result = run([source, "text", ruleset]);
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /ignorepattern|regular expression/i);
+  assert.match(result.stderr, /Invalid ignorepattern/);
+  assert.match(result.stderr, /BooleanArgumentFlag/);
   assert.equal(result.stdout, "");
 });
 
@@ -171,6 +186,59 @@ export function keepFlag(flag: boolean): void {}
   assert.equal(result.stderr, "");
 });
 
+test("valid StaticAccess ignorepattern suppresses matching methods via the CLI", () => {
+  const source = writeSource(
+    "static-access.ts",
+    `export class Worker {
+  ignored() { Math.max(1, 2); }
+  active() { Math.max(1, 2); }
+}
+`,
+  );
+  const ruleset = writeRuleset(
+    "static-access.xml",
+    `<ruleset name="ok">
+  <rule ref="StaticAccess">
+    <properties>
+      <property name="ignorepattern" value="^ignored"/>
+      <property name="exceptions" value=""/>
+    </properties>
+  </rule>
+</ruleset>`,
+  );
+
+  const result = run([source, "text", ruleset]);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /active/);
+  assert.doesNotMatch(result.stdout, /method 'ignored'/);
+  assert.equal(result.stderr, "");
+});
+
+test("StaticAccess exceptions suppress named receivers", () => {
+  const source = writeSource(
+    "static-exceptions.ts",
+    `export class Worker {
+  run() { Logger.write(); Math.max(1, 2); }
+}
+`,
+  );
+  const ruleset = writeRuleset(
+    "static-exceptions.xml",
+    `<ruleset name="ok">
+  <rule ref="StaticAccess">
+    <properties>
+      <property name="exceptions" value="Logger"/>
+    </properties>
+  </rule>
+</ruleset>`,
+  );
+
+  const result = run([source, "text", ruleset]);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /Math/);
+  assert.doesNotMatch(result.stdout, /Logger/);
+});
+
 test("a single rule failure does not drop findings from other rules on the same file", () => {
   const source = writeSource(
     "isolated.ts",
@@ -195,11 +263,11 @@ export function run(flag: boolean): number {
 
   const result = analyze([source], selections);
   const rules = new Set(result.findings.map((finding) => finding.ruleName));
+  const errorText = result.errors.map((error) => error.message).join("\n");
 
-  assert.ok(
-    result.errors.some((error) => /BooleanArgumentFlag|ignorepattern|regular expression/i.test(error.message)),
-    `expected rule error, got ${JSON.stringify(result.errors)}`,
-  );
+  assert.match(errorText, /Could not run rule BooleanArgumentFlag on /);
+  assert.match(errorText, /isolated\.ts/);
+  assert.match(errorText, /Invalid ignorepattern/);
   assert.ok(rules.has("LongVariable"), `expected LongVariable, got ${[...rules]}`);
   assert.ok(rules.has("EmptyCatchBlock"), `expected EmptyCatchBlock, got ${[...rules]}`);
   assert.ok(rules.has("IfStatementAssignment"), `expected IfStatementAssignment, got ${[...rules]}`);
@@ -218,7 +286,155 @@ test("loadRulesets rejects unsafe ignorepattern with RulesetError", () => {
 
   assert.throws(() => loadRulesets([ruleset]), (error) => {
     assert.ok(error instanceof RulesetError);
-    assert.match(error.errors.join("\n"), /ignorepattern/i);
+    assert.match(error.errors.join("\n"), /too expensive|ignorepattern/i);
+    assert.match(error.errors.join("\n"), /BooleanArgumentFlag/);
+    assert.match(error.errors.join("\n"), /load-reject\.xml/);
     return true;
   });
+});
+
+test("compileIgnorePattern accepts empty and valid patterns, rejects bad ones", () => {
+  assert.equal(compileIgnorePattern(""), undefined);
+
+  const exactMax = "a".repeat(maxIgnorePatternLength);
+  const atMax = compileIgnorePattern(exactMax);
+  assert.ok(atMax instanceof RegExp);
+
+  const regex = compileIgnorePattern("^skip");
+  assert.ok(regex instanceof RegExp);
+  assert.equal(regex.test("skipMe"), true);
+  assert.equal(regex.test("keepMe"), false);
+  assert.equal(compileIgnorePattern("^skip"), regex);
+
+  assert.throws(() => compileIgnorePattern("["), (error) => {
+    assert.ok(error instanceof IgnorePatternError);
+    assert.equal(error.name, "IgnorePatternError");
+    assert.match(error.message, /^Invalid ignorepattern:/);
+    return true;
+  });
+  assert.throws(() => compileIgnorePattern("["), IgnorePatternError);
+
+  assert.throws(() => compileIgnorePattern("a".repeat(maxIgnorePatternLength + 1)), (error) => {
+    assert.ok(error instanceof IgnorePatternError);
+    assert.match(error.message, new RegExp(`maximum length of ${maxIgnorePatternLength}`));
+    return true;
+  });
+
+  assert.throws(() => compileIgnorePattern("(a+)+$"), (error) => {
+    assert.ok(error instanceof IgnorePatternError);
+    assert.match(error.message, /too expensive/);
+    return true;
+  });
+  assert.throws(() => compileIgnorePattern("(a|a)*$"), IgnorePatternError);
+});
+
+test("testIgnorePattern respects missing regex and subject length cap", () => {
+  assert.equal(testIgnorePattern(undefined, "anything"), false);
+  const regex = compileIgnorePattern("^a+$");
+  assert.equal(testIgnorePattern(regex, "aaa"), true);
+  assert.equal(testIgnorePattern(regex, "bbb"), false);
+
+  const exact = "a".repeat(maxIgnoreSubjectLength);
+  assert.equal(testIgnorePattern(regex, exact), true);
+
+  const over = `${"a".repeat(maxIgnoreSubjectLength)}b`;
+  assert.equal(testIgnorePattern(regex, over), true);
+
+  const prefixB = `b${"a".repeat(maxIgnoreSubjectLength)}`;
+  assert.equal(testIgnorePattern(regex, prefixB), false);
+});
+
+test("validateIgnorePatternProperty only checks ignorepattern keys", () => {
+  assert.equal(isIgnorePatternProperty("ignorepattern"), true);
+  assert.equal(isIgnorePatternProperty(" IgnorePattern "), true);
+  assert.equal(isIgnorePatternProperty("IGNOREPATTERN"), true);
+  assert.equal(isIgnorePatternProperty("maximum"), false);
+  assert.equal(isIgnorePatternProperty("ignore-pattern"), false);
+
+  validateIgnorePatternProperty("maximum", "[");
+  validateIgnorePatternProperty("ignorepattern", "");
+  validateIgnorePatternProperty("ignorepattern", "^ok");
+  assert.throws(() => validateIgnorePatternProperty("ignorepattern", "["), IgnorePatternError);
+});
+
+test("validateSelectionProperties rejects bad ignorepattern on a selection", () => {
+  assert.throws(
+    () =>
+      validateSelectionProperties({
+        name: "BooleanArgumentFlag",
+        rulesetName: "t",
+        properties: { ignorepattern: "[" },
+      }),
+    IgnorePatternError,
+  );
+  validateSelectionProperties({
+    name: "BooleanArgumentFlag",
+    rulesetName: "t",
+    properties: { ignorepattern: "^skip" },
+  });
+  validateSelectionProperties({
+    name: "LongVariable",
+    rulesetName: "t",
+    properties: { maximum: "10" },
+  });
+  validateSelectionProperties({
+    name: "BooleanArgumentFlag",
+    rulesetName: "t",
+    properties: {},
+  });
+});
+
+test("runRule surfaces invalid ignorepattern without mutating sibling rule config", () => {
+  const source = writeSource(
+    "run-rule.ts",
+    `export function keepFlag(flag: boolean): void {}
+export function skipFlag(flag: boolean): void {}
+`,
+  );
+  const definition = getRuleDefinition("BooleanArgumentFlag");
+  assert.ok(definition);
+  const file = sourceFileFrom(source);
+
+  assert.throws(
+    () =>
+      runRule(
+        definition,
+        {
+          name: "BooleanArgumentFlag",
+          rulesetName: "t",
+          properties: { ignorepattern: "[" },
+        },
+        file,
+      ),
+    IgnorePatternError,
+  );
+
+  const findings = runRule(
+    definition,
+    {
+      name: "BooleanArgumentFlag",
+      rulesetName: "t",
+      priority: 5,
+      properties: { ignorepattern: "^skip" },
+    },
+    file,
+  );
+  assert.equal(findings.some((finding) => finding.message.includes("keepFlag")), true);
+  assert.equal(findings.some((finding) => finding.message.includes("skipFlag")), false);
+  assert.ok(findings.every((finding) => finding.priority === 5));
+});
+
+test("unknown rule name still fails analysis before running rules", () => {
+  const source = writeSource("unknown-rule.ts", "export const value = 1;\n");
+  assert.throws(
+    () =>
+      analyze([source], [
+        {
+          name: "NoSuchRule",
+          rulesetName: "t",
+          properties: {},
+        },
+      ]),
+    /Unknown rule: NoSuchRule/,
+  );
 });
