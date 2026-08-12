@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,10 +60,32 @@ test("the packed executable prints help", () => {
   assert.equal(result.stderr, "");
 });
 
-test("the packed executable prints its package version", () => {
+test("the packed executable prints its exact package version", () => {
+  const installedPackage = JSON.parse(
+    readFileSync(join(consumerRoot, "node_modules", "messcript", "package.json"), "utf8"),
+  );
   const result = runPackagedCli(["--version"]);
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /^messcript \d+\.\d+\.\d+\n$/);
+  assert.equal(result.stdout, `messcript ${installedPackage.version}\n`);
   assert.equal(result.stderr, "");
+});
+
+test("the packed executable reports its exact package version", () => {
+  const installedPackage = JSON.parse(
+    readFileSync(join(consumerRoot, "node_modules", "messcript", "package.json"), "utf8"),
+  );
+  const sourcePath = join(consumerRoot, "smoke.ts");
+  writeFileSync(sourcePath, "export function meaning(): number { return 42; }\n", "utf8");
+
+  const result = runPackagedCli([
+    sourcePath,
+    "json",
+    "typescript",
+    "--ignore-violations-on-exit",
+  ]);
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stderr, "");
+  assert.equal(JSON.parse(result.stdout).tool.version, installedPackage.version);
 });

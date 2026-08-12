@@ -5,7 +5,8 @@ oversized functions and classes, tangled dependencies, dead private code, muddy
 naming, and other mess that reviews keep rediscovering.
 
 `messcript` is a local CLI. It reads source as text, never runs your project,
-never loads your dependencies, and needs no project config. Node.js 20.11+.
+never loads your dependencies, and needs no project config. Homebrew installs a
+standalone executable; source builds require Node.js 20.11+.
 
 ## Quick start
 
@@ -34,6 +35,10 @@ Machine-readable report shapes: [docs/reports.md](docs/reports.md).
 
 ## Install
 
+Homebrew: `brew install quality-gates/tap/messcript`.
+
+To build from source:
+
 ```console
 git clone https://github.com/quality-gates/messcript.git
 cd messcript
@@ -41,7 +46,7 @@ npm ci && npm run build
 node dist/cli.js --version
 ```
 
-The compiled binary is `dist/cli.js`. Its version comes from `package.json`;
+The compiled CLI is `dist/cli.js`. Its version comes from `package.json`;
 `messcript --version` and structured reports use the same value.
 
 ## Tune the gate
@@ -100,6 +105,7 @@ exit code `2`.
 ## Maintainers
 
 Command reference and report formats: [docs/usage.md](docs/usage.md).
+Homebrew release path: [docs/homebrew-release.md](docs/homebrew-release.md).
 
 Mutation measurement uses Stryker (`npm run mutation`). Pull-request CI mutates
 only production files changed against `origin/main`
