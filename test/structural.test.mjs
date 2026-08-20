@@ -141,6 +141,16 @@ const object = {
   assert.ok(messages(findings).every((message) => /first declared at line/.test(message)));
 });
 
+test("CyclomaticComplexity handles deeply nested statements", () => {
+  const depth = 830;
+  const file = sourceFile(`function nested(value) {${"if (value) {".repeat(depth)}return 0;${"}".repeat(depth)}}`);
+
+  const findings = findCyclomaticComplexity(file);
+
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /Cyclomatic Complexity of 831/);
+});
+
 test("complexity and codesize rules honor exact threshold boundaries", () => {
   const file = sourceFile(`
 function one(value) { return value ? 1 : 0; }

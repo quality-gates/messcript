@@ -16,6 +16,25 @@ function findingNames(findings) {
   return findings.map((finding) => finding.message.match(/'([^']+)'/)?.[1]).filter(Boolean);
 }
 
+test("UnusedLocalVariable honors the foreach allowance", () => {
+  const file = sourceFile(`
+declare const values: number[];
+declare const records: { nested: number }[];
+function loop() {
+  for (const item of values) {}
+  for (const { nested } of records) {}
+}
+`);
+  const previous = localProperties["allow-unused-foreach-variables"];
+  try {
+    localProperties["allow-unused-foreach-variables"] = true;
+
+    assert.deepEqual(findingNames(findUnusedLocalVariable(file)), []);
+  } finally {
+    localProperties["allow-unused-foreach-variables"] = previous;
+  }
+});
+
 test("unused analysis distinguishes used, unused, private, local, formal, and uncertain declarations", () => {
   const file = sourceFile(`
 class Service {
