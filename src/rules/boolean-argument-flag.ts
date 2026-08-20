@@ -2,6 +2,7 @@
 // messcript-disable CouplingBetweenObjects
 import ts from "typescript";
 import { forEachFunction } from "../ast/functions";
+import { isBooleanType } from "../metrics/boolean";
 import type { Finding } from "../finding";
 import {
   createCleanCodeFinding,
@@ -15,30 +16,6 @@ import { compileIgnorePattern, testIgnorePattern } from "./ignore-pattern";
 export const ruleName = "BooleanArgumentFlag";
 export const priority = 1;
 export const properties = { exceptions: "", ignorepattern: "" } as const;
-
-function unwrapType(type: ts.TypeNode): ts.TypeNode {
-  if (ts.isParenthesizedTypeNode(type)) {
-    return unwrapType(type.type);
-  }
-  return type;
-}
-
-function isBooleanType(type: ts.TypeNode | undefined): boolean {
-  if (!type) {
-    return false;
-  }
-  const unwrapped = unwrapType(type);
-  if (unwrapped.kind === ts.SyntaxKind.BooleanKeyword) {
-    return true;
-  }
-  if (ts.isTypeReferenceNode(unwrapped) && ts.isIdentifier(unwrapped.typeName)) {
-    return unwrapped.typeName.text === "Boolean";
-  }
-  if (ts.isUnionTypeNode(unwrapped)) {
-    return unwrapped.types.some((part) => isBooleanType(part));
-  }
-  return false;
-}
 
 function isBooleanInitializer(node: ts.Expression | undefined): boolean {
   if (!node) {

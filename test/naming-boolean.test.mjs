@@ -20,11 +20,11 @@ import { findCamelCasePropertyName } from "../dist/rules/camel-case-property-nam
 import { findCamelCaseVariableName } from "../dist/rules/camel-case-variable-name.js";
 import { isCamelCaseName, isPascalCaseName } from "../dist/rules/camel-case-utils.js";
 import { findConstantNamingConventions } from "../dist/rules/constant-naming-conventions.js";
-import { findLongClassName } from "../dist/rules/long-class-name.js";
-import { findLongVariable } from "../dist/rules/long-variable.js";
+import { findLongClassName, properties as longClassProperties } from "../dist/rules/long-class-name.js";
+import { findLongVariable, properties as longVariableProperties } from "../dist/rules/long-variable.js";
 import { isBooleanFunction, isConstantName, isIdiomaticShortName, adjustedLength } from "../dist/rules/naming-utils.js";
 import { findShortClassName, properties as shortClassProperties } from "../dist/rules/short-class-name.js";
-import { findShortMethodName } from "../dist/rules/short-method-name.js";
+import { findShortMethodName, properties as shortMethodProperties } from "../dist/rules/short-method-name.js";
 import { findShortVariable, properties as shortVariableProperties } from "../dist/rules/short-variable.js";
 
 function sourceFile(source, fileName = "naming-boolean.ts") {
@@ -113,6 +113,12 @@ class Service {
   const getFindings = findBooleanGetMethodName(file);
   assert.deepEqual(names(getFindings).sort(), ["getConditional", "getFlag", "getFlag", "getParameter"]);
   assert.doesNotMatch(messages(getFindings).join("\n"), /getNumber|getPartial|isReady/);
+});
+
+test("boolean argument flags ignore parameters with non-boolean union members", () => {
+  const file = sourceFile("export function mixed(value: boolean | string) {}");
+
+  assert.deepEqual(findBooleanArgumentFlag(file), []);
 });
 
 test("boolean rules honor visibility, exceptions, ignore patterns, computed names, and parameter configuration", () => {
@@ -234,6 +240,54 @@ export const Component = () => true;
   shortVariableProperties.exceptions = "ab";
   assert.deepEqual(names(findShortVariable(file)).sort(), ["a"]);
   shortVariableProperties.exceptions = "";
+});
+
+test("LongClassName honors configured prefix and suffix subtraction", () => {
+  const previousMaximum = longClassProperties.maximum;
+  const previousPrefixes = longClassProperties["subtract-prefixes"];
+  const previousSuffixes = longClassProperties["subtract-suffixes"];
+  try {
+    longClassProperties.maximum = 5;
+    longClassProperties["subtract-prefixes"] = "Pre";
+    longClassProperties["subtract-suffixes"] = "Class";
+
+    assert.deepEqual(names(findLongClassName(sourceFile("class PreValueClass {}"))), []);
+  } finally {
+    longClassProperties.maximum = previousMaximum;
+    longClassProperties["subtract-prefixes"] = previousPrefixes;
+    longClassProperties["subtract-suffixes"] = previousSuffixes;
+  }
+});
+
+test("LongVariable honors configured prefix and suffix subtraction", () => {
+  const previousMaximum = longVariableProperties.maximum;
+  const previousPrefixes = longVariableProperties["subtract-prefixes"];
+  const previousSuffixes = longVariableProperties["subtract-suffixes"];
+  try {
+    longVariableProperties.maximum = 5;
+    longVariableProperties["subtract-prefixes"] = "Pre";
+    longVariableProperties["subtract-suffixes"] = "Suffix";
+
+    assert.deepEqual(names(findLongVariable(sourceFile("const PreValueSuffix = 1;"))), []);
+  } finally {
+    longVariableProperties.maximum = previousMaximum;
+    longVariableProperties["subtract-prefixes"] = previousPrefixes;
+    longVariableProperties["subtract-suffixes"] = previousSuffixes;
+  }
+});
+
+test("ShortMethodName honors configured exceptions", () => {
+  const previousMinimum = shortMethodProperties.minimum;
+  const previousExceptions = shortMethodProperties.exceptions;
+  try {
+    shortMethodProperties.minimum = 3;
+    shortMethodProperties.exceptions = "ab";
+
+    assert.deepEqual(names(findShortMethodName(sourceFile("export function ab() {}"))), []);
+  } finally {
+    shortMethodProperties.minimum = previousMinimum;
+    shortMethodProperties.exceptions = previousExceptions;
+  }
 });
 
 test("naming boundaries and AST name roles remain observable", () => {

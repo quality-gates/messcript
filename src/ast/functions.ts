@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { walkAst } from "./walk";
 
 export type FunctionLike =
   | ts.ArrowFunction
@@ -26,25 +27,19 @@ export function isFunctionLikeWithBody(node: ts.Node): node is FunctionLike {
 }
 
 export function forEachFunctionLike(sourceFile: ts.SourceFile, callback: (node: FunctionLike) => void): void {
-  function visit(node: ts.Node): void {
+  walkAst(sourceFile, (node) => {
     if (isFunctionLike(node)) {
       callback(node);
     }
-    ts.forEachChild(node, visit);
-  }
-
-  visit(sourceFile);
+  });
 }
 
 export function forEachFunction(sourceFile: ts.SourceFile, callback: (node: FunctionLike) => void): void {
-  function visit(node: ts.Node): void {
+  walkAst(sourceFile, (node) => {
     if (isFunctionLikeWithBody(node)) {
       callback(node);
     }
-    ts.forEachChild(node, visit);
-  }
-
-  visit(sourceFile);
+  });
 }
 
 export function getFunctionName(node: FunctionLike, sourceFile: ts.SourceFile): string | undefined {

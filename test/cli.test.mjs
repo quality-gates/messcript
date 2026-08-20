@@ -1118,6 +1118,63 @@ test("recommended language policies tune defaults and opinionated opt-ins", () =
   assert.equal(typescriptExceptions.stdout, "");
 });
 
+test("configured rule properties affect the real CLI analysis", () => {
+  const input = join(scanRoot, "src", "configured-options.ts");
+  const ruleset = join(scanRoot, "rulesets", "configured-options.xml");
+  writeFileSync(input, `
+class PreValueClass {}
+const PreValueSuffix = 1;
+declare const values: number[];
+export function ab() {}
+export function loop(value: boolean | string) {
+  for (const item of values) {}
+}
+`);
+  writeFileSync(ruleset, `<ruleset name="configured-options">
+  <rule name="BooleanArgumentFlag" />
+  <rule name="LongClassName">
+    <properties>
+      <property name="maximum" value="5" />
+      <property name="subtract-prefixes" value="Pre" />
+      <property name="subtract-suffixes" value="Class" />
+    </properties>
+  </rule>
+  <rule name="LongVariable">
+    <properties>
+      <property name="maximum" value="6" />
+      <property name="subtract-prefixes" value="Pre" />
+      <property name="subtract-suffixes" value="Suffix" />
+    </properties>
+  </rule>
+  <rule name="ShortMethodName">
+    <properties><property name="exceptions" value="ab" /></properties>
+  </rule>
+  <rule name="UnusedLocalVariable">
+    <properties><property name="allow-unused-foreach-variables" value="true" /></properties>
+  </rule>
+</ruleset>`);
+
+  const result = runCli([input, "text", ruleset]);
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "");
+});
+
+test("the real CLI handles deeply nested complexity input", () => {
+  const input = join(scanRoot, "src", "deep.ts");
+  const ruleset = join(scanRoot, "rulesets", "deep.xml");
+  const depth = 830;
+  writeFileSync(input, `function nested(value) {${"if (value) {".repeat(depth)}return 0;${"}".repeat(depth)}}`);
+  writeFileSync(ruleset, `<ruleset name="deep"><rule name="CyclomaticComplexity" /></ruleset>`);
+
+  const result = runCli([input, "text", ruleset]);
+
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /Cyclomatic Complexity of 831/);
+  assert.equal(result.stderr, "");
+});
+
 test("CyclomaticComplexity reports a stable text finding", () => {
   const result = runCli([join(fixturesRoot, "complex.ts"), "text", "codesize"]);
 

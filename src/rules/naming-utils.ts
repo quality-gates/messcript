@@ -16,6 +16,10 @@ export function isReactComponentBinding(binding: NamedBinding): boolean {
   return isReactComponentName(binding.name, binding.node);
 }
 
+export function parseCommaSeparatedNames(value: string): string[] {
+  return value.split(",").map((part) => part.trim()).filter(Boolean);
+}
+
 export function adjustedLength(name: string, prefixes: readonly string[] = [], suffixes: readonly string[] = []): number {
   let adjusted = getNameWithoutSigil(name);
   const prefix = prefixes.find((candidate) => adjusted.startsWith(candidate));
