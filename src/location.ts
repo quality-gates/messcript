@@ -25,6 +25,7 @@ export function compareLocations(left: Located, right: Located): number {
 // one of those (legal, near-invisible) characters. `locate` recomputes
 // line/column using a \n-and-\r\n-only line map instead, so findings
 // stay aligned with what a diff, an editor, or a CI annotation shows.
+// messcript-disable-next-line ConstantNamingConventions
 const lineStartsByFile = new WeakMap<ts.SourceFile, readonly number[]>();
 
 function computeLineStarts(text: string): number[] {
