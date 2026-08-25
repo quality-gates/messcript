@@ -2,6 +2,7 @@ import ts from "typescript";
 import type { ClassLike } from "../ast/classes";
 import { getClassContext } from "../ast/classes";
 import type { Finding } from "../finding";
+import { locate } from "../location";
 
 export function createClassFinding(
   node: ClassLike,
@@ -10,7 +11,7 @@ export function createClassFinding(
   priority: number,
   messageForContext: (context: string) => string,
 ): Finding {
-  const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+  const position = locate(sourceFile, node.getStart(sourceFile));
   const context = getClassContext(node, sourceFile);
 
   return {

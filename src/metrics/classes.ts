@@ -1,6 +1,7 @@
 import ts from "typescript";
 import type { ClassLike } from "../ast/classes";
 import { getClassMethods } from "../ast/classes";
+import { locate } from "../location";
 import { calculateCyclomaticComplexity } from "./cyclomatic";
 
 export function calculateClassLineCount(
@@ -9,9 +10,9 @@ export function calculateClassLineCount(
   ignoreWhitespace: boolean,
 ): number {
   const start = node.getStart(sourceFile);
-  const end = sourceFile.getLineAndCharacterOfPosition(Math.max(start, node.getEnd() - 1));
+  const end = locate(sourceFile, Math.max(start, node.getEnd() - 1));
   if (!ignoreWhitespace) {
-    return end.line - sourceFile.getLineAndCharacterOfPosition(start).line + 1;
+    return end.line - locate(sourceFile, start).line + 1;
   }
 
   return sourceFile.text

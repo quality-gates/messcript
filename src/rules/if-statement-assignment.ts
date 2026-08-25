@@ -2,6 +2,7 @@
 import ts from "typescript";
 import { forEachFunction, isFunctionLike } from "../ast/functions";
 import type { Finding } from "../finding";
+import { locate } from "../location";
 import { createCleanCodeFinding, functionContext } from "./clean-code-finding";
 
 export const ruleName = "IfStatementAssignment";
@@ -27,7 +28,7 @@ function addConditionFindings(
   const assignments: ts.BinaryExpression[] = [];
   findAssignments(condition, assignments);
   for (const assignment of assignments) {
-    const position = sourceFile.getLineAndCharacterOfPosition(assignment.getStart(sourceFile));
+    const position = locate(sourceFile, assignment.getStart(sourceFile));
     findings.push(
       createCleanCodeFinding(
         assignment,

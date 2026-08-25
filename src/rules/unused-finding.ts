@@ -1,6 +1,7 @@
 import ts from "typescript";
 import type { UnusedDeclaration, UnusedKind } from "../analysis/unused";
 import type { Finding } from "../finding";
+import { locate } from "../location";
 
 export function createUnusedFinding(
   declaration: UnusedDeclaration,
@@ -8,7 +9,7 @@ export function createUnusedFinding(
   ruleName: string,
   message: string,
 ): Finding {
-  const position = sourceFile.getLineAndCharacterOfPosition(declaration.node.getStart(sourceFile));
+  const position = locate(sourceFile, declaration.node.getStart(sourceFile));
   return {
     path: sourceFile.fileName,
     line: position.line + 1,

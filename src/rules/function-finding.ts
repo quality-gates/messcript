@@ -1,6 +1,7 @@
 import type { FunctionLike } from "../ast/functions";
 import { getFunctionContext } from "../ast/functions";
 import type { Finding } from "../finding";
+import { locate } from "../location";
 import ts from "typescript";
 
 export function createFunctionFinding(
@@ -10,7 +11,7 @@ export function createFunctionFinding(
   priority: number,
   messageForContext: (context: string) => string,
 ): Finding {
-  const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+  const position = locate(sourceFile, node.getStart(sourceFile));
   const context = getFunctionContext(node, sourceFile);
 
   return {

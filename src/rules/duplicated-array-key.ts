@@ -1,6 +1,7 @@
 // messcript-disable ConstantNamingConventions
 import ts from "typescript";
 import type { Finding } from "../finding";
+import { locate } from "../location";
 import { createCleanCodeFinding } from "./clean-code-finding";
 
 export const ruleName = "DuplicatedArrayKey";
@@ -67,7 +68,7 @@ function checkObjectLiteral(node: ts.ObjectLiteralExpression, sourceFile: ts.Sou
     if (!key) {
       continue;
     }
-    const line = sourceFile.getLineAndCharacterOfPosition(key.node.getStart(sourceFile)).line + 1;
+    const line = locate(sourceFile, key.node.getStart(sourceFile)).line + 1;
     const first = seen.get(key.key);
     if (first) {
       findings.push(
