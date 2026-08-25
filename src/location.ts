@@ -1,3 +1,4 @@
+// messcript-disable ConstantNamingConventions
 import type ts from "typescript";
 
 export type Located = {
@@ -16,16 +17,12 @@ export function compareLocations(left: Located, right: Located): number {
   return left.column - right.column;
 }
 
-// TypeScript's own scanner treats U+2028 (LINE SEPARATOR) and U+2029
-// (PARAGRAPH SEPARATOR) as line terminators, per the ECMAScript spec.
-// git, GitHub, GitLab, and virtually every editor do not: they only
-// recognise \n and \r\n. Reporting positions straight from
-// `sourceFile.getLineAndCharacterOfPosition` therefore drifts away from
-// the line numbers every other tool agrees on whenever source contains
-// one of those (legal, near-invisible) characters. `locate` recomputes
-// line/column using a \n-and-\r\n-only line map instead, so findings
-// stay aligned with what a diff, an editor, or a CI annotation shows.
-// messcript-disable-next-line ConstantNamingConventions
+// TypeScript treats U+2028 and U+2029 as line terminators. Git, GitHub,
+// GitLab, and most editors do not: they use only \n and \r\n. This
+// makes `sourceFile.getLineAndCharacterOfPosition` report the wrong
+// line for source that contains U+2028 or U+2029. `locate` computes
+// the line and column from a \n-and-\r\n-only map instead, so findings
+// match the line numbers a diff, an editor, or a CI annotation shows.
 const lineStartsByFile = new WeakMap<ts.SourceFile, readonly number[]>();
 
 function computeLineStarts(text: string): number[] {
@@ -53,7 +50,7 @@ function lineStartsFor(sourceFile: ts.SourceFile): readonly number[] {
   return starts;
 }
 
-export function locate(sourceFile: ts.SourceFile, position: number): { line: number; character: number } {
+export function locate(sourceFile: ts.SourceFile, position: number): ts.LineAndCharacter {
   const starts = lineStartsFor(sourceFile);
   let low = 0;
   let high = starts.length - 1;

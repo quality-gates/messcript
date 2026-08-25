@@ -287,3 +287,30 @@ test("covered-msi CLI --only ignores out-of-scope files in the report", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("covered-msi CLI passes --minimum when the report has no mutants", () => {
+  const dir = mkdtempSync(join(tmpdir(), "covered-msi-"));
+  try {
+    const reportPath = join(dir, "mutation.json");
+    writeFileSync(
+      reportPath,
+      JSON.stringify({
+        files: {
+          "src/location.ts": { mutants: [] },
+        },
+      }),
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      ["scripts/covered-msi.mjs", reportPath, "--only", "src/location.ts", "--minimum", "80"],
+      { encoding: "utf8" },
+    );
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /covered-MSI=0\.00%/);
+    assert.equal(result.stderr, "");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
