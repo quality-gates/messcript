@@ -71,7 +71,8 @@ async function main(argv) {
     ].join(" "),
   );
 
-  if (minimum !== undefined && coveredMsi < minimum) {
+  const total = killed + survived + noCoverage + timeout;
+  if (minimum !== undefined && total > 0 && coveredMsi < minimum) {
     console.error(`covered-MSI ${coveredMsi.toFixed(2)}% is below the ${minimum}% minimum`);
     process.exit(1);
   }
