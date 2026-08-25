@@ -3,6 +3,7 @@ import { getFunctionContext, getFunctionName } from "../ast/functions";
 import type { FunctionLike } from "../ast/functions";
 import type { ClassLike } from "../ast/classes";
 import type { Finding } from "../finding";
+import { locate } from "../location";
 
 export function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
   const modifiers = (node as ts.Node & { modifiers?: readonly ts.Modifier[] }).modifiers;
@@ -85,7 +86,7 @@ export function createCleanCodeFinding(
   context: string,
   message: string,
 ): Finding {
-  const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+  const position = locate(sourceFile, node.getStart(sourceFile));
   return {
     path: sourceFile.fileName,
     line: position.line + 1,

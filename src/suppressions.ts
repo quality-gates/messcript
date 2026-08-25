@@ -1,5 +1,6 @@
 import ts from "typescript";
 import type { Finding } from "./finding";
+import { locate } from "./location";
 
 type DirectiveKind = "disable-next-line" | "disable" | "enable";
 
@@ -45,7 +46,7 @@ function directivesIn(sourceFile: ts.SourceFile): readonly Directive[] {
   let token = scanner.scan();
   while (token !== ts.SyntaxKind.EndOfFileToken) {
     if (token === ts.SyntaxKind.SingleLineCommentTrivia || token === ts.SyntaxKind.MultiLineCommentTrivia) {
-      const position = sourceFile.getLineAndCharacterOfPosition(scanner.getTokenPos());
+      const position = locate(sourceFile, scanner.getTokenPos());
       const directive = parseDirective(scanner.getTokenText(), position.line + 1);
       if (directive) {
         directives.push(directive);
@@ -86,7 +87,7 @@ function suppressedRulesByLine(sourceFile: ts.SourceFile): ReadonlyMap<number, R
   const active = new Map<string, number>();
   const nextLine = new Map<number, Set<string>>();
   const result = new Map<number, ReadonlySet<string>>();
-  const lineCount = sourceFile.getLineAndCharacterOfPosition(sourceFile.end).line + 1;
+  const lineCount = locate(sourceFile, sourceFile.end).line + 1;
 
   for (let line = 1; line <= lineCount; line += 1) {
     // messcript-disable-next-line UnusedLocalVariable

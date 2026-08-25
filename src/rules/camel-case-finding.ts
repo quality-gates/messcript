@@ -1,5 +1,6 @@
 import ts from "typescript";
 import type { Finding } from "../finding";
+import { locate } from "../location";
 
 export function createCamelCaseFinding(
   node: ts.Node,
@@ -8,7 +9,7 @@ export function createCamelCaseFinding(
   context: string,
   message: string,
 ): Finding {
-  const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+  const position = locate(sourceFile, node.getStart(sourceFile));
   return {
     path: sourceFile.fileName,
     line: position.line + 1,

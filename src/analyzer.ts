@@ -4,7 +4,7 @@ import ts from "typescript";
 import { discoverSourceFiles, scriptKindForPath } from "./discovery";
 import type { DiscoveryOptions } from "./discovery";
 import type { Finding } from "./finding";
-import { compareLocations } from "./location";
+import { compareLocations, locate } from "./location";
 import { getRuleDefinition, runGlobalVariable, runRule } from "./rules/catalog";
 import type { RuleSelection } from "./rules/catalog";
 import { loadRulesets } from "./rulesets";
@@ -68,7 +68,7 @@ export function analyze(
       );
       const parseDiagnostics = (sourceFile as ts.SourceFile & { parseDiagnostics: readonly ts.Diagnostic[] }).parseDiagnostics;
       for (const diagnostic of parseDiagnostics) {
-        const position = sourceFile.getLineAndCharacterOfPosition(diagnostic.start ?? 0);
+        const position = locate(sourceFile, diagnostic.start ?? 0);
         const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, " ");
         errors.push({
           path,

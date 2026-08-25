@@ -2,6 +2,7 @@ import ts from "typescript";
 import { getFunctionContext, isFunctionLike } from "../ast/functions";
 import type { FunctionLike } from "../ast/functions";
 import type { Finding } from "../finding";
+import { locate } from "../location";
 
 export function enclosingFunction(node: ts.Node): FunctionLike | undefined {
   let current = node.parent;
@@ -27,7 +28,7 @@ export function createDesignFinding(
   context: string,
   message: string,
 ): Finding {
-  const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+  const position = locate(sourceFile, node.getStart(sourceFile));
   return {
     path: sourceFile.fileName,
     line: position.line + 1,
@@ -47,7 +48,7 @@ export function createDesignFindingAt(
   context: string,
   message: string,
 ): Finding {
-  const location = sourceFile.getLineAndCharacterOfPosition(position);
+  const location = locate(sourceFile, position);
   return {
     path: sourceFile.fileName,
     line: location.line + 1,
