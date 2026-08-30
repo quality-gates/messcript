@@ -14,10 +14,11 @@ import { isBooleanExpression, isBooleanType } from "../dist/metrics/boolean.js";
 import { findBooleanArgumentFlag, properties as booleanArgumentProperties } from "../dist/rules/boolean-argument-flag.js";
 import { findBooleanGetMethodName, properties as booleanGetProperties } from "../dist/rules/boolean-get-method-name.js";
 import { findCamelCaseClassName } from "../dist/rules/camel-case-class-name.js";
-import { findCamelCaseMethodName } from "../dist/rules/camel-case-method-name.js";
+import { findCamelCaseMethodName, properties as camelCaseMethodProperties } from "../dist/rules/camel-case-method-name.js";
 import { findCamelCaseParameterName } from "../dist/rules/camel-case-parameter-name.js";
-import { findCamelCasePropertyName } from "../dist/rules/camel-case-property-name.js";
-import { findCamelCaseVariableName } from "../dist/rules/camel-case-variable-name.js";
+import { findCamelCasePropertyName, properties as camelCasePropertyProperties } from "../dist/rules/camel-case-property-name.js";
+import { findCamelCaseVariableName, properties as camelCaseVariableProperties } from "../dist/rules/camel-case-variable-name.js";
+import { properties as camelCaseParameterProperties } from "../dist/rules/camel-case-parameter-name.js";
 import { isCamelCaseName, isPascalCaseName } from "../dist/rules/camel-case-utils.js";
 import { findConstantNamingConventions } from "../dist/rules/constant-naming-conventions.js";
 import { findLongClassName, properties as longClassProperties } from "../dist/rules/long-class-name.js";
@@ -195,6 +196,31 @@ export const goodValue = 3;
   assert.deepEqual(names(findCamelCasePropertyName(file)), ["bad_property"]);
   assert.deepEqual(names(findCamelCaseVariableName(file)).sort(), ["bad_local", "bad_variable"]);
   assert.deepEqual(names(findConstantNamingConventions(file)).sort(), ["bad_arrow", "bad_constant", "goodValue"]);
+});
+
+test("casing rules honor configured underscore allowances", () => {
+  const file = sourceFile(`
+class Example {
+  _privateField = 0;
+  _helperMethod(_value) { const _localValue = _value; return _localValue; }
+}
+`);
+
+  camelCaseMethodProperties["allow-underscore-test"] = true;
+  camelCasePropertyProperties["allow-underscore-test"] = true;
+  camelCaseParameterProperties["allow-underscore"] = true;
+  camelCaseVariableProperties["allow-underscore"] = true;
+  try {
+    assert.deepEqual(findCamelCaseMethodName(file), []);
+    assert.deepEqual(findCamelCasePropertyName(file), []);
+    assert.deepEqual(findCamelCaseParameterName(file), []);
+    assert.deepEqual(findCamelCaseVariableName(file), []);
+  } finally {
+    camelCaseMethodProperties["allow-underscore-test"] = false;
+    camelCasePropertyProperties["allow-underscore-test"] = false;
+    camelCaseParameterProperties["allow-underscore"] = false;
+    camelCaseVariableProperties["allow-underscore"] = false;
+  }
 });
 
 test("short and long naming rules honor idiomatic and threshold names", () => {

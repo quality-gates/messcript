@@ -10,9 +10,10 @@ export const priority = 1;
 export const properties = { "allow-underscore": false, "allow-underscore-test": false } as const;
 
 export function findCamelCasePropertyName(sourceFile: ts.SourceFile): Finding[] {
+  const allowUnderscore = properties["allow-underscore"] || properties["allow-underscore-test"];
   const findings: Finding[] = [];
   for (const property of collectProperties(sourceFile)) {
-    if (isCamelCaseName(property.name)) {
+    if (isCamelCaseName(property.name, allowUnderscore)) {
       continue;
     }
     findings.push(
