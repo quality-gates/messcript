@@ -62,7 +62,8 @@ function normalizedSuffixes(suffixes: readonly string[]): string[] {
 }
 
 function isSourceFile(path: string, suffixes: readonly string[]): boolean {
-  return suffixes.some((suffix) => path.endsWith(suffix));
+  const lowerCasePath = path.toLowerCase();
+  return suffixes.some((suffix) => lowerCasePath.endsWith(suffix));
 }
 
 function isExcluded(path: string, exclusions: readonly string[]): boolean {
@@ -171,6 +172,6 @@ export function scriptKindForPath(path: string, suffixes: readonly string[] = so
     case ".cjs":
       return ts.ScriptKind.JS;
     default:
-      return basename(path).endsWith(".d.ts") ? ts.ScriptKind.TS : ts.ScriptKind.JS;
+      return basename(path).toLowerCase().endsWith(".d.ts") ? ts.ScriptKind.TS : ts.ScriptKind.JS;
   }
 }

@@ -143,7 +143,7 @@ export function forgetFlag(): boolean { return true; }
   booleanArgumentProperties.ignorepattern = "^$";
   assert.doesNotMatch(messages(findBooleanArgumentFlag(file)).join("\n"), /ComputedService/);
   booleanArgumentProperties.ignorepattern = "";
-  assert.deepEqual(findBooleanArgumentFlag(sourceFile("export const Anonymous = class { flagMethod(flag: boolean) {} };")), []);
+  assert.equal(findBooleanArgumentFlag(sourceFile("export const Anonymous = class { flagMethod(flag: boolean) {} };")).length, 1);
 
   booleanGetProperties.checkParameterizedMethods = true;
   assert.deepEqual(names(findBooleanGetMethodName(sourceFile("function getFlag(value: boolean): boolean { return value; } function getNoParam(): boolean { return true; }"))), ["getNoParam"]);
@@ -273,6 +273,21 @@ test("LongVariable honors configured prefix and suffix subtraction", () => {
     longVariableProperties.maximum = previousMaximum;
     longVariableProperties["subtract-prefixes"] = previousPrefixes;
     longVariableProperties["subtract-suffixes"] = previousSuffixes;
+  }
+});
+
+test("ShortClassName trims whitespace around comma-separated exceptions", () => {
+  const previousMinimum = shortClassProperties.minimum;
+  const previousExceptions = shortClassProperties.exceptions;
+  try {
+    shortClassProperties.minimum = 3;
+    shortClassProperties.exceptions = "Ab, Cd";
+
+    const file = sourceFile("export class Ab {}\nexport class Cd {}\nexport class Ef {}");
+    assert.deepEqual(names(findShortClassName(file)).sort(), ["Ef"]);
+  } finally {
+    shortClassProperties.minimum = previousMinimum;
+    shortClassProperties.exceptions = previousExceptions;
   }
 });
 

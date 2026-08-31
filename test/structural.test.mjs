@@ -259,6 +259,41 @@ class Small {
   classComplexityProperties.maximum = 50;
 });
 
+test("TooManyMethods and TooManyPublicMethods honor a configured ignorepattern and default to case-insensitive accessor prefixes", () => {
+  const file = sourceFile(`
+class Widget {
+  fooBar() {}
+  SETNAME() {}
+}
+`);
+
+  // Default: uppercase "SETNAME" is excluded case-insensitively, leaving only
+  // fooBar counted, so a max of 1 does not trip.
+  methodsProperties.maxmethods = 1;
+  assert.equal(findTooManyMethods(file).length, 0);
+  publicMethodsProperties.maxmethods = 1;
+  assert.equal(findTooManyPublicMethods(file).length, 0);
+
+  // Configuring ignorepattern to exclude fooBar instead means SETNAME is now
+  // counted (no longer excluded by the default), still 1 method <= max 1.
+  methodsProperties.ignorepattern = "^fooBar$";
+  assert.equal(findTooManyMethods(file).length, 0);
+  publicMethodsProperties.ignorepattern = "^fooBar$";
+  assert.equal(findTooManyPublicMethods(file).length, 0);
+
+  // A configured pattern that matches nothing excludes nothing: both methods
+  // are counted, tripping the max-1 threshold.
+  methodsProperties.ignorepattern = "^nomatch$";
+  assert.equal(findTooManyMethods(file).length, 1);
+  publicMethodsProperties.ignorepattern = "^nomatch$";
+  assert.equal(findTooManyPublicMethods(file).length, 1);
+
+  methodsProperties.ignorepattern = "^(?:[sS][eE][tT]|[gG][eE][tT]|[iI][sS]|[hH][aA][sS]|[wW][iI][tT][hH])";
+  publicMethodsProperties.ignorepattern = "^(?:[sS][eE][tT]|[gG][eE][tT]|[iI][sS]|[hH][aA][sS]|[wW][iI][tT][hH])";
+  methodsProperties.maxmethods = 25;
+  publicMethodsProperties.maxmethods = 10;
+});
+
 test("global, coupling, and cohesion rules track structural dependencies and state", () => {
   const file = sourceFile(`
 import DefaultThing, { NamedThing as Alias } from "package";
