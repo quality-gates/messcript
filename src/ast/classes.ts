@@ -12,7 +12,13 @@ export type ClassMethod =
 
 export type ClassField = ts.ParameterDeclaration | ts.PropertyDeclaration;
 
-const ignoredMethodPattern = /^(set|get|is|has|with)/i;
+/**
+ * Default `ignorepattern` for method-name exclusion (accessor-style prefixes),
+ * matched case-insensitively via explicit upper/lower character classes since
+ * `compileIgnorePattern` compiles patterns without regex flags.
+ */
+export const defaultIgnoredMethodPattern =
+  "^(?:[sS][eE][tT]|[gG][eE][tT]|[iI][sS]|[hH][aA][sS]|[wW][iI][tT][hH])";
 
 function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
   const modifiers = (node as ts.Node & { modifiers?: readonly ts.Modifier[] }).modifiers;
@@ -127,7 +133,11 @@ export function getClassMethodName(node: ClassMethod, sourceFile: ts.SourceFile)
   return memberName(node, sourceFile);
 }
 
-export function isIgnoredClassMethod(node: ClassMethod, sourceFile: ts.SourceFile): boolean {
+export function isIgnoredClassMethod(
+  node: ClassMethod,
+  sourceFile: ts.SourceFile,
+  ignoreRegex: RegExp | undefined,
+): boolean {
   const name = getClassMethodName(node, sourceFile);
-  return name !== undefined && ignoredMethodPattern.test(name);
+  return name !== undefined && ignoreRegex !== undefined && ignoreRegex.test(name);
 }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import ts from "typescript";
 import { test } from "node:test";
 import {
+  defaultIgnoredMethodPattern,
   forEachClass,
   getClassContext,
   getClassFields,
@@ -97,8 +98,11 @@ const expressionFunction = function expressionFunction() {};
   assert.equal(isPublicClassMember(getClassFields(namedClass)[1]), false);
   assert.equal(isPublicClassMember(getClassFields(namedClass)[3]), false);
   assert.equal(isPublicClassMember(methods[3]), true);
-  assert.equal(isIgnoredClassMethod(methods[3], file), true);
-  assert.equal(isIgnoredClassMethod(methods[4], file), false);
+  const defaultIgnoreRegex = new RegExp(defaultIgnoredMethodPattern);
+  assert.equal(isIgnoredClassMethod(methods[3], file, defaultIgnoreRegex), true);
+  assert.equal(isIgnoredClassMethod(methods[4], file, defaultIgnoreRegex), false);
+  assert.equal(isIgnoredClassMethod(methods[3], file, undefined), false);
+  assert.equal(isIgnoredClassMethod(methods[4], file, /^compute$/), true);
 
   const allFunctions = [];
   const functionsWithBodies = [];
