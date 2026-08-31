@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import os, { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { Writable } from "node:stream";
@@ -326,6 +326,44 @@ test("compileIgnorePattern accepts empty and valid patterns, rejects bad ones", 
     return true;
   });
   assert.throws(() => compileIgnorePattern("(a|a)*$"), IgnorePatternError);
+});
+
+test("compileIgnorePattern accepts cheap patterns under simulated CPU contention", () => {
+  // Oversubscribe the machine's cores with busy-looping child processes so
+  // interpreter-boot/spawn wall-clock jitter is provoked, then repeatedly
+  // compile trivially cheap, uncached patterns. A correct implementation
+  // must measure only probe-evaluation cost, not process-spawn overhead,
+  // so none of these should throw regardless of load.
+  const cpuCount = Math.max(os.cpus().length, 1);
+  const busy = [];
+  for (let i = 0; i < cpuCount * 4; i++) {
+    busy.push(
+      spawn(process.execPath, [
+        "-e",
+        "const end = Date.now() + 5000; while (Date.now() < end) { Math.sqrt(Math.random()); }",
+      ]),
+    );
+  }
+
+  try {
+    const failures = [];
+    for (let i = 0; i < 20; i++) {
+      const pattern = `^x${i}$`;
+      try {
+        const regex = compileIgnorePattern(pattern);
+        assert.ok(regex instanceof RegExp);
+      } catch (error) {
+        failures.push({ pattern, message: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    assert.deepEqual(
+      failures,
+      [],
+      `expected no failures under load, got: ${JSON.stringify(failures)}`,
+    );
+  } finally {
+    for (const child of busy) child.kill();
+  }
 });
 
 test("testIgnorePattern respects missing regex and subject length cap", () => {
