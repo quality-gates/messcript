@@ -20,6 +20,7 @@
       "test/ignore-pattern.test.mjs",
       "test/unused.test.mjs",
       "test/structural.test.mjs",
+      "test/discovery.test.mjs",
       "test/rulesets.test.mjs"
     ]
   },

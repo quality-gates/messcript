@@ -62,7 +62,8 @@ function normalizedSuffixes(suffixes: readonly string[]): string[] {
 }
 
 function isSourceFile(path: string, suffixes: readonly string[]): boolean {
-  return suffixes.some((suffix) => path.endsWith(suffix));
+  const lowerCasePath = path.toLowerCase();
+  return suffixes.some((suffix) => lowerCasePath.endsWith(suffix));
 }
 
 function isExcluded(path: string, exclusions: readonly string[]): boolean {
