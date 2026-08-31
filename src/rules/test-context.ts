@@ -1,3 +1,4 @@
+// messcript-disable ConstantNamingConventions
 import { basename, sep } from "node:path";
 
 const testDirectoryNames = new Set(["__spec__", "__specs__", "__test__", "__tests__", "spec", "specs", "test", "tests"]);
