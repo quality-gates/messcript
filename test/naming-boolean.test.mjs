@@ -242,6 +242,16 @@ export const Component = () => true;
   shortVariableProperties.exceptions = "";
 });
 
+test("ShortVariable trims whitespace around comma-separated exceptions", () => {
+  const file = sourceFile(`
+export const a = 1;
+export const ab = 2;
+`);
+  shortVariableProperties.exceptions = "a, ab";
+  assert.deepEqual(names(findShortVariable(file)).sort(), []);
+  shortVariableProperties.exceptions = "";
+});
+
 test("LongClassName honors configured prefix and suffix subtraction", () => {
   const previousMaximum = longClassProperties.maximum;
   const previousPrefixes = longClassProperties["subtract-prefixes"];
