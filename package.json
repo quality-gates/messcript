@@ -1,6 +1,6 @@
 {
   "name": "messcript",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "An idiomatic JavaScript and TypeScript mess detector.",
   "license": "MIT",
   "type": "commonjs",
