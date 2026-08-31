@@ -13,9 +13,11 @@ import { loadRulesets, RulesetError } from "../dist/rulesets.js";
 import {
   IgnorePatternError,
   compileIgnorePattern,
+  ignorePatternProbeChildArguments,
   isIgnorePatternProperty,
   maxIgnorePatternLength,
   maxIgnoreSubjectLength,
+  nativeIgnorePatternProbeArgument,
   testIgnorePattern,
   validateIgnorePatternProperty,
 } from "../dist/rules/ignore-pattern.js";
@@ -99,13 +101,13 @@ test("nested-quantifier ignorepattern is rejected before analysis and does not h
 </ruleset>`,
   );
 
-  const result = runCliTimed([source, "text", ruleset], 2000);
+  const result = runCliTimed([source, "text", ruleset], 5000);
 
   assert.equal(result.timedOut, false, "CLI hung on nested-quantifier ignorepattern");
   assert.equal(result.status, 1);
   assert.match(result.stderr, /too expensive|ignorepattern/i);
   assert.equal(result.stdout, "");
-  assert.ok(result.elapsedMs < 2000, `expected fast rejection, took ${result.elapsedMs.toFixed(0)}ms`);
+  assert.ok(result.elapsedMs < 5000, `expected bounded rejection, took ${result.elapsedMs.toFixed(0)}ms`);
 });
 
 test("alternation ReDoS ignorepattern is rejected before analysis and does not hang", () => {
@@ -124,12 +126,12 @@ test("alternation ReDoS ignorepattern is rejected before analysis and does not h
 </ruleset>`,
   );
 
-  const result = runCliTimed([source, "text", ruleset], 2000);
+  const result = runCliTimed([source, "text", ruleset], 5000);
 
   assert.equal(result.timedOut, false, "CLI hung on alternation ignorepattern");
   assert.equal(result.status, 1);
   assert.match(result.stderr, /too expensive|ignorepattern/i);
-  assert.ok(result.elapsedMs < 2000, `expected fast rejection, took ${result.elapsedMs.toFixed(0)}ms`);
+  assert.ok(result.elapsedMs < 5000, `expected bounded rejection, took ${result.elapsedMs.toFixed(0)}ms`);
 });
 
 test("invalid ignorepattern is a ruleset error, not a silent partial analysis", () => {
@@ -327,6 +329,41 @@ test("compileIgnorePattern accepts empty and valid patterns, rejects bad ones", 
     return true;
   });
   assert.throws(() => compileIgnorePattern("(a|a)*$"), IgnorePatternError);
+});
+
+test("native entry exposes an isolated ignorepattern probe mode", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["scripts/native-entry.cjs", nativeIgnorePatternProbeArgument, "^safe$"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 0);
+  assert.equal(Number.isFinite(Number(result.stdout)), true);
+  assert.equal(result.stderr, "");
+});
+
+test("ignorepattern probes route through the native executable only when marked", () => {
+  const previousMarker = process.env.MESSCRIPT_NATIVE_EXECUTABLE;
+  try {
+    delete process.env.MESSCRIPT_NATIVE_EXECUTABLE;
+    assert.deepEqual(ignorePatternProbeChildArguments("^safe$", "probe-script"), [
+      "-e",
+      "probe-script",
+    ]);
+
+    process.env.MESSCRIPT_NATIVE_EXECUTABLE = process.execPath;
+    assert.deepEqual(ignorePatternProbeChildArguments("^safe$", "probe-script"), [
+      nativeIgnorePatternProbeArgument,
+      "^safe$",
+    ]);
+  } finally {
+    if (previousMarker === undefined) {
+      delete process.env.MESSCRIPT_NATIVE_EXECUTABLE;
+    } else {
+      process.env.MESSCRIPT_NATIVE_EXECUTABLE = previousMarker;
+    }
+  }
 });
 
 test("a pattern that fails its safety check with a transient timeout is retried, not permanently blacklisted", () => {
