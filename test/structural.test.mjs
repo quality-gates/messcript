@@ -129,6 +129,37 @@ const greeting = \`hello \${\`nested \${name}\`}\`;
 function work() {}
 `);
   assert.equal(findDevelopmentCodeFragment(nested).length, 1);
+
+  const braceInInterpolation = sourceFile(`
+const value = \`text \${(() => { return { a: 1 }; })()} more\`;
+// TODO after brace-heavy interpolation
+function work() {}
+`);
+  assert.equal(findDevelopmentCodeFragment(braceInInterpolation).length, 1);
+
+  const commentBetweenNestedBraceAndRealClose = sourceFile(`
+const value = \`outer \${(() => { return 1; })() /* TODO mid-expression */ } tail\`;
+// TODO after full expression
+function work() {}
+`);
+  assert.equal(findDevelopmentCodeFragment(commentBetweenNestedBraceAndRealClose).length, 2);
+
+  const multipleSubstitutions = sourceFile(`
+const x = 1;
+const y = 2;
+const value = \`a \${x} b \${y} c\`;
+// TODO after multiple substitutions
+function work() {}
+`);
+  assert.equal(findDevelopmentCodeFragment(multipleSubstitutions).length, 1);
+
+  const noTemplateAtAll = sourceFile(`
+function plain() {
+  return { a: 1 };
+}
+// TODO after plain braces, no template ever scanned
+`);
+  assert.equal(findDevelopmentCodeFragment(noTemplateAtAll).length, 1);
 });
 
 test("duplicate keys recognize static literals and ignore dynamic keys", () => {
