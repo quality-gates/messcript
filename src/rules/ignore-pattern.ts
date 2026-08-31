@@ -12,7 +12,18 @@ const safetyProbes = [
   `${"a".repeat(32)}${"b".repeat(32)}!`,
 ] as const;
 
+/** Budget for probe-only regex evaluation time, as self-reported by the child process. */
 const safetyTimeoutMs = 80;
+
+/**
+ * Wall-clock backstop for the whole child process (interpreter boot + probe
+ * evaluation). This is intentionally generous: it exists only to bound truly
+ * runaway patterns (catastrophic backtracking that never returns), not to
+ * budget the pattern itself. Boot/spawn jitter under system load must not
+ * approach this value for it to remain a pure backstop rather than a source
+ * of false rejections.
+ */
+const safetyHardTimeoutMs = 1000;
 
 export class IgnorePatternError extends Error {
   constructor(message: string) {
@@ -40,9 +51,21 @@ function isTimedOut(result: ReturnType<typeof spawnSync>): boolean {
 /**
  * Reject patterns that take too long against fixed adversarial probes.
  * Runs in a child process so a pathological pattern cannot hang this process.
+ *
+ * The child self-times only the regex-construction-and-probe-evaluation
+ * work (via `process.hrtime.bigint()`) and reports that figure back over
+ * stdout; that figure, not the parent's wall-clock observation of the
+ * whole child lifetime, is what gets compared against `safetyTimeoutMs`.
+ * This deliberately excludes Node interpreter startup and process-spawn
+ * overhead from the budget, since those are machine/load-dependent and
+ * unrelated to the cost of the pattern itself. `safetyHardTimeoutMs` is
+ * a separate, generous wall-clock backstop that only fires for patterns
+ * pathological enough to never return (catastrophic backtracking), not
+ * for ordinary spawn jitter.
  */
 function assertPatternIsCheap(pattern: string): void {
   const script = `
+const start = process.hrtime.bigint();
 const pattern = ${JSON.stringify(pattern)};
 const probes = ${JSON.stringify([...safetyProbes])};
 try {
@@ -50,6 +73,8 @@ try {
   for (const probe of probes) {
     regex.test(probe);
   }
+  const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
+  process.stdout.write(String(elapsedMs));
   process.exit(0);
 } catch {
   process.exit(2);
@@ -57,7 +82,7 @@ try {
 `;
   const result = spawnSync(process.execPath, ["-e", script], {
     encoding: "utf8",
-    timeout: safetyTimeoutMs,
+    timeout: safetyHardTimeoutMs,
   });
 
   if (isTimedOut(result)) {
@@ -69,6 +94,11 @@ try {
         ? `Invalid ignorepattern: ${pattern}`
         : `ignorepattern failed safety evaluation with exit status ${String(result.status)}.`,
     );
+  }
+
+  const probeElapsedMs = Number(result.stdout);
+  if (!Number.isFinite(probeElapsedMs) || probeElapsedMs > safetyTimeoutMs) {
+    throw new IgnorePatternError("ignorepattern is too expensive to evaluate (possible ReDoS).");
   }
 }
 
