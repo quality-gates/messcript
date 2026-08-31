@@ -171,6 +171,6 @@ export function scriptKindForPath(path: string, suffixes: readonly string[] = so
     case ".cjs":
       return ts.ScriptKind.JS;
     default:
-      return basename(path).endsWith(".d.ts") ? ts.ScriptKind.TS : ts.ScriptKind.JS;
+      return basename(path).toLowerCase().endsWith(".d.ts") ? ts.ScriptKind.TS : ts.ScriptKind.JS;
   }
 }
