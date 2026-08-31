@@ -143,7 +143,7 @@ export function forgetFlag(): boolean { return true; }
   booleanArgumentProperties.ignorepattern = "^$";
   assert.doesNotMatch(messages(findBooleanArgumentFlag(file)).join("\n"), /ComputedService/);
   booleanArgumentProperties.ignorepattern = "";
-  assert.deepEqual(findBooleanArgumentFlag(sourceFile("export const Anonymous = class { flagMethod(flag: boolean) {} };")), []);
+  assert.equal(findBooleanArgumentFlag(sourceFile("export const Anonymous = class { flagMethod(flag: boolean) {} };")).length, 1);
 
   booleanGetProperties.checkParameterizedMethods = true;
   assert.deepEqual(names(findBooleanGetMethodName(sourceFile("function getFlag(value: boolean): boolean { return value; } function getNoParam(): boolean { return true; }"))), ["getNoParam"]);
