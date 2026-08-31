@@ -113,6 +113,24 @@ function catches() {
   developmentProperties.markers = "TODO,FIXME,HACK";
 });
 
+test("DevelopmentCodeFragment finds marker comments after template expressions with interpolation", () => {
+  const file = sourceFile(`
+const name = "world";
+const greeting = \`hello \${name}\`;
+// TODO fix this later
+function work() {}
+`);
+  assert.equal(findDevelopmentCodeFragment(file).length, 1);
+
+  const nested = sourceFile(`
+const name = "world";
+const greeting = \`hello \${\`nested \${name}\`}\`;
+// TODO fix this too
+function work() {}
+`);
+  assert.equal(findDevelopmentCodeFragment(nested).length, 1);
+});
+
 test("duplicate keys recognize static literals and ignore dynamic keys", () => {
   const file = sourceFile(`
 const value = 1;

@@ -30,6 +30,7 @@ function commentFindings(sourceFile: ts.SourceFile, markers: readonly string[]):
   }
   const findings: Finding[] = [];
   const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, sourceFile.languageVariant, sourceFile.text);
+  const templateExpressionDepths: number[] = [];
   let token = scanner.scan();
   while (token !== ts.SyntaxKind.EndOfFileToken) {
     if (token === ts.SyntaxKind.SingleLineCommentTrivia || token === ts.SyntaxKind.MultiLineCommentTrivia) {
@@ -46,6 +47,24 @@ function commentFindings(sourceFile: ts.SourceFile, markers: readonly string[]):
             "Development-only marker found in production source.",
           ),
         );
+      }
+    }
+
+    if (token === ts.SyntaxKind.TemplateHead) {
+      templateExpressionDepths.push(1);
+    } else if (templateExpressionDepths.length > 0) {
+      const depth = templateExpressionDepths.length - 1;
+      if (token === ts.SyntaxKind.OpenBraceToken) {
+        templateExpressionDepths[depth] += 1;
+      } else if (token === ts.SyntaxKind.CloseBraceToken) {
+        templateExpressionDepths[depth] -= 1;
+        if (templateExpressionDepths[depth] === 0) {
+          templateExpressionDepths.pop();
+          token = scanner.reScanTemplateToken(false);
+          if (token === ts.SyntaxKind.TemplateMiddle) {
+            templateExpressionDepths.push(1);
+          }
+        }
       }
     }
     token = scanner.scan();
