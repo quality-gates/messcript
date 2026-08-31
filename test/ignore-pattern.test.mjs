@@ -323,6 +323,7 @@ test("compileIgnorePattern accepts empty and valid patterns, rejects bad ones", 
   assert.throws(() => compileIgnorePattern("(a+)+$"), (error) => {
     assert.ok(error instanceof IgnorePatternError);
     assert.match(error.message, /too expensive/);
+    assert.equal(error.transient, true);
     return true;
   });
   assert.throws(() => compileIgnorePattern("(a|a)*$"), IgnorePatternError);
