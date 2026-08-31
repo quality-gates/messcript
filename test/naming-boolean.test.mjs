@@ -14,10 +14,10 @@ import { isBooleanExpression, isBooleanType } from "../dist/metrics/boolean.js";
 import { findBooleanArgumentFlag, properties as booleanArgumentProperties } from "../dist/rules/boolean-argument-flag.js";
 import { findBooleanGetMethodName, properties as booleanGetProperties } from "../dist/rules/boolean-get-method-name.js";
 import { findCamelCaseClassName } from "../dist/rules/camel-case-class-name.js";
-import { findCamelCaseMethodName } from "../dist/rules/camel-case-method-name.js";
-import { findCamelCaseParameterName } from "../dist/rules/camel-case-parameter-name.js";
-import { findCamelCasePropertyName } from "../dist/rules/camel-case-property-name.js";
-import { findCamelCaseVariableName } from "../dist/rules/camel-case-variable-name.js";
+import { findCamelCaseMethodName, properties as camelCaseMethodProperties } from "../dist/rules/camel-case-method-name.js";
+import { findCamelCaseParameterName, properties as camelCaseParameterProperties } from "../dist/rules/camel-case-parameter-name.js";
+import { findCamelCasePropertyName, properties as camelCasePropertyProperties } from "../dist/rules/camel-case-property-name.js";
+import { findCamelCaseVariableName, properties as camelCaseVariableProperties } from "../dist/rules/camel-case-variable-name.js";
 import { isCamelCaseName, isPascalCaseName } from "../dist/rules/camel-case-utils.js";
 import { findConstantNamingConventions } from "../dist/rules/constant-naming-conventions.js";
 import { findLongClassName, properties as longClassProperties } from "../dist/rules/long-class-name.js";
@@ -195,6 +195,62 @@ export const goodValue = 3;
   assert.deepEqual(names(findCamelCasePropertyName(file)), ["bad_property"]);
   assert.deepEqual(names(findCamelCaseVariableName(file)).sort(), ["bad_local", "bad_variable"]);
   assert.deepEqual(names(findConstantNamingConventions(file)).sort(), ["bad_arrow", "bad_constant", "goodValue"]);
+});
+
+test("camelCase rules honor allow-underscore for a leading underscore, and allow-underscore-test scoped to test files", () => {
+  const file = sourceFile(`
+class Example {
+  _privateField = 1;
+  _badField_ = 2;
+  _helperMethod(_parameter) { const _localValue = _parameter; return _localValue; }
+}
+`);
+  const testFile = sourceFile(
+    `
+class Example {
+  _privateField = 1;
+  _helperMethod(_parameter) { return _parameter; }
+}
+`,
+    "example.test.ts",
+  );
+
+  // Baseline: unconfigured, underscore-prefixed names are still flagged.
+  assert.deepEqual(names(findCamelCaseParameterName(file)), ["_parameter"]);
+  assert.deepEqual(names(findCamelCaseVariableName(file)), ["_localValue"]);
+  assert.deepEqual(names(findCamelCaseMethodName(file)), ["_helperMethod"]);
+  assert.deepEqual(names(findCamelCasePropertyName(file)).sort(), ["_badField_", "_privateField"]);
+
+  // allow-underscore permits a single leading underscore, but not other invalid names.
+  camelCaseParameterProperties["allow-underscore"] = true;
+  camelCaseVariableProperties["allow-underscore"] = true;
+  camelCaseMethodProperties["allow-underscore"] = true;
+  camelCasePropertyProperties["allow-underscore"] = true;
+  try {
+    assert.deepEqual(names(findCamelCaseParameterName(file)), []);
+    assert.deepEqual(names(findCamelCaseVariableName(file)), []);
+    assert.deepEqual(names(findCamelCaseMethodName(file)), []);
+    assert.deepEqual(names(findCamelCasePropertyName(file)), ["_badField_"]);
+  } finally {
+    camelCaseParameterProperties["allow-underscore"] = false;
+    camelCaseVariableProperties["allow-underscore"] = false;
+    camelCaseMethodProperties["allow-underscore"] = false;
+    camelCasePropertyProperties["allow-underscore"] = false;
+  }
+
+  // allow-underscore-test only relaxes method/property checks in test-context files,
+  // independently of allow-underscore.
+  camelCaseMethodProperties["allow-underscore-test"] = true;
+  camelCasePropertyProperties["allow-underscore-test"] = true;
+  try {
+    assert.deepEqual(names(findCamelCaseMethodName(file)), ["_helperMethod"]);
+    assert.deepEqual(names(findCamelCasePropertyName(file)).sort(), ["_badField_", "_privateField"]);
+    assert.deepEqual(names(findCamelCaseMethodName(testFile)), []);
+    assert.deepEqual(names(findCamelCasePropertyName(testFile)), []);
+  } finally {
+    camelCaseMethodProperties["allow-underscore-test"] = false;
+    camelCasePropertyProperties["allow-underscore-test"] = false;
+  }
 });
 
 test("short and long naming rules honor idiomatic and threshold names", () => {
