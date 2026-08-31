@@ -26,9 +26,19 @@ const safetyTimeoutMs = 80;
 const safetyHardTimeoutMs = 1000;
 
 export class IgnorePatternError extends Error {
-  constructor(message: string) {
+  /**
+   * True when this error reflects a transient evaluation condition (e.g. a
+   * safety-check timeout that may have been caused by system load) rather
+   * than a permanent property of the pattern itself (e.g. a syntax error).
+   * Transient errors must not be cached indefinitely: the pattern deserves
+   * a fresh evaluation on a later lookup.
+   */
+  readonly transient: boolean;
+
+  constructor(message: string, options?: { readonly transient?: boolean }) {
     super(message);
     this.name = "IgnorePatternError";
+    this.transient = options?.transient ?? false;
   }
 }
 
@@ -86,7 +96,10 @@ try {
   });
 
   if (isTimedOut(result)) {
-    throw new IgnorePatternError("ignorepattern is too expensive to evaluate (possible ReDoS).");
+    throw new IgnorePatternError(
+      "ignorepattern is too expensive to evaluate (possible ReDoS).",
+      { transient: true },
+    );
   }
   if (result.status !== 0) {
     throw new IgnorePatternError(
@@ -98,11 +111,14 @@ try {
 
   const probeElapsedMs = Number(result.stdout);
   if (!Number.isFinite(probeElapsedMs) || probeElapsedMs > safetyTimeoutMs) {
-    throw new IgnorePatternError("ignorepattern is too expensive to evaluate (possible ReDoS).");
+    throw new IgnorePatternError(
+      "ignorepattern is too expensive to evaluate (possible ReDoS).",
+      { transient: true },
+    );
   }
 }
 
-function compileUncached(pattern: string): RegExp {
+function compileUncached(pattern: string, assertCheap: (pattern: string) => void): RegExp {
   if (pattern.length > maxIgnorePatternLength) {
     throw new IgnorePatternError(
       `ignorepattern exceeds maximum length of ${maxIgnorePatternLength}.`,
@@ -116,15 +132,28 @@ function compileUncached(pattern: string): RegExp {
     throw new IgnorePatternError(`Invalid ignorepattern: ${syntaxErrorMessage(error)}`);
   }
 
-  assertPatternIsCheap(pattern);
+  assertCheap(pattern);
   return regex;
 }
 
 /**
  * Compile a ruleset ignorepattern.
  * Empty string means "no ignore". Invalid or expensive patterns throw IgnorePatternError.
+ *
+ * `assertCheap` is an injection seam for tests; production callers should
+ * never pass it and get the real ReDoS safety check.
+ *
+ * Permanent errors (e.g. genuine syntax errors) are cached indefinitely,
+ * so a pattern that can never succeed is not re-evaluated on every lookup.
+ * Transient errors (a safety-check timeout, which can be caused by
+ * incidental system load rather than the pattern itself) are deliberately
+ * NOT cached: a later lookup for the same pattern re-attempts compilation
+ * instead of being permanently rejected based on one unlucky evaluation.
  */
-export function compileIgnorePattern(pattern: string): RegExp | undefined {
+export function compileIgnorePattern(
+  pattern: string,
+  assertCheap: (pattern: string) => void = assertPatternIsCheap,
+): RegExp | undefined {
   if (pattern.length === 0) {
     return undefined;
   }
@@ -138,14 +167,16 @@ export function compileIgnorePattern(pattern: string): RegExp | undefined {
   }
 
   try {
-    const regex = compileUncached(pattern);
+    const regex = compileUncached(pattern, assertCheap);
     compileCache.set(pattern, { regex });
     return regex;
   } catch (error) {
     const ignoreError = error instanceof IgnorePatternError
       ? error
       : new IgnorePatternError(syntaxErrorMessage(error));
-    compileCache.set(pattern, { error: ignoreError });
+    if (!ignoreError.transient) {
+      compileCache.set(pattern, { error: ignoreError });
+    }
     throw ignoreError;
   }
 }

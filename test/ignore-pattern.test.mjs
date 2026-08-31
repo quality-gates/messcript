@@ -328,6 +328,53 @@ test("compileIgnorePattern accepts empty and valid patterns, rejects bad ones", 
   assert.throws(() => compileIgnorePattern("(a|a)*$"), IgnorePatternError);
 });
 
+test("a pattern that fails its safety check with a transient timeout is retried, not permanently blacklisted", () => {
+  const pattern = `^retry-after-transient-timeout-${Math.random()}$`;
+  let calls = 0;
+  const flakyAssertCheap = () => {
+    calls++;
+    if (calls === 1) {
+      throw new IgnorePatternError(
+        "ignorepattern is too expensive to evaluate (possible ReDoS).",
+        { transient: true },
+      );
+    }
+  };
+
+  assert.throws(() => compileIgnorePattern(pattern, flakyAssertCheap), IgnorePatternError);
+  assert.equal(calls, 1);
+
+  // A later lookup must re-attempt compilation instead of returning the
+  // stale timeout error from the cache.
+  const regex = compileIgnorePattern(pattern, flakyAssertCheap);
+  assert.equal(calls, 2, "expected the safety check to run again rather than serve a cached timeout");
+  assert.ok(regex instanceof RegExp);
+  assert.equal(regex.test(pattern.slice(1, -1)), true);
+
+  // Once compiled successfully, subsequent lookups hit the regex cache and
+  // must not re-invoke the safety check at all.
+  const cachedAgain = compileIgnorePattern(pattern, flakyAssertCheap);
+  assert.equal(calls, 2);
+  assert.equal(cachedAgain, regex);
+});
+
+test("a pattern that fails its safety check with a genuine (non-transient) error stays blacklisted", () => {
+  const pattern = `^permanently-rejected-${Math.random()}$`;
+  let calls = 0;
+  const alwaysRejects = () => {
+    calls++;
+    throw new IgnorePatternError("ignorepattern is too expensive to evaluate (possible ReDoS).");
+  };
+
+  assert.throws(() => compileIgnorePattern(pattern, alwaysRejects), IgnorePatternError);
+  assert.equal(calls, 1);
+
+  // A later lookup must return the cached error without re-invoking the
+  // (expensive) safety check again.
+  assert.throws(() => compileIgnorePattern(pattern, alwaysRejects), IgnorePatternError);
+  assert.equal(calls, 1, "expected the cached permanent error to be reused, not re-evaluated");
+});
+
 test("compileIgnorePattern accepts cheap patterns under simulated CPU contention", () => {
   // Oversubscribe the machine's cores with busy-looping child processes so
   // interpreter-boot/spawn wall-clock jitter is provoked, then repeatedly
