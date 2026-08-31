@@ -276,6 +276,21 @@ test("LongVariable honors configured prefix and suffix subtraction", () => {
   }
 });
 
+test("ShortClassName trims whitespace around comma-separated exceptions", () => {
+  const previousMinimum = shortClassProperties.minimum;
+  const previousExceptions = shortClassProperties.exceptions;
+  try {
+    shortClassProperties.minimum = 3;
+    shortClassProperties.exceptions = "Ab, Cd";
+
+    const file = sourceFile("export class Ab {}\nexport class Cd {}\nexport class Ef {}");
+    assert.deepEqual(names(findShortClassName(file)).sort(), ["Ef"]);
+  } finally {
+    shortClassProperties.minimum = previousMinimum;
+    shortClassProperties.exceptions = previousExceptions;
+  }
+});
+
 test("ShortMethodName honors configured exceptions", () => {
   const previousMinimum = shortMethodProperties.minimum;
   const previousExceptions = shortMethodProperties.exceptions;
