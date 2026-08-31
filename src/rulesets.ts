@@ -102,9 +102,9 @@ function parseXml(source: string): XmlNode {
   let root: XmlNode | undefined;
   let cursor = 0;
 
-  function appendText(text: string): void {
+  function appendText(text: string, verbatim = false): void {
     if (stack.length > 0) {
-      stack[stack.length - 1].text += decodeXml(text);
+      stack[stack.length - 1].text += verbatim ? text : decodeXml(text);
     } else if (text.trim().length > 0) {
       throw new Error("XML has text outside its root element");
     }
@@ -131,7 +131,7 @@ function parseXml(source: string): XmlNode {
       if (end === -1) {
         throw new Error("XML CDATA section is not closed");
       }
-      appendText(source.slice(open + 9, end));
+      appendText(source.slice(open + 9, end), true);
       cursor = end + 3;
       continue;
     }
