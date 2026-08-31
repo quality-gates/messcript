@@ -12,6 +12,7 @@ import {
   isPublicFunction,
 } from "./clean-code-finding";
 import { compileIgnorePattern, testIgnorePattern } from "./ignore-pattern";
+import { parseCommaSeparatedNames } from "./naming-utils";
 
 export const ruleName = "BooleanArgumentFlag";
 export const priority = 1;
@@ -49,7 +50,7 @@ function booleanBindingIdentifiers(name: ts.BindingName, initializer: ts.Express
 
 function isIgnored(node: ts.Node, sourceFile: ts.SourceFile, ignoreRegex: RegExp | undefined): boolean {
   const owner = enclosingClass(node);
-  if (owner && properties.exceptions.split(",").map((value) => value.trim()).includes(owner.name?.text ?? "")) {
+  if (owner && parseCommaSeparatedNames(properties.exceptions).includes(owner.name?.text ?? "")) {
     return true;
   }
   const methodName = ts.isFunctionLike(node) && node.name && !ts.isComputedPropertyName(node.name)
