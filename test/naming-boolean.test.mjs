@@ -19,6 +19,7 @@ import { findCamelCaseParameterName, properties as camelCaseParameterProperties 
 import { findCamelCasePropertyName, properties as camelCasePropertyProperties } from "../dist/rules/camel-case-property-name.js";
 import { findCamelCaseVariableName, properties as camelCaseVariableProperties } from "../dist/rules/camel-case-variable-name.js";
 import { isCamelCaseName, isPascalCaseName } from "../dist/rules/camel-case-utils.js";
+import { isTestContextFileName } from "../dist/rules/test-context.js";
 import { findConstantNamingConventions } from "../dist/rules/constant-naming-conventions.js";
 import { findLongClassName, properties as longClassProperties } from "../dist/rules/long-class-name.js";
 import { findLongVariable, properties as longVariableProperties } from "../dist/rules/long-variable.js";
@@ -251,6 +252,31 @@ class Example {
     camelCaseMethodProperties["allow-underscore-test"] = false;
     camelCasePropertyProperties["allow-underscore-test"] = false;
   }
+});
+
+test("isCamelCaseName's allowUnderscore flag strips exactly one leading underscore and defaults to off", () => {
+  assert.equal(isCamelCaseName("_foo"), false);
+  assert.equal(isCamelCaseName("_foo", false), false);
+  assert.equal(isCamelCaseName("_foo", true), true);
+  assert.equal(isCamelCaseName("__foo", true), false);
+  assert.equal(isCamelCaseName("_1foo", true), false);
+  assert.equal(isCamelCaseName("_badField_", true), false);
+  assert.equal(isCamelCaseName("Foo", true), false);
+  assert.equal(isCamelCaseName("fooBar", true), true);
+});
+
+test("isTestContextFileName recognizes conventional test directories and test/spec filenames only", () => {
+  for (const directory of ["__spec__", "__specs__", "__test__", "__tests__", "spec", "specs", "test", "tests"]) {
+    assert.equal(isTestContextFileName(`/project/${directory}/foo.ts`), true, directory);
+    assert.equal(isTestContextFileName(`/project/src/${directory}/nested/foo.ts`), true, `nested ${directory}`);
+  }
+  assert.equal(isTestContextFileName("/project/Test/foo.ts"), true, "case-insensitive directory");
+  assert.equal(isTestContextFileName("/project/src/foo.test.ts"), true);
+  assert.equal(isTestContextFileName("/project/src/foo.spec.tsx"), true);
+  assert.equal(isTestContextFileName("/project/src/foo.TEST.ts"), true, "case-insensitive filename");
+  assert.equal(isTestContextFileName("/project/src/foo.ts"), false);
+  assert.equal(isTestContextFileName("/project/src/test"), false, "a file literally named test, not a directory");
+  assert.equal(isTestContextFileName("/project/src/foo.test.js.bak"), false, "extension after the test marker blocks the match");
 });
 
 test("short and long naming rules honor idiomatic and threshold names", () => {
