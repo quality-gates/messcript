@@ -23,7 +23,10 @@ const safetyTimeoutMs = 80;
  * approach this value for it to remain a pure backstop rather than a source
  * of false rejections.
  */
-const safetyHardTimeoutMs = 1000;
+const safetyHardTimeoutMs = 3000;
+
+const nativeProbeEnvironmentVariable = "MESSCRIPT_NATIVE_EXECUTABLE";
+export const nativeIgnorePatternProbeArgument = "--messcript-internal-ignore-pattern-probe";
 
 export class IgnorePatternError extends Error {
   /**
@@ -58,6 +61,23 @@ function isTimedOut(result: ReturnType<typeof spawnSync>): boolean {
   );
 }
 
+/** Run the isolated regex work. Used directly by the native executable's child mode. */
+export function measureIgnorePatternProbe(pattern: string): number {
+  const start = process.hrtime.bigint();
+  const regex = new RegExp(pattern);
+  for (const probe of safetyProbes) {
+    regex.test(probe);
+  }
+  return Number(process.hrtime.bigint() - start) / 1e6;
+}
+
+/** Select the child-process contract for Node scripts versus native SEA executables. */
+export function ignorePatternProbeChildArguments(pattern: string, nodeScript: string): string[] {
+  return process.env[nativeProbeEnvironmentVariable] === process.execPath
+    ? [nativeIgnorePatternProbeArgument, pattern]
+    : ["-e", nodeScript];
+}
+
 /**
  * Reject patterns that take too long against fixed adversarial probes.
  * Runs in a child process so a pathological pattern cannot hang this process.
@@ -90,7 +110,7 @@ try {
   process.exit(2);
 }
 `;
-  const result = spawnSync(process.execPath, ["-e", script], {
+  const result = spawnSync(process.execPath, ignorePatternProbeChildArguments(pattern, script), {
     encoding: "utf8",
     timeout: safetyHardTimeoutMs,
   });
