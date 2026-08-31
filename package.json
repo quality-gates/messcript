@@ -20,7 +20,7 @@
     "mutation": "stryker run && node scripts/covered-msi.mjs coverage/mutation/mutation.json",
     "mutation:pr": "node scripts/mutation-pr.mjs",
     "prepack": "npm run build",
-    "test": "npm run build && node --test test/cli.test.mjs test/metrics.test.mjs test/ast-metrics.test.mjs test/reporters.test.mjs test/naming-boolean.test.mjs test/ignore-pattern.test.mjs test/unused.test.mjs test/structural.test.mjs test/mutation-pr.test.mjs test/package-smoke.test.mjs"
+    "test": "npm run build && node --test test/cli.test.mjs test/metrics.test.mjs test/ast-metrics.test.mjs test/reporters.test.mjs test/naming-boolean.test.mjs test/ignore-pattern.test.mjs test/unused.test.mjs test/structural.test.mjs test/mutation-pr.test.mjs test/package-smoke.test.mjs test/discovery.test.mjs"
   },
   "dependencies": {
     "typescript": "^5.9.2"
