@@ -24,6 +24,38 @@ function configuredFunctions(value: string): Set<string> {
   return new Set(value.split(",").map((part) => part.trim().toLowerCase()).filter(Boolean));
 }
 
+// Tracks template-expression nesting depth while scanning, and re-scans after
+// each interpolation's closing brace so the scanner recovers the token stream
+// instead of swallowing everything up to the next backtick (or EOF) into a
+// single template token. See src/suppressions.ts for the same scanner quirk.
+function trackTemplateExpression(scanner: ts.Scanner, token: ts.SyntaxKind, depths: number[]): ts.SyntaxKind {
+  if (token === ts.SyntaxKind.TemplateHead) {
+    depths.push(1);
+    return token;
+  }
+  if (depths.length === 0) {
+    return token;
+  }
+  const depth = depths.length - 1;
+  if (token === ts.SyntaxKind.OpenBraceToken) {
+    depths[depth] += 1;
+    return token;
+  }
+  if (token !== ts.SyntaxKind.CloseBraceToken) {
+    return token;
+  }
+  depths[depth] -= 1;
+  if (depths[depth] !== 0) {
+    return token;
+  }
+  depths.pop();
+  const rescanned = scanner.reScanTemplateToken(false);
+  if (rescanned === ts.SyntaxKind.TemplateMiddle) {
+    depths.push(1);
+  }
+  return rescanned;
+}
+
 function commentFindings(sourceFile: ts.SourceFile, markers: readonly string[]): Finding[] {
   if (markers.length === 0) {
     return [];
@@ -49,24 +81,7 @@ function commentFindings(sourceFile: ts.SourceFile, markers: readonly string[]):
         );
       }
     }
-
-    if (token === ts.SyntaxKind.TemplateHead) {
-      templateExpressionDepths.push(1);
-    } else if (templateExpressionDepths.length > 0) {
-      const depth = templateExpressionDepths.length - 1;
-      if (token === ts.SyntaxKind.OpenBraceToken) {
-        templateExpressionDepths[depth] += 1;
-      } else if (token === ts.SyntaxKind.CloseBraceToken) {
-        templateExpressionDepths[depth] -= 1;
-        if (templateExpressionDepths[depth] === 0) {
-          templateExpressionDepths.pop();
-          token = scanner.reScanTemplateToken(false);
-          if (token === ts.SyntaxKind.TemplateMiddle) {
-            templateExpressionDepths.push(1);
-          }
-        }
-      }
-    }
+    token = trackTemplateExpression(scanner, token, templateExpressionDepths);
     token = scanner.scan();
   }
   return findings;
