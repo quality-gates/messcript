@@ -1,18 +1,26 @@
 // messcript-disable ConstantNamingConventions
 import ts from "typescript";
-import { forEachClass, getClassMethods, isIgnoredClassMethod, isPublicClassMember } from "../ast/classes";
+import {
+  defaultIgnoredMethodPattern,
+  forEachClass,
+  getClassMethods,
+  isIgnoredClassMethod,
+  isPublicClassMember,
+} from "../ast/classes";
 import type { Finding } from "../finding";
 import { createClassFinding } from "./class-finding";
+import { compileIgnorePattern } from "./ignore-pattern";
 
 export const ruleName = "TooManyPublicMethods";
 export const priority = 3;
-export const properties = { maxmethods: 10, ignorepattern: "(^(set|get|is|has|with))i" } as const;
+export const properties = { maxmethods: 10, ignorepattern: defaultIgnoredMethodPattern } as const;
 
 export function findTooManyPublicMethods(sourceFile: ts.SourceFile): Finding[] {
+  const ignoreRegex = compileIgnorePattern(properties.ignorepattern);
   const findings: Finding[] = [];
   forEachClass(sourceFile, (node) => {
     const methodCount = getClassMethods(node).filter(
-      (method) => isPublicClassMember(method) && !isIgnoredClassMethod(method, sourceFile),
+      (method) => isPublicClassMember(method) && !isIgnoredClassMethod(method, sourceFile, ignoreRegex),
     ).length;
     if (methodCount <= properties.maxmethods) {
       return;
