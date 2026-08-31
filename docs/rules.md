@@ -61,10 +61,10 @@ executable metric findings. Prefer `typescript` for mixed JS/TS repositories.
 | `design` | `GlobalVariable` | 1 | `report-immutable=false` | Flags module/script and static state that is actually mutated. Set `report-immutable=true` to also report initialized immutable module state. Mutation-based by default so imports and true constants stay quiet. |
 | `design` | `LackOfCohesionOfMethods` | 3 | `maximum=1` | Flags classes whose methods form more than `maximum` disconnected groups (LCOM4) via shared instance state and receiver calls. |
 | `controversial` | `CamelCaseClassName` | 1 | — | Flags class names that are not PascalCase / UpperCamelCase. |
-| `controversial` | `CamelCaseMethodName` | 1 | `allow-underscore=false`, `allow-underscore-test=false` | Flags method names that are not camelCase. Conservative around private, React, hook, and similar names. |
-| `controversial` | `CamelCasePropertyName` | 1 | `allow-underscore=false`, `allow-underscore-test=false` | Flags property names that are not camelCase, with the same conservative exemptions. |
-| `controversial` | `CamelCaseParameterName` | 1 | `allow-underscore=false` | Flags parameter names that are not camelCase, after ordinary short-name exemptions. |
-| `controversial` | `CamelCaseVariableName` | 1 | `allow-underscore=false` | Flags variable names that are not camelCase, after ordinary short-name and constant exemptions. |
+| `controversial` | `CamelCaseMethodName` | 1 | `allow-underscore=false`, `allow-underscore-test=false` | Flags method names that are not camelCase. Conservative around private, React, hook, and similar names. `allow-underscore` permits a single leading underscore everywhere; `allow-underscore-test` permits it independently, but only in test-context files (a conventional test directory such as `test/` or `__tests__/`, or a `*.test.*`/`*.spec.*` filename). |
+| `controversial` | `CamelCasePropertyName` | 1 | `allow-underscore=false`, `allow-underscore-test=false` | Flags property names that are not camelCase, with the same conservative exemptions. `allow-underscore` and `allow-underscore-test` behave as for `CamelCaseMethodName`. |
+| `controversial` | `CamelCaseParameterName` | 1 | `allow-underscore=false` | Flags parameter names that are not camelCase, after ordinary short-name exemptions. `allow-underscore` permits a single leading underscore. |
+| `controversial` | `CamelCaseVariableName` | 1 | `allow-underscore=false` | Flags variable names that are not camelCase, after ordinary short-name and constant exemptions. `allow-underscore` permits a single leading underscore. |
 
 ## Built-in rulesets
 

@@ -2,6 +2,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, relative, resolve, sep } from "node:path";
 import ts from "typescript";
+import { isTestContextFileName } from "./rules/test-context";
 
 export const sourceSuffixes = [
   ".d.ts",
@@ -39,8 +40,6 @@ const ignoredDirectoryNames = new Set([
   "vendor",
 ]);
 
-const testDirectoryNames = new Set(["__spec__", "__specs__", "__test__", "__tests__", "spec", "specs", "test", "tests"]);
-
 export type DiscoveryOptions = {
   suffixes?: readonly string[];
   exclusions?: readonly string[];
@@ -71,12 +70,7 @@ function isExcluded(path: string, exclusions: readonly string[]): boolean {
 }
 
 function isTestPath(path: string, rootPath: string): boolean {
-  const relativePath = relative(rootPath, path);
-  const pathParts = relativePath.split(sep);
-  return (
-    pathParts.slice(0, -1).some((part) => testDirectoryNames.has(part.toLowerCase())) ||
-    /\.(?:test|spec)\.[^.]+$/i.test(basename(path))
-  );
+  return isTestContextFileName(relative(rootPath, path));
 }
 
 // messcript-disable-next-line CyclomaticComplexity NPathComplexity

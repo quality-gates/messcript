@@ -10,10 +10,11 @@ export const priority = 1;
 export const properties = { "allow-underscore": false } as const;
 
 export function findCamelCaseVariableName(sourceFile: ts.SourceFile): Finding[] {
+  const allowUnderscore = properties["allow-underscore"];
   const constantStarts = new Set(collectSemanticConstants(sourceFile).map((constant) => constant.node.getStart(sourceFile)));
   const findings: Finding[] = [];
   for (const variable of collectVariables(sourceFile)) {
-    if (constantStarts.has(variable.node.getStart(sourceFile)) || isCamelCaseName(variable.name)) {
+    if (constantStarts.has(variable.node.getStart(sourceFile)) || isCamelCaseName(variable.name, allowUnderscore)) {
       continue;
     }
     findings.push(

@@ -1,8 +1,11 @@
-export function isCamelCaseName(name: string): boolean {
+export function isCamelCaseName(name: string, allowUnderscore = false): boolean {
   if (name === "_") {
     return true;
   }
   const normalized = name.replace(/^#/, "");
+  if (allowUnderscore && normalized.startsWith("_")) {
+    return isCamelCaseName(normalized.slice(1));
+  }
   return normalized === "$" || /^\$?[a-z][A-Za-z0-9]*$/.test(normalized);
 }
 
