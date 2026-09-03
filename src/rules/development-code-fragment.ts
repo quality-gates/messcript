@@ -36,6 +36,12 @@ function trackTemplateExpression(scanner: ts.Scanner, token: ts.SyntaxKind, dept
   if (depths.length === 0) {
     return token;
   }
+  if (token === ts.SyntaxKind.SlashToken || token === ts.SyntaxKind.SlashEqualsToken) {
+    const rescanned = scanner.reScanSlashToken();
+    if (rescanned === ts.SyntaxKind.RegularExpressionLiteral) {
+      return rescanned;
+    }
+  }
   const depth = depths.length - 1;
   if (token === ts.SyntaxKind.OpenBraceToken) {
     depths[depth] += 1;

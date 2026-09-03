@@ -92,7 +92,7 @@ function literalMemberName(node: ts.Expression, sourceFile: ts.SourceFile): stri
 function directReceiverMember(
   node: ts.Expression,
   sourceFile: ts.SourceFile,
-): { receiver: Receiver; name: string } | undefined {
+): { receiver: Receiver; name: string; receiverName?: string } | undefined {
   const expression = unwrapExpression(node);
   if (ts.isPropertyAccessExpression(expression)) {
     const receiver = unwrapExpression(expression.expression);
@@ -100,7 +100,11 @@ function directReceiverMember(
       return { receiver: "this", name: nameText(expression.name, sourceFile) ?? expression.name.getText(sourceFile) };
     }
     if (ts.isIdentifier(receiver)) {
-      return { receiver: "class", name: nameText(expression.name, sourceFile) ?? expression.name.getText(sourceFile) };
+      return {
+        receiver: "class",
+        name: nameText(expression.name, sourceFile) ?? expression.name.getText(sourceFile),
+        receiverName: receiver.text,
+      };
     }
   }
   if (ts.isElementAccessExpression(expression)) {
@@ -113,7 +117,7 @@ function directReceiverMember(
       return { receiver: "this", name };
     }
     if (ts.isIdentifier(receiver)) {
-      return { receiver: "class", name };
+      return { receiver: "class", name, receiverName: receiver.text };
     }
   }
   return undefined;
@@ -130,7 +134,7 @@ function directFieldAccess(
   const member = directReceiverMember(expression, sourceFile);
   if (member) {
     const scope = member.receiver === "this" ? methodScope : "static";
-    if (member.receiver === "class" && member.name !== className && className) {
+    if (member.receiver === "class" && className && member.receiverName !== className) {
       return undefined;
     }
     if (member.receiver === "class" && methodScope !== "static") {
@@ -272,8 +276,8 @@ function collectUses(
     }
   }
 
-  function addAccessorOrMethod(receiver: Receiver, name: string): void {
-    if (receiver === "class" && method.scope !== "static") {
+  function addAccessorOrMethod(receiver: Receiver, name: string, receiverName?: string): void {
+    if (receiver === "class" && (method.scope !== "static" || (className && receiverName !== className))) {
       return;
     }
     const scope = receiver === "this" || receiver === "bare" ? method.scope : "static";
@@ -310,7 +314,7 @@ function collectUses(
       } else {
         const member = directReceiverMember(expression, sourceFile);
         if (member) {
-          addAccessorOrMethod(member.receiver, member.name);
+          addAccessorOrMethod(member.receiver, member.name, member.receiverName);
         }
       }
     }
@@ -319,7 +323,7 @@ function collectUses(
       const member = directReceiverMember(node, sourceFile);
       if (member) {
         addField(node);
-        if (member.receiver === "class" && method.scope !== "static") {
+        if (member.receiver === "class" && (method.scope !== "static" || (className && member.receiverName !== className))) {
           return;
         }
         const scope = member.receiver === "this" || member.receiver === "bare" ? method.scope : "static";

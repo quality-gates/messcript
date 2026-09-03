@@ -258,3 +258,22 @@ const { [key]: alias = values[key] } = values;
   assert.equal(fields.find((declaration) => declaration.name === "readExternal")?.used, true);
   assert.equal(declarations.some((declaration) => declaration.name === "Imported"), false);
 });
+
+test("destructuring this marks private fields and methods as used", () => {
+  const file = sourceFile(`
+class Service {
+  private count = 1;
+  private log() {}
+  private unused = 2;
+  action() {
+    const { count, log } = this;
+    log();
+    return count;
+  }
+}
+`);
+  const declarations = analyzeUnused(file);
+  assert.equal(declarations.find((d) => d.name === "count")?.used, true);
+  assert.equal(declarations.find((d) => d.name === "log")?.used, true);
+  assert.equal(declarations.find((d) => d.name === "unused")?.used, false);
+});

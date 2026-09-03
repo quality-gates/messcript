@@ -29,7 +29,13 @@ export function findCamelCaseMethodName(sourceFile: ts.SourceFile): Finding[] {
   });
   function visitSignature(node: ts.Node): void {
     if (ts.isMethodSignature(node) && node.name && !ts.isComputedPropertyName(node.name)) {
-      const name = node.name.getText(sourceFile);
+      const name =
+        ts.isIdentifier(node.name) ||
+        ts.isStringLiteral(node.name) ||
+        ts.isNumericLiteral(node.name) ||
+        ts.isNoSubstitutionTemplateLiteral(node.name)
+          ? node.name.text
+          : node.name.getText(sourceFile);
       if (!isCamelCaseName(name, allowUnderscore)) {
         findings.push(createCamelCaseFinding(node, sourceFile, ruleName, `method ${name}()`, `The method ${name} is not named in camelCase.`));
       }

@@ -56,6 +56,9 @@ function directivesIn(sourceFile: ts.SourceFile): readonly Directive[] {
     if (token === ts.SyntaxKind.TemplateHead) {
       templateExpressionDepths.push(1);
     } else if (templateExpressionDepths.length > 0) {
+      if (token === ts.SyntaxKind.SlashToken || token === ts.SyntaxKind.SlashEqualsToken) {
+        token = scanner.reScanSlashToken();
+      }
       const depth = templateExpressionDepths.length - 1;
       if (token === ts.SyntaxKind.OpenBraceToken) {
         templateExpressionDepths[depth] += 1;

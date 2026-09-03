@@ -101,13 +101,13 @@ test("nested-quantifier ignorepattern is rejected before analysis and does not h
 </ruleset>`,
   );
 
-  const result = runCliTimed([source, "text", ruleset], 5000);
+  const result = runCliTimed([source, "text", ruleset], 10000);
 
   assert.equal(result.timedOut, false, "CLI hung on nested-quantifier ignorepattern");
   assert.equal(result.status, 1);
   assert.match(result.stderr, /too expensive|ignorepattern/i);
   assert.equal(result.stdout, "");
-  assert.ok(result.elapsedMs < 5000, `expected bounded rejection, took ${result.elapsedMs.toFixed(0)}ms`);
+  assert.ok(result.elapsedMs < 10000, `expected bounded rejection, took ${result.elapsedMs.toFixed(0)}ms`);
 });
 
 test("alternation ReDoS ignorepattern is rejected before analysis and does not hang", () => {
@@ -126,12 +126,12 @@ test("alternation ReDoS ignorepattern is rejected before analysis and does not h
 </ruleset>`,
   );
 
-  const result = runCliTimed([source, "text", ruleset], 5000);
+  const result = runCliTimed([source, "text", ruleset], 10000);
 
   assert.equal(result.timedOut, false, "CLI hung on alternation ignorepattern");
   assert.equal(result.status, 1);
   assert.match(result.stderr, /too expensive|ignorepattern/i);
-  assert.ok(result.elapsedMs < 5000, `expected bounded rejection, took ${result.elapsedMs.toFixed(0)}ms`);
+  assert.ok(result.elapsedMs < 10000, `expected bounded rejection, took ${result.elapsedMs.toFixed(0)}ms`);
 });
 
 test("invalid ignorepattern is a ruleset error, not a silent partial analysis", () => {

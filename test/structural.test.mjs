@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import ts from "typescript";
 import { test } from "node:test";
+import { getClassMethods } from "../dist/ast/classes.js";
 import { calculateClassComplexity, calculateClassLineCount } from "../dist/metrics/classes.js";
 import { calculateNPathComplexity } from "../dist/metrics/complexity.js";
 import { calculateCyclomaticComplexity } from "../dist/metrics/cyclomatic.js";
@@ -159,7 +160,12 @@ function plain() {
 }
 // TODO after plain braces, no template ever scanned
 `);
-  assert.equal(findDevelopmentCodeFragment(noTemplateAtAll).length, 1);
+  const regexLiteralWithBraces = sourceFile(`
+const greeting = \`matched: \${/\\d{4}/.test("2026")}\`;
+// TODO after regex with braces
+function work() {}
+`);
+  assert.equal(findDevelopmentCodeFragment(regexLiteralWithBraces).length, 1);
 });
 
 test("duplicate keys recognize static literals and ignore dynamic keys", () => {
@@ -188,6 +194,18 @@ const object = {
   assert.ok(messages(findings).some((message) => /beta/.test(message)));
   assert.ok(messages(findings).some((message) => /-1/.test(message)));
   assert.ok(messages(findings).every((message) => /first declared at line/.test(message)));
+
+  const getterSetter = sourceFile(`
+const object = {
+  get foo() { return 1; },
+  set foo(v) {},
+  get bar() { return 1; },
+  get bar() { return 2; },
+};
+`);
+  const gsFindings = findDuplicatedArrayKey(getterSetter);
+  assert.equal(gsFindings.length, 1);
+  assert.match(gsFindings[0].message, /bar/);
 });
 
 test("CyclomaticComplexity handles deeply nested statements", () => {
@@ -292,6 +310,31 @@ class Widget {
   publicMethodsProperties.ignorepattern = "^(?:[sS][eE][tT]|[gG][eE][tT]|[iI][sS]|[hH][aA][sS]|[wW][iI][tT][hH])";
   methodsProperties.maxmethods = 25;
   publicMethodsProperties.maxmethods = 10;
+
+  const constructorFile = sourceFile(`
+class OnlyConstructors {
+  constructor();
+  constructor(x: number);
+  constructor(x?: number) {}
+}
+`);
+  // Constructor overloads are deduplicated down to 1 constructor
+  assert.equal(getClassMethods(constructorFile.statements[0]).length, 1);
+  methodsProperties.maxmethods = 1;
+  assert.equal(findTooManyMethods(constructorFile).length, 0);
+  publicMethodsProperties.maxmethods = 1;
+  assert.equal(findTooManyPublicMethods(constructorFile).length, 0);
+
+  const literalMethodFile = sourceFile(`
+class Service {
+  "getName"() { return "test"; }
+}
+`);
+  // default ignorepattern matches ^get case-insensitively, so "getName" is ignored
+  methodsProperties.maxmethods = 0;
+  assert.equal(findTooManyMethods(literalMethodFile).length, 0);
+  methodsProperties.maxmethods = 25;
+  publicMethodsProperties.maxmethods = 10;
 });
 
 test("global, coupling, and cohesion rules track structural dependencies and state", () => {
@@ -349,6 +392,15 @@ class Cohesive {
   assert.equal(calculateLcom4(cohesionClass), 2);
   assert.equal(findLackOfCohesionOfMethods(cohesionFile).length, 1);
   assert.equal(findLackOfCohesionOfMethods(cohesionFile, 2).length, 0);
+
+  const staticCohesionFile = sourceFile(`
+class StaticCohesion {
+  static shared = 1;
+  static methodA() { return StaticCohesion.shared; }
+  static methodB() { StaticCohesion.shared = 2; }
+}
+`);
+  assert.equal(calculateLcom4(staticCohesionFile.statements[0]), 1);
 });
 
 test("structural rules support JavaScript syntax and configured opt-ins", () => {
@@ -461,4 +513,17 @@ class StaticState {
   assert.ok(messages(immutable).some((message) => /unassigned/.test(message)));
   assert.ok(messages(immutable).some((message) => /first/.test(message)));
   assert.ok(messages(immutable).some((message) => /property/.test(message)));
+});
+
+test("global-variable analysis observes mutations via destructuring assignments", () => {
+  const file = sourceFile(`
+let destructuredArray = 0;
+let destructuredObject = 0;
+[destructuredArray] = [1];
+({ key: destructuredObject } = { key: 2 });
+`);
+  const findings = findGlobalVariable([file], false);
+  const found = messages(findings);
+  assert.ok(found.some((m) => /destructuredArray/.test(m)));
+  assert.ok(found.some((m) => /destructuredObject/.test(m)));
 });

@@ -33,6 +33,9 @@ function bindingName(node: ts.Node): string | undefined {
   if (ts.isPrivateIdentifier(node)) {
     return node.text;
   }
+  if (ts.isStringLiteral(node) || ts.isNumericLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return node.text;
+  }
   return undefined;
 }
 

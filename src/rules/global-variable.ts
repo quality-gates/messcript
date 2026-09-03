@@ -354,6 +354,48 @@ function markPropertyMutation(
   }
 }
 
+function extractDestructuringTargets(
+  node: ts.Node,
+  onTarget: (target: ts.Identifier | ts.PropertyAccessExpression | ts.ElementAccessExpression) => void,
+): void {
+  if (ts.isIdentifier(node) || ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+    onTarget(node);
+    return;
+  }
+  if (ts.isParenthesizedExpression(node)) {
+    extractDestructuringTargets(node.expression, onTarget);
+    return;
+  }
+  if (ts.isArrayLiteralExpression(node)) {
+    for (const element of node.elements) {
+      if (ts.isOmittedExpression(element)) {
+        continue;
+      }
+      if (ts.isSpreadElement(element)) {
+        extractDestructuringTargets(element.expression, onTarget);
+      } else if (ts.isBinaryExpression(element) && element.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        extractDestructuringTargets(element.left, onTarget);
+      } else {
+        extractDestructuringTargets(element, onTarget);
+      }
+    }
+  } else if (ts.isObjectLiteralExpression(node)) {
+    for (const property of node.properties) {
+      if (ts.isShorthandPropertyAssignment(property)) {
+        onTarget(property.name);
+      } else if (ts.isPropertyAssignment(property)) {
+        if (ts.isBinaryExpression(property.initializer) && property.initializer.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+          extractDestructuringTargets(property.initializer.left, onTarget);
+        } else {
+          extractDestructuringTargets(property.initializer, onTarget);
+        }
+      } else if (ts.isSpreadAssignment(property)) {
+        extractDestructuringTargets(property.expression, onTarget);
+      }
+    }
+  }
+}
+
 function observeMutations(
   sourceFile: ts.SourceFile,
   bindings: readonly Binding[],
@@ -364,11 +406,13 @@ function observeMutations(
   // messcript-disable-next-line CyclomaticComplexity NPathComplexity
   function visit(node: ts.Node): void {
     if (ts.isBinaryExpression(node) && assignmentOperator(node.operatorToken.kind)) {
-      if (ts.isIdentifier(node.left)) {
-        markBindingMutation(node.left, node.left.text, bindings, mutatedBindings);
-      } else if (ts.isPropertyAccessExpression(node.left) || ts.isElementAccessExpression(node.left)) {
-        markPropertyMutation(node.left, sourceFile, bindings, fields, mutatedBindings, mutatedFields);
-      }
+      extractDestructuringTargets(node.left, (target) => {
+        if (ts.isIdentifier(target)) {
+          markBindingMutation(target, target.text, bindings, mutatedBindings);
+        } else {
+          markPropertyMutation(target, sourceFile, bindings, fields, mutatedBindings, mutatedFields);
+        }
+      });
     }
     if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) && updateOperator(node.operator)) {
       const operand = node.operand;
