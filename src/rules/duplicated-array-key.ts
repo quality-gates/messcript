@@ -75,6 +75,7 @@ function propertyName(property: ts.ObjectLiteralElementLike, sourceFile: ts.Sour
 
 type KeyRecord = { get?: { line: number }; set?: { line: number }; value?: { line: number } };
 
+// messcript-disable-next-line CyclomaticComplexity NPathComplexity
 function checkObjectLiteral(node: ts.ObjectLiteralExpression, sourceFile: ts.SourceFile, findings: Finding[]): void {
   const seen = new Map<string, KeyRecord>();
   for (const property of node.properties) {

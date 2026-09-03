@@ -354,6 +354,7 @@ function markPropertyMutation(
   }
 }
 
+// messcript-disable-next-line CyclomaticComplexity NPathComplexity
 function extractDestructuringTargets(
   node: ts.Node,
   onTarget: (target: ts.Identifier | ts.PropertyAccessExpression | ts.ElementAccessExpression) => void,

@@ -28,6 +28,7 @@ function configuredFunctions(value: string): Set<string> {
 // each interpolation's closing brace so the scanner recovers the token stream
 // instead of swallowing everything up to the next backtick (or EOF) into a
 // single template token. See src/suppressions.ts for the same scanner quirk.
+// messcript-disable-next-line CyclomaticComplexity NPathComplexity
 function trackTemplateExpression(scanner: ts.Scanner, token: ts.SyntaxKind, depths: number[]): ts.SyntaxKind {
   if (token === ts.SyntaxKind.TemplateHead) {
     depths.push(1);
