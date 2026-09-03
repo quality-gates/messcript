@@ -18,11 +18,14 @@ export function isBooleanType(type: ts.TypeNode | undefined): boolean {
     return isBooleanType(type.type);
   }
   if (ts.isUnionTypeNode(type)) {
-    return type.types.every(
-      (member) =>
-        isBooleanType(member) ||
-        member.kind === ts.SyntaxKind.UndefinedKeyword ||
-        (ts.isLiteralTypeNode(member) && member.literal.kind === ts.SyntaxKind.NullKeyword),
+    return (
+      type.types.some((member) => isBooleanType(member)) &&
+      type.types.every(
+        (member) =>
+          isBooleanType(member) ||
+          member.kind === ts.SyntaxKind.UndefinedKeyword ||
+          (ts.isLiteralTypeNode(member) && member.literal.kind === ts.SyntaxKind.NullKeyword),
+      )
     );
   }
   return false;
@@ -30,6 +33,9 @@ export function isBooleanType(type: ts.TypeNode | undefined): boolean {
 
 // messcript-disable-next-line CyclomaticComplexity NPathComplexity
 export function isBooleanExpression(expression: ts.Expression): boolean {
+  if (ts.isParenthesizedExpression(expression)) {
+    return isBooleanExpression(expression.expression);
+  }
   if (expression.kind === ts.SyntaxKind.TrueKeyword || expression.kind === ts.SyntaxKind.FalseKeyword) {
     return true;
   }

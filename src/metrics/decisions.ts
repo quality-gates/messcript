@@ -12,7 +12,10 @@ export function isDecisionOperator(kind: ts.SyntaxKind): boolean {
   return (
     kind === ts.SyntaxKind.AmpersandAmpersandToken ||
     kind === ts.SyntaxKind.BarBarToken ||
-    kind === ts.SyntaxKind.QuestionQuestionToken
+    kind === ts.SyntaxKind.QuestionQuestionToken ||
+    kind === ts.SyntaxKind.AmpersandAmpersandEqualsToken ||
+    kind === ts.SyntaxKind.BarBarEqualsToken ||
+    kind === ts.SyntaxKind.QuestionQuestionEqualsToken
   );
 }
 

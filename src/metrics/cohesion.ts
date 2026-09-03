@@ -92,7 +92,7 @@ function literalMemberName(node: ts.Expression, sourceFile: ts.SourceFile): stri
 function directReceiverMember(
   node: ts.Expression,
   sourceFile: ts.SourceFile,
-): { receiver: Receiver; name: string } | undefined {
+): { receiver: Receiver; name: string; receiverName?: string } | undefined {
   const expression = unwrapExpression(node);
   if (ts.isPropertyAccessExpression(expression)) {
     const receiver = unwrapExpression(expression.expression);
@@ -100,7 +100,11 @@ function directReceiverMember(
       return { receiver: "this", name: nameText(expression.name, sourceFile) ?? expression.name.getText(sourceFile) };
     }
     if (ts.isIdentifier(receiver)) {
-      return { receiver: "class", name: nameText(expression.name, sourceFile) ?? expression.name.getText(sourceFile) };
+      return {
+        receiver: "class",
+        name: nameText(expression.name, sourceFile) ?? expression.name.getText(sourceFile),
+        receiverName: receiver.text,
+      };
     }
   }
   if (ts.isElementAccessExpression(expression)) {
@@ -113,10 +117,19 @@ function directReceiverMember(
       return { receiver: "this", name };
     }
     if (ts.isIdentifier(receiver)) {
-      return { receiver: "class", name };
+      return { receiver: "class", name, receiverName: receiver.text };
     }
   }
   return undefined;
+}
+
+function isForeignClassMember(
+  receiver: Receiver,
+  receiverName: string | undefined,
+  methodScope: Scope,
+  className: string | undefined,
+): boolean {
+  return receiver === "class" && (methodScope !== "static" || receiverName !== className);
 }
 
 // messcript-disable-next-line CyclomaticComplexity
@@ -129,13 +142,10 @@ function directFieldAccess(
 ): string | undefined {
   const member = directReceiverMember(expression, sourceFile);
   if (member) {
+    if (isForeignClassMember(member.receiver, member.receiverName, methodScope, className)) {
+      return undefined;
+    }
     const scope = member.receiver === "this" ? methodScope : "static";
-    if (member.receiver === "class" && member.name !== className && className) {
-      return undefined;
-    }
-    if (member.receiver === "class" && methodScope !== "static") {
-      return undefined;
-    }
     return fields.get(scopedKey(scope, member.name))?.key;
   }
   const unwrapped = unwrapExpression(expression);
@@ -272,8 +282,8 @@ function collectUses(
     }
   }
 
-  function addAccessorOrMethod(receiver: Receiver, name: string): void {
-    if (receiver === "class" && method.scope !== "static") {
+  function addAccessorOrMethod(receiver: Receiver, name: string, receiverName?: string): void {
+    if (isForeignClassMember(receiver, receiverName, method.scope, className)) {
       return;
     }
     const scope = receiver === "this" || receiver === "bare" ? method.scope : "static";
@@ -310,7 +320,7 @@ function collectUses(
       } else {
         const member = directReceiverMember(expression, sourceFile);
         if (member) {
-          addAccessorOrMethod(member.receiver, member.name);
+          addAccessorOrMethod(member.receiver, member.name, member.receiverName);
         }
       }
     }
@@ -319,7 +329,7 @@ function collectUses(
       const member = directReceiverMember(node, sourceFile);
       if (member) {
         addField(node);
-        if (member.receiver === "class" && method.scope !== "static") {
+        if (isForeignClassMember(member.receiver, member.receiverName, method.scope, className)) {
           return;
         }
         const scope = member.receiver === "this" || member.receiver === "bare" ? method.scope : "static";

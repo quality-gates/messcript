@@ -250,7 +250,21 @@ test("decision and complexity metrics cover optional chains, operators, and stat
   assert.equal(isDecisionOperator(ts.SyntaxKind.AmpersandAmpersandToken), true);
   assert.equal(isDecisionOperator(ts.SyntaxKind.BarBarToken), true);
   assert.equal(isDecisionOperator(ts.SyntaxKind.QuestionQuestionToken), true);
+  assert.equal(isDecisionOperator(ts.SyntaxKind.AmpersandAmpersandEqualsToken), true);
+  assert.equal(isDecisionOperator(ts.SyntaxKind.BarBarEqualsToken), true);
+  assert.equal(isDecisionOperator(ts.SyntaxKind.QuestionQuestionEqualsToken), true);
   assert.equal(isDecisionOperator(ts.SyntaxKind.PlusToken), false);
+  assert.equal(isDecisionOperator(ts.SyntaxKind.EqualsToken), false);
+
+  const logicalAssignmentFn = sourceFile(`
+function testLogicalAssignment(a, b) {
+  a &&= b;
+  a ||= b;
+  a ??= b;
+  return a;
+}
+`);
+  assert.equal(calculateCyclomaticComplexity(logicalAssignmentFn.statements[0].body), 4);
 
   const file = sourceFile(`
 function decisions(value) {

@@ -19,7 +19,7 @@ export function findBooleanGetMethodName(sourceFile: ts.SourceFile): Finding[] {
     if (!name || !/^get/i.test(getNameWithoutSigil(name)) || node.body === undefined) {
       return;
     }
-    if (properties.checkParameterizedMethods && node.parameters.length > 0) {
+    if (!properties.checkParameterizedMethods && node.parameters.length > 0) {
       return;
     }
     if (!isBooleanFunction(node, collectBooleanReturns(node.body), isBooleanExpression, isBooleanType)) {

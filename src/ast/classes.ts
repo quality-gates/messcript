@@ -37,6 +37,14 @@ function memberName(node: ClassMethod | ClassField, sourceFile: ts.SourceFile): 
     return "constructor";
   }
   if ("name" in node && node.name) {
+    if (
+      ts.isIdentifier(node.name) ||
+      ts.isStringLiteral(node.name) ||
+      ts.isNumericLiteral(node.name) ||
+      ts.isNoSubstitutionTemplateLiteral(node.name)
+    ) {
+      return node.name.text;
+    }
     return node.name.getText(sourceFile);
   }
   return undefined;
@@ -52,7 +60,9 @@ function isParameterProperty(node: ts.ParameterDeclaration): boolean {
 }
 
 function sameMethodName(left: ClassMethod, right: ClassMethod, sourceFile: ts.SourceFile): boolean {
-  return memberName(left, sourceFile) === memberName(right, sourceFile);
+  const leftName = memberName(left, sourceFile);
+  const rightName = memberName(right, sourceFile);
+  return leftName !== undefined && leftName === rightName;
 }
 
 export function forEachClass(sourceFile: ts.SourceFile, callback: (node: ClassLike) => void): void {
@@ -84,6 +94,12 @@ export function getClassMethods(node: ClassLike): ClassMethod[] {
   );
 
   return methods.filter((method, index) => {
+    if (ts.isConstructorDeclaration(method)) {
+      if (method.body) {
+        return true;
+      }
+      return !methods.slice(index + 1).some((candidate) => ts.isConstructorDeclaration(candidate));
+    }
     if (!ts.isMethodDeclaration(method) || method.body) {
       return true;
     }

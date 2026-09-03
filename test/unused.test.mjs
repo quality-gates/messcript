@@ -258,3 +258,34 @@ const { [key]: alias = values[key] } = values;
   assert.equal(fields.find((declaration) => declaration.name === "readExternal")?.used, true);
   assert.equal(declarations.some((declaration) => declaration.name === "Imported"), false);
 });
+
+test("destructuring this marks private fields and methods as used", () => {
+  const file = sourceFile(`
+class Service {
+  private count = 1;
+  private log() {}
+  private asField = 2;
+  private assertField = 3;
+  private assignField = 4;
+  private renameField = 5;
+  private unused = 6;
+  action() {
+    const { count, log } = this;
+    const { asField } = (this as any);
+    const { assertField } = (<any>this);
+    let assignField, renameField;
+    ({ assignField, renameField: localRename } = this);
+    log();
+    return count + asField + assertField + assignField + localRename;
+  }
+}
+`);
+  const declarations = analyzeUnused(file);
+  assert.equal(declarations.find((d) => d.name === "count")?.used, true);
+  assert.equal(declarations.find((d) => d.name === "log")?.used, true);
+  assert.equal(declarations.find((d) => d.name === "asField")?.used, true);
+  assert.equal(declarations.find((d) => d.name === "assertField")?.used, true);
+  assert.equal(declarations.find((d) => d.name === "assignField")?.used, true);
+  assert.equal(declarations.find((d) => d.name === "renameField")?.used, true);
+  assert.equal(declarations.find((d) => d.name === "unused")?.used, false);
+});

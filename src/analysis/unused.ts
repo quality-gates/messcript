@@ -352,6 +352,32 @@ class UnusedAnalyzer {
     }
   }
 
+  private unwrapExpression(expr: ts.Expression): ts.Expression {
+    let cur = expr;
+    while (ts.isParenthesizedExpression(cur) || ts.isAsExpression(cur) || ts.isTypeAssertionExpression(cur)) {
+      cur = cur.expression;
+    }
+    return cur;
+  }
+
+  private checkThisDestructuring(scope: Scope, pattern: ts.BindingName, initializer: ts.Expression | undefined): void {
+    if (!initializer || !ts.isObjectBindingPattern(pattern)) {
+      return;
+    }
+    if (this.unwrapExpression(initializer).kind === ts.SyntaxKind.ThisKeyword) {
+      for (const element of pattern.elements) {
+        const memberName = element.propertyName && ts.isIdentifier(element.propertyName)
+          ? element.propertyName.text
+          : ts.isIdentifier(element.name)
+          ? element.name.text
+          : undefined;
+        if (memberName) {
+          this.markPrivate(scope, memberName, element);
+        }
+      }
+    }
+  }
+
   // messcript-disable-next-line CyclomaticComplexity NPathComplexity ExcessiveMethodLength
   private visitReferences(node: ts.Node): void {
     const scope = this.scopeByNode.get(node) ?? this.root;
@@ -374,6 +400,19 @@ class UnusedAnalyzer {
       }
       return;
     }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      const right = this.unwrapExpression(node.right);
+      const left = this.unwrapExpression(node.left);
+      if (right.kind === ts.SyntaxKind.ThisKeyword && ts.isObjectLiteralExpression(left)) {
+        for (const prop of left.properties) {
+          if (ts.isShorthandPropertyAssignment(prop)) {
+            this.markPrivate(scope, prop.name.text, prop);
+          } else if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name)) {
+            this.markPrivate(scope, prop.name.text, prop);
+          }
+        }
+      }
+    }
     if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
       for (const child of node.members) {
         this.visitReferences(child);
@@ -385,6 +424,7 @@ class UnusedAnalyzer {
       return;
     }
     if (ts.isVariableDeclaration(node)) {
+      this.checkThisDestructuring(scope, node.name, node.initializer);
       if (node.type) {
         this.visitReferences(node.type);
       }
@@ -394,6 +434,7 @@ class UnusedAnalyzer {
       return;
     }
     if (ts.isParameter(node)) {
+      this.checkThisDestructuring(scope, node.name, node.initializer);
       if (node.type) {
         this.visitReferences(node.type);
       }

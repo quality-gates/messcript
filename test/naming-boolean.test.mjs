@@ -63,8 +63,11 @@ test("boolean types, expressions, and function return boundaries are precise", (
   assert.equal(isBooleanType(sourceFile("let value: Boolean;").statements[0].declarationList.declarations[0].type), true);
   assert.equal(isBooleanType(sourceFile("let value: (boolean);").statements[0].declarationList.declarations[0].type), true);
 
+  const nullUndefined = sourceFile("let value: null | undefined;").statements[0].declarationList.declarations[0].type;
+  assert.equal(isBooleanType(nullUndefined), false);
+
   const expression = (value) => sourceFile(`const result = ${value};`).statements[0].declarationList.declarations[0].initializer;
-  for (const value of ["true", "false", "!value", "left === right", "left < right", "value in object", "value instanceof Type", "Boolean(value)"]) {
+  for (const value of ["true", "false", "!value", "left === right", "left < right", "value in object", "value instanceof Type", "Boolean(value)", "(left === right)", "((true))", "(!value)"]) {
     assert.equal(isBooleanExpression(expression(value)), true, value);
   }
   assert.equal(isBooleanExpression(expression("value")), false);
@@ -92,7 +95,7 @@ test("boolean types, expressions, and function return boundaries are precise", (
 
 test("boolean rules cover typed, inferred, destructured, parameterized, and non-boolean cases", () => {
   const file = sourceFile(`
-export function booleanArguments(this: boolean, flag: boolean, boxed: Boolean, union: boolean | undefined, wrapped: (boolean), negated = !flag, off = false, bitwise = ~flag, text: String, count: number, number = 1) {}
+export function booleanArguments(this: boolean, flag: boolean, boxed: Boolean, union: boolean | undefined, wrapped: (boolean), negated = !flag, off = false, bitwise = ~flag, text: String, count: number, number = 1, nullish: null | undefined) {}
 export function destructured({ enabled = true, optional, count = 1, nested: { nestedEnabled = true } } = {}) {}
 export function getFlag(): boolean { return true; }
 export function getParameter(value: boolean): boolean { return value; }
@@ -100,6 +103,8 @@ export function getConditional(value: boolean): boolean { if (value) return true
 export function getPartial(value) { if (value) return true; }
 export function getNumber(): number { return 1; }
 export function isReady(): boolean { return true; }
+export function getParens() { return (code === 200); }
+export function getNullish(): null | undefined { return null; }
 class Service {
   getFlag(): boolean { return true; }
   private hidden(flag: boolean) {}
@@ -108,12 +113,19 @@ class Service {
 `);
   const argumentFindings = findBooleanArgumentFlag(file).filter((finding) => /booleanArguments|destructured/.test(finding.context));
   assert.deepEqual(names(argumentFindings).sort(), ["boxed", "enabled", "flag", "negated", "nestedEnabled", "off", "union", "wrapped"]);
-  assert.doesNotMatch(messages(argumentFindings).join("\n"), /optional|count|number|hidden/);
+  assert.doesNotMatch(messages(argumentFindings).join("\n"), /optional|count|number|hidden|nullish/);
   assert.doesNotMatch(messages(argumentFindings).join("\n"), /this|bitwise|text/);
 
+  // Default: checkParameterizedMethods is false, so getParameter and getConditional are skipped
   const getFindings = findBooleanGetMethodName(file);
-  assert.deepEqual(names(getFindings).sort(), ["getConditional", "getFlag", "getFlag", "getParameter"]);
-  assert.doesNotMatch(messages(getFindings).join("\n"), /getNumber|getPartial|isReady/);
+  assert.deepEqual(names(getFindings).sort(), ["getFlag", "getFlag", "getParens"]);
+  assert.doesNotMatch(messages(getFindings).join("\n"), /getNumber|getPartial|isReady|getParameter|getConditional|getNullish/);
+
+  // When checkParameterizedMethods is true, parameterized methods are checked as well
+  booleanGetProperties.checkParameterizedMethods = true;
+  const parameterizedFindings = findBooleanGetMethodName(file);
+  assert.deepEqual(names(parameterizedFindings).sort(), ["getConditional", "getFlag", "getFlag", "getParameter", "getParens"]);
+  booleanGetProperties.checkParameterizedMethods = false;
 });
 
 test("boolean argument flags ignore parameters with non-boolean union members", () => {
@@ -146,8 +158,10 @@ export function forgetFlag(): boolean { return true; }
   booleanArgumentProperties.ignorepattern = "";
   assert.equal(findBooleanArgumentFlag(sourceFile("export const Anonymous = class { flagMethod(flag: boolean) {} };")).length, 1);
 
-  booleanGetProperties.checkParameterizedMethods = true;
+  booleanGetProperties.checkParameterizedMethods = false;
   assert.deepEqual(names(findBooleanGetMethodName(sourceFile("function getFlag(value: boolean): boolean { return value; } function getNoParam(): boolean { return true; }"))), ["getNoParam"]);
+  booleanGetProperties.checkParameterizedMethods = true;
+  assert.deepEqual(names(findBooleanGetMethodName(sourceFile("function getFlag(value: boolean): boolean { return value; } function getNoParam(): boolean { return true; }"))), ["getFlag", "getNoParam"]);
   booleanGetProperties.checkParameterizedMethods = false;
   const getFindings = findBooleanGetMethodName(file);
   assert.deepEqual(names(getFindings), ["GetUpper"]);
@@ -196,6 +210,21 @@ export const goodValue = 3;
   assert.deepEqual(names(findCamelCasePropertyName(file)), ["bad_property"]);
   assert.deepEqual(names(findCamelCaseVariableName(file)).sort(), ["bad_local", "bad_variable"]);
   assert.deepEqual(names(findConstantNamingConventions(file)).sort(), ["bad_arrow", "bad_constant", "goodValue"]);
+});
+
+test("CamelCaseMethodName does not false-positive on quoted valid camelCase method names", () => {
+  const file = sourceFile(`
+interface Example {
+  "validCamel"(): void;
+  "bad_name"(): void;
+}
+class Implementation {
+  "validMethod"() {}
+  "another_bad"() {}
+}
+`);
+  const findings = findCamelCaseMethodName(file);
+  assert.deepEqual(names(findings).sort(), ["another_bad", "bad_name"]);
 });
 
 test("camelCase rules honor allow-underscore for a leading underscore, and allow-underscore-test scoped to test files", () => {
