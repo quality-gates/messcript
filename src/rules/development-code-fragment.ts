@@ -38,10 +38,7 @@ function trackTemplateExpression(scanner: ts.Scanner, token: ts.SyntaxKind, dept
     return token;
   }
   if (token === ts.SyntaxKind.SlashToken || token === ts.SyntaxKind.SlashEqualsToken) {
-    const rescanned = scanner.reScanSlashToken();
-    if (rescanned === ts.SyntaxKind.RegularExpressionLiteral) {
-      return rescanned;
-    }
+    return scanner.reScanSlashToken();
   }
   const depth = depths.length - 1;
   if (token === ts.SyntaxKind.OpenBraceToken) {

@@ -49,7 +49,8 @@ class OverloadedContract implements Contract {
 import type { ExternalType } from "missing-dependency";
 export type Alias = ExternalType | Ambient.Value;
 `;
-  const suppressionSource = `// messcript-disable-next-line CyclomaticComplexity
+  const suppressionSource = `const _template = \`prefix \${/[{]/.test("a")} \${/=foo{/.test("b")}\`;
+// messcript-disable-next-line CyclomaticComplexity
 ${complexSource}
 // eslint-disable-next-line CyclomaticComplexity
 ${complexSource.replace("complex(", "complexAgain(")}`;

@@ -374,7 +374,7 @@ function extractDestructuringTargets(
       }
       if (ts.isSpreadElement(element)) {
         extractDestructuringTargets(element.expression, onTarget);
-      } else if (ts.isBinaryExpression(element) && element.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      } else if (ts.isBinaryExpression(element)) {
         extractDestructuringTargets(element.left, onTarget);
       } else {
         extractDestructuringTargets(element, onTarget);
@@ -385,7 +385,7 @@ function extractDestructuringTargets(
       if (ts.isShorthandPropertyAssignment(property)) {
         onTarget(property.name);
       } else if (ts.isPropertyAssignment(property)) {
-        if (ts.isBinaryExpression(property.initializer) && property.initializer.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        if (ts.isBinaryExpression(property.initializer)) {
           extractDestructuringTargets(property.initializer.left, onTarget);
         } else {
           extractDestructuringTargets(property.initializer, onTarget);

@@ -161,11 +161,18 @@ function plain() {
 // TODO after plain braces, no template ever scanned
 `);
   const regexLiteralWithBraces = sourceFile(`
-const greeting = \`matched: \${/\\d{4}/.test("2026")}\`;
-// TODO after regex with braces
+const greeting = \`matched: \${/[{]/.test("2026")}\`;
+// TODO after regex with unbalanced brace
 function work() {}
 `);
   assert.equal(findDevelopmentCodeFragment(regexLiteralWithBraces).length, 1);
+
+  const regexLiteralWithSlashEquals = sourceFile(`
+const greeting = \`matched: \${/=foo{/.test("=foo{")}\`;
+// TODO after regex starting with slash equals
+function work() {}
+`);
+  assert.equal(findDevelopmentCodeFragment(regexLiteralWithSlashEquals).length, 1);
 });
 
 test("duplicate keys recognize static literals and ignore dynamic keys", () => {
@@ -201,11 +208,17 @@ const object = {
   set foo(v) {},
   get bar() { return 1; },
   get bar() { return 2; },
+  set baz(v) {},
+  set baz(v) {},
+  set qux(v) {},
+  qux: 1,
 };
 `);
   const gsFindings = findDuplicatedArrayKey(getterSetter);
-  assert.equal(gsFindings.length, 1);
+  assert.equal(gsFindings.length, 3);
   assert.match(gsFindings[0].message, /bar/);
+  assert.match(gsFindings[1].message, /baz/);
+  assert.match(gsFindings[2].message, /qux/);
 });
 
 test("CyclomaticComplexity handles deeply nested statements", () => {
@@ -317,9 +330,14 @@ class OnlyConstructors {
   constructor(x: number);
   constructor(x?: number) {}
 }
+class WithBody {
+  constructor(x: number);
+  constructor(x: any) { this.x = x; }
+}
 `);
   // Constructor overloads are deduplicated down to 1 constructor
   assert.equal(getClassMethods(constructorFile.statements[0]).length, 1);
+  assert.equal(getClassMethods(constructorFile.statements[1]).length, 1);
   methodsProperties.maxmethods = 1;
   assert.equal(findTooManyMethods(constructorFile).length, 0);
   publicMethodsProperties.maxmethods = 1;
@@ -331,8 +349,26 @@ class Service {
 }
 `);
   // default ignorepattern matches ^get case-insensitively, so "getName" is ignored
-  methodsProperties.maxmethods = 0;
   assert.equal(findTooManyMethods(literalMethodFile).length, 0);
+  assert.equal(findTooManyPublicMethods(literalMethodFile).length, 0);
+
+  // explicitly match only exact get to confirm unquoted literal name is checked
+  methodsProperties.ignorepattern = "^get$";
+  publicMethodsProperties.ignorepattern = "^get$";
+  methodsProperties.maxmethods = 0;
+  publicMethodsProperties.maxmethods = 0;
+  assert.equal(findTooManyMethods(literalMethodFile).length, 1);
+  assert.equal(findTooManyPublicMethods(literalMethodFile).length, 1);
+
+  const classExpression = sourceFile(`
+export const ExpressionClass = class {
+  method() { return 1; }
+};
+`);
+  assert.match(messages(findTooManyMethods(classExpression))[0], /ExpressionClass/);
+  assert.match(messages(findTooManyPublicMethods(classExpression))[0], /ExpressionClass/);
+  methodsProperties.ignorepattern = "";
+  publicMethodsProperties.ignorepattern = "";
   methodsProperties.maxmethods = 25;
   publicMethodsProperties.maxmethods = 10;
 });
@@ -394,13 +430,27 @@ class Cohesive {
   assert.equal(findLackOfCohesionOfMethods(cohesionFile, 2).length, 0);
 
   const staticCohesionFile = sourceFile(`
+class OtherClass {
+  static otherShared = 0;
+  static otherMethod() { return 1; }
+}
 class StaticCohesion {
   static shared = 1;
-  static methodA() { return StaticCohesion.shared; }
+  static helper() { return 2; }
+  static methodA() {
+    OtherClass.otherMethod();
+    OtherClass.otherShared = 1;
+    StaticCohesion.helper();
+    return StaticCohesion.shared;
+  }
   static methodB() { StaticCohesion.shared = 2; }
+  instanceMethod() {
+    StaticCohesion.shared = 3;
+    return StaticCohesion.helper();
+  }
 }
 `);
-  assert.equal(calculateLcom4(staticCohesionFile.statements[0]), 1);
+  assert.equal(calculateLcom4(staticCohesionFile.statements[1]), 1);
 });
 
 test("structural rules support JavaScript syntax and configured opt-ins", () => {
@@ -517,13 +567,24 @@ class StaticState {
 
 test("global-variable analysis observes mutations via destructuring assignments", () => {
   const file = sourceFile(`
-let destructuredArray = 0;
-let destructuredObject = 0;
-[destructuredArray] = [1];
-({ key: destructuredObject } = { key: 2 });
+let a = 0, b = 0, c = 0, d = 0, e = 0, f = 0, g = 0, h = 0;
+([a]) = [1];
+[, b] = [0, 1];
+[c = 10] = [];
+[...d] = [1, 2];
+({ key: e } = { key: 1 });
+({ key: f = 10 } = {});
+({ ...g } = { x: 1 });
+({ h } = { h: 1 });
+class Foo { static prop = 0; }
+[Foo.prop] = [1];
 `);
   const findings = findGlobalVariable([file], false);
   const found = messages(findings);
-  assert.ok(found.some((m) => /destructuredArray/.test(m)));
-  assert.ok(found.some((m) => /destructuredObject/.test(m)));
+  for (const name of ["a", "b", "c", "d", "e", "f", "g", "h", "prop"]) {
+    assert.ok(
+      findings.some((f) => f.message.endsWith(`: ${name}.`)),
+      `expected ${name} to be marked mutated`,
+    );
+  }
 });

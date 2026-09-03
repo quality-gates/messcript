@@ -264,16 +264,28 @@ test("destructuring this marks private fields and methods as used", () => {
 class Service {
   private count = 1;
   private log() {}
-  private unused = 2;
+  private asField = 2;
+  private assertField = 3;
+  private assignField = 4;
+  private renameField = 5;
+  private unused = 6;
   action() {
     const { count, log } = this;
+    const { asField } = (this as any);
+    const { assertField } = (<any>this);
+    let assignField, renameField;
+    ({ assignField, renameField: localRename } = this);
     log();
-    return count;
+    return count + asField + assertField + assignField + localRename;
   }
 }
 `);
   const declarations = analyzeUnused(file);
   assert.equal(declarations.find((d) => d.name === "count")?.used, true);
   assert.equal(declarations.find((d) => d.name === "log")?.used, true);
+  assert.equal(declarations.find((d) => d.name === "asField")?.used, true);
+  assert.equal(declarations.find((d) => d.name === "assertField")?.used, true);
+  assert.equal(declarations.find((d) => d.name === "assignField")?.used, true);
+  assert.equal(declarations.find((d) => d.name === "renameField")?.used, true);
   assert.equal(declarations.find((d) => d.name === "unused")?.used, false);
 });
