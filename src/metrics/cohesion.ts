@@ -123,6 +123,15 @@ function directReceiverMember(
   return undefined;
 }
 
+function isForeignClassMember(
+  receiver: Receiver,
+  receiverName: string | undefined,
+  methodScope: Scope,
+  className: string | undefined,
+): boolean {
+  return receiver === "class" && (methodScope !== "static" || receiverName !== className);
+}
+
 // messcript-disable-next-line CyclomaticComplexity
 function directFieldAccess(
   expression: ts.Expression,
@@ -133,13 +142,10 @@ function directFieldAccess(
 ): string | undefined {
   const member = directReceiverMember(expression, sourceFile);
   if (member) {
+    if (isForeignClassMember(member.receiver, member.receiverName, methodScope, className)) {
+      return undefined;
+    }
     const scope = member.receiver === "this" ? methodScope : "static";
-    if (member.receiver === "class" && className && member.receiverName !== className) {
-      return undefined;
-    }
-    if (member.receiver === "class" && methodScope !== "static") {
-      return undefined;
-    }
     return fields.get(scopedKey(scope, member.name))?.key;
   }
   const unwrapped = unwrapExpression(expression);
@@ -277,7 +283,7 @@ function collectUses(
   }
 
   function addAccessorOrMethod(receiver: Receiver, name: string, receiverName?: string): void {
-    if (receiver === "class" && (method.scope !== "static" || (className && receiverName !== className))) {
+    if (isForeignClassMember(receiver, receiverName, method.scope, className)) {
       return;
     }
     const scope = receiver === "this" || receiver === "bare" ? method.scope : "static";
@@ -323,7 +329,7 @@ function collectUses(
       const member = directReceiverMember(node, sourceFile);
       if (member) {
         addField(node);
-        if (member.receiver === "class" && (method.scope !== "static" || (className && member.receiverName !== className))) {
+        if (isForeignClassMember(member.receiver, member.receiverName, method.scope, className)) {
           return;
         }
         const scope = member.receiver === "this" || member.receiver === "bare" ? method.scope : "static";

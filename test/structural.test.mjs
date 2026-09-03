@@ -334,21 +334,36 @@ class WithBody {
   constructor(x: number);
   constructor(x: any) { this.x = x; }
 }
+class WithBodyAndMethods {
+  constructor(x: number);
+  constructor(x: any) { this.x = x; }
+  trailing() {}
+}
+declare class AmbientConstructors {
+  constructor(x: number);
+  constructor(x: string);
+}
 `);
   // Constructor overloads are deduplicated down to 1 constructor
   assert.equal(getClassMethods(constructorFile.statements[0]).length, 1);
   assert.equal(getClassMethods(constructorFile.statements[1]).length, 1);
-  methodsProperties.maxmethods = 1;
+  assert.equal(getClassMethods(constructorFile.statements[2]).length, 2);
+  assert.equal(getClassMethods(constructorFile.statements[3]).length, 1);
+  methodsProperties.maxmethods = 2;
   assert.equal(findTooManyMethods(constructorFile).length, 0);
-  publicMethodsProperties.maxmethods = 1;
+  publicMethodsProperties.maxmethods = 2;
   assert.equal(findTooManyPublicMethods(constructorFile).length, 0);
 
   const literalMethodFile = sourceFile(`
 class Service {
   "getName"() { return "test"; }
+  123() { return "num"; }
+  \`templateName\`() { return "tpl"; }
 }
 `);
   // default ignorepattern matches ^get case-insensitively, so "getName" is ignored
+  methodsProperties.maxmethods = 2;
+  publicMethodsProperties.maxmethods = 2;
   assert.equal(findTooManyMethods(literalMethodFile).length, 0);
   assert.equal(findTooManyPublicMethods(literalMethodFile).length, 0);
 
