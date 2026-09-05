@@ -5,4 +5,6 @@ WORKDIR /workspace
 COPY package*.json ./
 RUN npm ci
 COPY . .
+VOLUME ["/workspace/node_modules"]
 CMD ["npm", "test"]
+
