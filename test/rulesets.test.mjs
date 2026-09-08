@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { loadRulesets } from "../dist/rulesets.js";
+import { applyRuleFilters, loadRulesets } from "../dist/rulesets.js";
 
 let workspace;
 
@@ -54,3 +54,44 @@ test("regular (non-CDATA) text content still has entity-decoding applied", () =>
 
   assert.equal(loaded.selections[0].properties.exceptions, "a & b");
 });
+
+test("applyRuleFilters filters by priority range [minimumPriority, maximumPriority]", () => {
+  const loaded = {
+    rulesets: ["custom"],
+    warnings: [],
+    selections: [
+      { name: "Rule1", rulesetName: "custom", priority: 1, properties: {} },
+      { name: "Rule2", rulesetName: "custom", priority: 2, properties: {} },
+      { name: "Rule3", rulesetName: "custom", priority: 3, properties: {} },
+      { name: "Rule4", rulesetName: "custom", priority: 4, properties: {} },
+      { name: "Rule5", rulesetName: "custom", priority: 5, properties: {} },
+    ],
+  };
+
+  const range1to2 = applyRuleFilters(loaded, { minimumPriority: 1, maximumPriority: 2 });
+  assert.deepEqual(range1to2.selections.map((s) => s.name), ["Rule1", "Rule2"]);
+
+  const range2to4 = applyRuleFilters(loaded, { minimumPriority: 2, maximumPriority: 4 });
+  assert.deepEqual(range2to4.selections.map((s) => s.name), ["Rule2", "Rule3", "Rule4"]);
+});
+
+test("applyRuleFilters handles single boundary filters", () => {
+  const loaded = {
+    rulesets: ["custom"],
+    warnings: [],
+    selections: [
+      { name: "Rule1", rulesetName: "custom", priority: 1, properties: {} },
+      { name: "Rule2", rulesetName: "custom", priority: 2, properties: {} },
+      { name: "Rule3", rulesetName: "custom", priority: 3, properties: {} },
+      { name: "Rule4", rulesetName: "custom", priority: 4, properties: {} },
+      { name: "Rule5", rulesetName: "custom", priority: 5, properties: {} },
+    ],
+  };
+
+  const max2 = applyRuleFilters(loaded, { maximumPriority: 2 });
+  assert.deepEqual(max2.selections.map((s) => s.name), ["Rule1", "Rule2"]);
+
+  const min3 = applyRuleFilters(loaded, { minimumPriority: 3 });
+  assert.deepEqual(min3.selections.map((s) => s.name), ["Rule3", "Rule4", "Rule5"]);
+});
+
