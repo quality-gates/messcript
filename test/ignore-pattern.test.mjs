@@ -241,6 +241,34 @@ test("StaticAccess exceptions suppress named receivers", () => {
   assert.doesNotMatch(result.stdout, /Logger/);
 });
 
+test("BooleanArgumentFlag exceptions suppress findings on class expressions", () => {
+  const source = writeSource(
+    "boolean-class-expr-exceptions.ts",
+    `export const MyService = class {
+  doWork(flag: boolean) {}
+};
+export const OtherService = class {
+  doWork(flag: boolean) {}
+};
+`,
+  );
+  const ruleset = writeRuleset(
+    "boolean-class-expr-exceptions.xml",
+    `<ruleset name="ok">
+  <rule ref="BooleanArgumentFlag">
+    <properties>
+      <property name="exceptions" value="MyService"/>
+    </properties>
+  </rule>
+</ruleset>`,
+  );
+
+  const result = run([source, "text", ruleset]);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /OtherService::doWork/);
+  assert.doesNotMatch(result.stdout, /MyService::doWork/);
+});
+
 test("a single rule failure does not drop findings from other rules on the same file", () => {
   const source = writeSource(
     "isolated.ts",

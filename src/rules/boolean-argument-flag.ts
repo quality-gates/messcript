@@ -5,6 +5,7 @@ import { forEachFunction } from "../ast/functions";
 import { isBooleanType } from "../metrics/boolean";
 import type { Finding } from "../finding";
 import {
+  className,
   createCleanCodeFinding,
   enclosingClass,
   functionContext,
@@ -50,7 +51,8 @@ function booleanBindingIdentifiers(name: ts.BindingName, initializer: ts.Express
 
 function isIgnored(node: ts.Node, sourceFile: ts.SourceFile, ignoreRegex: RegExp | undefined): boolean {
   const owner = enclosingClass(node);
-  if (owner?.name && parseCommaSeparatedNames(properties.exceptions).includes(owner.name.text)) {
+  const ownerName = owner ? className(owner) : undefined;
+  if (ownerName && parseCommaSeparatedNames(properties.exceptions).includes(ownerName)) {
     return true;
   }
   const methodName = ts.isFunctionLike(node) && node.name && !ts.isComputedPropertyName(node.name)
