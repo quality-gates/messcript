@@ -235,6 +235,29 @@ class UnusedAnalyzer {
     }
   }
 
+  private buildFor(node: ts.ForStatement, parent: Scope): void {
+    const loopScope: Scope = { parent, bindings: new Map(), root: false };
+    this.scopeByNode.set(node, loopScope);
+    if (node.initializer) {
+      this.build(node.initializer, loopScope);
+    }
+    if (node.condition) {
+      this.build(node.condition, loopScope);
+    }
+    if (node.incrementor) {
+      this.build(node.incrementor, loopScope);
+    }
+    this.build(node.statement, loopScope);
+  }
+
+  private buildForInOrOf(node: ts.ForInStatement | ts.ForOfStatement, parent: Scope): void {
+    const loopScope: Scope = { parent, bindings: new Map(), root: false };
+    this.scopeByNode.set(node, loopScope);
+    this.build(node.expression, parent);
+    this.build(node.initializer, loopScope);
+    this.build(node.statement, loopScope);
+  }
+
   // messcript-disable-next-line CyclomaticComplexity NPathComplexity
   private build(node: ts.Node, scope: Scope): void {
     this.scopeByNode.set(node, scope);
@@ -299,6 +322,14 @@ class UnusedAnalyzer {
     }
     if (ts.isMethodDeclaration(node) || ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node)) {
       this.buildFunction(node, scope);
+      return;
+    }
+    if (ts.isForStatement(node)) {
+      this.buildFor(node, scope);
+      return;
+    }
+    if (ts.isForInStatement(node) || ts.isForOfStatement(node)) {
+      this.buildForInOrOf(node, scope);
       return;
     }
     if (ts.isCatchClause(node)) {

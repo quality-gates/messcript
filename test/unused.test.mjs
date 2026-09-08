@@ -289,3 +289,127 @@ class Service {
   assert.equal(declarations.find((d) => d.name === "renameField")?.used, true);
   assert.equal(declarations.find((d) => d.name === "unused")?.used, false);
 });
+
+test("sequential loops sharing variable names resolve references to their own declaration", () => {
+  const file = sourceFile(`
+function forLoops() {
+  for (let i = 0; i < 10; i++) {
+    console.log(i);
+  }
+  for (let i = 0; i < 10; i++) {
+    console.log(i);
+  }
+}
+
+function forOfLoops(arr1: number[], arr2: number[]) {
+  for (const item of arr1) {
+    console.log(item);
+  }
+  for (const item of arr2) {
+    console.log(item);
+  }
+}
+
+function forInLoops(obj1: Record<string, number>, obj2: Record<string, number>) {
+  for (const key in obj1) {
+    console.log(key);
+  }
+  for (const key in obj2) {
+    console.log(key);
+  }
+}
+`);
+  const findings = findUnusedLocalVariable(file);
+  assert.deepEqual(findings, []);
+});
+
+test("sequential loops correctly flag only unused loop variables", () => {
+  const file = sourceFile(`
+function testFor() {
+  for (let i = 0; i < 10; i++) {
+    console.log(i);
+  }
+  for (let i = 0; false; ) {
+  }
+}
+
+function testForOf(arr1: number[], arr2: number[]) {
+  for (const item of arr1) {
+    console.log(item);
+  }
+  for (const item of arr2) {
+  }
+}
+
+function testForIn(obj1: Record<string, number>, obj2: Record<string, number>) {
+  for (const key in obj1) {
+    console.log(key);
+  }
+  for (const key in obj2) {
+  }
+}
+`);
+  const findings = findUnusedLocalVariable(file);
+  assert.equal(findings.length, 3);
+  assert.equal(findings[0].line, 6);
+  assert.equal(findings[0].context, "local variable i");
+  assert.equal(findings[1].line, 14);
+  assert.equal(findings[1].context, "local variable item");
+  assert.equal(findings[2].line, 22);
+  assert.equal(findings[2].context, "local variable key");
+});
+
+test("nested loops shadowing outer loop variable isolate scopes", () => {
+  const file = sourceFile(`
+function nested() {
+  for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 5; i++) {
+      console.log(i);
+    }
+    console.log(i);
+  }
+}
+`);
+  const findings = findUnusedLocalVariable(file);
+  assert.deepEqual(findings, []);
+});
+
+test("for loops handle condition, incrementor, empty clauses, and iterable expressions", () => {
+  const file = sourceFile(`
+function testConditions() {
+  for (let i = 0; i < 10;) {
+    break;
+  }
+}
+
+function testIncrementors() {
+  for (let j = 0; ; j++) {
+    break;
+  }
+}
+
+function testEmptyFor() {
+  for (;;) {
+    break;
+  }
+}
+
+function testOfExpression() {
+  const item = [1, 2];
+  for (const item of item) {
+    console.log(item);
+  }
+}
+
+function testInExpression() {
+  const key = { a: 1 };
+  for (const key in key) {
+    console.log(key);
+  }
+}
+`);
+  const findings = findUnusedLocalVariable(file);
+  assert.deepEqual(findings, []);
+});
+
+
