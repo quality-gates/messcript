@@ -603,8 +603,8 @@ export function applyRuleFilters(
     return (
       (requestedSet.size === 0 || requestedSet.has(selection.name.toLowerCase())) &&
       !disabled.includes(selection.name.toLowerCase()) &&
-      (options.minimumPriority === undefined || priority <= options.minimumPriority) &&
-      (options.maximumPriority === undefined || priority >= options.maximumPriority)
+      (options.minimumPriority === undefined || priority >= options.minimumPriority) &&
+      (options.maximumPriority === undefined || priority <= options.maximumPriority)
     );
   });
   return { ...loaded, selections };

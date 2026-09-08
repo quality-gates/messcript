@@ -909,9 +909,10 @@ test("successful help, version, option boundaries, and parser-error exit handlin
   assert.equal(optionFollowedByOption.status, 1);
   assert.match(optionFollowedByOption.stderr, /Missing value for option: --only/);
   const validMaximumPriority = runCli([source, "text", "codesize", "--maximum-priority", "1"]);
-  assert.equal(validMaximumPriority.status, direct.status);
+  assert.equal(validMaximumPriority.status, 0);
+  assert.equal(validMaximumPriority.stdout, "");
   const validMaximumPriorityFive = runCli([source, "text", "codesize", "--maximum-priority", "5"]);
-  assert.equal(validMaximumPriorityFive.status, 0);
+  assert.equal(validMaximumPriorityFive.status, direct.status);
   const invalidMaximumPriority = runCli([source, "text", "codesize", "--maximum-priority", "6"]);
   assert.equal(invalidMaximumPriority.status, 1);
   assert.match(invalidMaximumPriority.stderr, /expects a priority between 1 and 5/);
@@ -1524,12 +1525,28 @@ test("only, enable, disable, and priority filters select loaded rules", () => {
     "--disable",
     "CyclomaticComplexity",
   ]);
-  const priority = runCli([
+  const priorityMax = runCli([
+    join(scanRoot, "src", "naming.ts"),
+    "text",
+    join(scanRoot, "rulesets", "focused.xml"),
+    "--maximum-priority",
+    "1",
+  ]);
+  const priorityMin = runCli([
+    join(scanRoot, "src", "naming.ts"),
+    "text",
+    join(scanRoot, "rulesets", "focused.xml"),
+    "--minimum-priority",
+    "2",
+  ]);
+  const priorityRange = runCli([
     join(scanRoot, "src", "naming.ts"),
     "text",
     join(scanRoot, "rulesets", "focused.xml"),
     "--minimum-priority",
     "1",
+    "--maximum-priority",
+    "2",
   ]);
   const absent = runCli([
     join(fixturesRoot, "complex.ts"),
@@ -1551,9 +1568,15 @@ test("only, enable, disable, and priority filters select loaded rules", () => {
   assert.doesNotMatch(only.stdout, /CyclomaticComplexity|Excessive/);
   assert.equal(disabled.status, 0);
   assert.equal(disabled.stdout, "");
-  assert.equal(priority.status, 2);
-  assert.match(priority.stdout, /LongVariable \[priority 1\]/);
-  assert.doesNotMatch(priority.stdout, /CyclomaticComplexity/);
+  assert.equal(priorityMax.status, 2);
+  assert.match(priorityMax.stdout, /LongVariable \[priority 1\]/);
+  assert.doesNotMatch(priorityMax.stdout, /CyclomaticComplexity/);
+  assert.equal(priorityMin.status, 2);
+  assert.match(priorityMin.stdout, /CyclomaticComplexity \[priority 2\]/);
+  assert.doesNotMatch(priorityMin.stdout, /LongVariable/);
+  assert.equal(priorityRange.status, 2);
+  assert.match(priorityRange.stdout, /LongVariable \[priority 1\]/);
+  assert.match(priorityRange.stdout, /CyclomaticComplexity \[priority 2\]/);
   assert.equal(absent.status, 1);
   assert.match(absent.stderr, /Requested rule 'longvariable' is not present/);
   assert.equal(invalidPriority.status, 1);
