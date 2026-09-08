@@ -89,13 +89,14 @@ function checkObjectLiteral(node: ts.ObjectLiteralExpression, sourceFile: ts.Sou
 
     if (key.kind === "get") {
       conflictLine = record.get?.line ?? record.value?.line;
-      record.get = { line };
     } else if (key.kind === "set") {
       conflictLine = record.set?.line ?? record.value?.line;
-      record.set = { line };
     } else {
-      conflictLine = record.value?.line ?? record.get?.line ?? record.set?.line;
-      record.value = { line };
+      conflictLine =
+        record.value?.line ??
+        (record.get && record.set
+          ? Math.min(record.get.line, record.set.line)
+          : (record.get?.line ?? record.set?.line));
     }
 
     if (conflictLine !== undefined) {
@@ -110,6 +111,7 @@ function checkObjectLiteral(node: ts.ObjectLiteralExpression, sourceFile: ts.Sou
         ),
       );
     } else {
+      record[key.kind] = { line };
       seen.set(key.key, record);
     }
   }

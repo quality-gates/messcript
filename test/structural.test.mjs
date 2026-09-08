@@ -221,6 +221,67 @@ const object = {
   assert.match(gsFindings[2].message, /qux/);
 });
 
+test("DuplicatedArrayKey preserves original declaration line for third and subsequent duplicate keys", () => {
+  const file = sourceFile(`
+const config = {
+  timeout: 100,
+  timeout: 200,
+  timeout: 300,
+  timeout: 400,
+};
+`);
+  const findings = findDuplicatedArrayKey(file);
+  assert.equal(findings.length, 3);
+  assert.deepEqual(
+    findings.map((f) => ({ line: f.line, message: f.message })),
+    [
+      { line: 4, message: "Duplicated array key timeout, first declared at line 3." },
+      { line: 5, message: "Duplicated array key timeout, first declared at line 3." },
+      { line: 6, message: "Duplicated array key timeout, first declared at line 3." },
+    ],
+  );
+
+  const accessorDuplicates = sourceFile(`
+const obj = {
+  get a() { return 1; },
+  get a() { return 2; },
+  get a() { return 3; },
+  set b(v) {},
+  set b(v) {},
+  set b(v) {},
+  get c() { return 1; },
+  set c(v) {},
+  c: 1,
+  c: 2,
+  set d(v) {},
+  get d() { return 1; },
+  d: 1,
+  d: 2,
+  e: 1,
+  get e() { return 1; },
+  set e(v) {},
+  e: 2,
+};
+`);
+  const accessorFindings = findDuplicatedArrayKey(accessorDuplicates);
+  assert.deepEqual(
+    accessorFindings.map((f) => ({ line: f.line, message: f.message })),
+    [
+      { line: 4, message: "Duplicated array key a, first declared at line 3." },
+      { line: 5, message: "Duplicated array key a, first declared at line 3." },
+      { line: 7, message: "Duplicated array key b, first declared at line 6." },
+      { line: 8, message: "Duplicated array key b, first declared at line 6." },
+      { line: 11, message: "Duplicated array key c, first declared at line 9." },
+      { line: 12, message: "Duplicated array key c, first declared at line 9." },
+      { line: 15, message: "Duplicated array key d, first declared at line 13." },
+      { line: 16, message: "Duplicated array key d, first declared at line 13." },
+      { line: 18, message: "Duplicated array key e, first declared at line 17." },
+      { line: 19, message: "Duplicated array key e, first declared at line 17." },
+      { line: 20, message: "Duplicated array key e, first declared at line 17." },
+    ],
+  );
+});
+
 test("CyclomaticComplexity handles deeply nested statements", () => {
   const depth = 830;
   const file = sourceFile(`function nested(value) {${"if (value) {".repeat(depth)}return 0;${"}".repeat(depth)}}`);
