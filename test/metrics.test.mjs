@@ -101,3 +101,47 @@ test("LCOM4 keeps static and instance state relationships separate", () => {
   assert.ok(ts.isClassDeclaration(classNode));
   assert.equal(calculateLcom4(classNode), 2);
 });
+
+test("LCOM4 ignores destructured locals that shadow instance fields", () => {
+  const sourceFile = ts.createSourceFile(
+    "destructure-cohesion.ts",
+    `const moduleState = { shared: 1, items: [1] };
+class Destructuring {
+  shared = 0;
+  other = 0;
+  addShared() { this.shared += 1; }
+  addOther() { const { shared } = moduleState; this.other += 1; return shared; }
+  renameOther() { const { shared: alias } = moduleState; this.other += 1; return alias; }
+  nestedOther() { const { deep: { shared } } = moduleState; this.other += 1; return shared; }
+  arrayOther() { const [, shared] = moduleState.items; this.other += 1; return shared; }
+  parameterOther({ shared }) { this.other += 1; return shared; }
+  touchShared() { return this.shared + 1; }
+}`,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const classNode = sourceFile.statements[1];
+  assert.ok(ts.isClassDeclaration(classNode));
+  assert.equal(calculateLcom4(classNode), 2);
+  assert.equal(findLackOfCohesionOfMethods(sourceFile).length, 1);
+});
+
+test("LCOM4 keeps the shadowed field disjoint when a method binds it locally", () => {
+  const sourceFile = ts.createSourceFile(
+    "shadow-cohesion.ts",
+    `const obj = { shared: 1 };
+export class C {
+  shared = 0;
+  other = 0;
+  a() { const x = 1; return this.shared + x; }
+  b() { const { shared } = obj; const x = 1; return shared + x; }
+}`,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const classNode = sourceFile.statements[1];
+  assert.ok(ts.isClassDeclaration(classNode));
+  assert.equal(calculateLcom4(classNode), 1);
+});
