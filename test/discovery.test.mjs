@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -19,6 +19,44 @@ test("discoverSourceFiles matches uppercase and mixed-case extensions the same a
     assert.deepEqual(
       result.files.map((path) => path.slice(dir.length + 1)).sort(),
       ["UpperComponent.TSX", "lowerComponent.tsx", "mixedComponent.TsX"].sort(),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("discoverSourceFiles classifies a test scan root and an explicit test file with --ignore-tests", () => {
+  const dir = mkdtempSync(join(tmpdir(), "messcript-discovery-tests-"));
+  try {
+    for (const directory of ["test", "tests", "spec", "__tests__"]) {
+      mkdirSync(join(dir, directory), { recursive: true });
+      writeFileSync(join(dir, directory, "helper.ts"), "export const x = 1;\n");
+    }
+    mkdirSync(join(dir, "app"), { recursive: true });
+    writeFileSync(join(dir, "app", "bar.ts"), "export const y = 1;\n");
+    writeFileSync(join(dir, "app", "foo.test.ts"), "export const z = 1;\n");
+    writeFileSync(join(dir, "app", "foo.spec.tsx"), "export const w = 1;\n");
+
+    for (const directory of ["test", "tests", "spec", "__tests__"]) {
+      assert.deepEqual(discoverSourceFiles([join(dir, directory)], { ignoreTests: true }).files, []);
+    }
+    assert.deepEqual(discoverSourceFiles([join(dir, "app", "foo.test.ts")], { ignoreTests: true }).files, []);
+    assert.deepEqual(discoverSourceFiles([join(dir, "app", "foo.spec.tsx")], { ignoreTests: true }).files, []);
+    assert.deepEqual(
+      discoverSourceFiles([join(dir, "app")], { ignoreTests: true }).files,
+      [join(dir, "app", "bar.ts")],
+    );
+    assert.deepEqual(
+      discoverSourceFiles([dir], {}).files.map((path) => path.slice(dir.length + 1)).sort(),
+      [
+        join("__tests__", "helper.ts"),
+        join("app", "bar.ts"),
+        join("app", "foo.spec.tsx"),
+        join("app", "foo.test.ts"),
+        join("spec", "helper.ts"),
+        join("test", "helper.ts"),
+        join("tests", "helper.ts"),
+      ].sort(),
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

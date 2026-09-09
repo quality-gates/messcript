@@ -2,7 +2,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, relative, resolve, sep } from "node:path";
 import ts from "typescript";
-import { isTestContextFileName } from "./rules/test-context";
+import { isTestContextDirectory, isTestContextFileName } from "./rules/test-context";
 
 export const sourceSuffixes = [
   ".d.ts",
@@ -69,8 +69,10 @@ function isExcluded(path: string, exclusions: readonly string[]): boolean {
   return exclusions.some((excludedPath) => path === excludedPath || path.startsWith(`${excludedPath}${sep}`));
 }
 
+// A path relative to the scan root cannot name the root itself, so a root that
+// is a test directory and an explicitly passed test file need their own checks.
 function isTestPath(path: string, rootPath: string): boolean {
-  return isTestContextFileName(relative(rootPath, path));
+  return isTestContextFileName(relative(rootPath, path)) || isTestContextFileName(basename(path)) || isTestContextDirectory(rootPath);
 }
 
 // messcript-disable-next-line CyclomaticComplexity NPathComplexity
