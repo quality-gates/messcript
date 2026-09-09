@@ -12,3 +12,11 @@ export function isTestContextFileName(path: string): boolean {
   const parts = path.split(sep);
   return parts.slice(0, -1).some((part) => testDirectoryNames.has(part.toLowerCase())) || /\.(?:test|spec)\.[^.]+$/i.test(basename(path));
 }
+
+/**
+ * Whether a path names a conventional test directory on its own, e.g. when the
+ * scan root itself is `test/` or `__tests__/`.
+ */
+export function isTestContextDirectory(path: string): boolean {
+  return testDirectoryNames.has(basename(path).toLowerCase());
+}

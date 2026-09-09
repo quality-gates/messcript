@@ -731,6 +731,8 @@ function visible(value) { if (value) return 1; return 0; }
   writeScanFixture("src/suppressed-only.ts", suppressedOnlySource);
   writeScanFixture("src/region-suppressions.ts", regionSuppressionSource);
   writeScanFixture("src/main.test.ts", complexSource);
+  writeScanFixture("src/main.spec.tsx", complexSource);
+  writeScanFixture("test/messy.ts", complexSource);
   writeScanFixture("src/custom.source", customSource);
   writeScanFixture("src/broken.ts", malformedSource);
   writeScanFixture("src/npath.ts", npathSource);
@@ -1758,6 +1760,30 @@ test("tests are included by default and ignored only when requested", () => {
   assert.match(ignored.stdout, /main\.ts/);
   assert.doesNotMatch(ignored.stdout, /main\.test\.ts/);
   assert.equal(included.stderr, ignored.stderr);
+});
+
+test("--ignore-tests skips a scan root that is a conventional test directory", () => {
+  const included = runCli([join(scanRoot, "test"), "text", "codesize"]);
+  const ignored = runCli([join(scanRoot, "test"), "text", "codesize", "--ignore-tests"]);
+
+  assert.match(included.stdout, /test[\\/]messy\.ts/);
+  assert.equal(included.status, 2);
+  assert.equal(ignored.status, 0);
+  assert.equal(ignored.stdout, "");
+  assert.equal(ignored.stderr, "");
+});
+
+test("--ignore-tests skips an explicitly passed test or spec file", () => {
+  for (const file of ["main.test.ts", "main.spec.tsx"]) {
+    const included = runCli([join(scanRoot, "src", file), "text", "codesize"]);
+    const ignored = runCli([join(scanRoot, "src", file), "text", "codesize", "--ignore-tests"]);
+
+    assert.match(included.stdout, new RegExp(`${file.replace(".", "\\.")}`));
+    assert.equal(included.status, 2);
+    assert.equal(ignored.status, 0);
+    assert.equal(ignored.stdout, "");
+    assert.equal(ignored.stderr, "");
+  }
 });
 
 test("suffix overrides and path exclusions control discovery", () => {
