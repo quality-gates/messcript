@@ -127,6 +127,25 @@ class Destructuring {
   assert.equal(findLackOfCohesionOfMethods(sourceFile).length, 1);
 });
 
+test("LCOM4 still joins methods through bare identifier field reads", () => {
+  const sourceFile = ts.createSourceFile(
+    "bare-cohesion.ts",
+    `class Bare {
+  shared = 0;
+  other = 0;
+  addShared() { this.shared += 1; }
+  addBare() { shared += 1; this.other += 1; }
+  addOther() { this.other += 1; }
+}`,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const classNode = sourceFile.statements[0];
+  assert.ok(ts.isClassDeclaration(classNode));
+  assert.equal(calculateLcom4(classNode), 1);
+});
+
 test("LCOM4 keeps the shadowed field disjoint when a method binds it locally", () => {
   const sourceFile = ts.createSourceFile(
     "shadow-cohesion.ts",
