@@ -21,7 +21,7 @@ import {
   testIgnorePattern,
   validateIgnorePatternProperty,
 } from "../dist/rules/ignore-pattern.js";
-import { getRuleDefinition, runRule, validateSelectionProperties } from "../dist/rules/catalog.js";
+import { canonicalPropertyName, getRuleDefinition, runRule, validateSelectionProperties } from "../dist/rules/catalog.js";
 
 let workspace;
 
@@ -614,4 +614,44 @@ test("unknown rule name still fails analysis before running rules", () => {
       ]),
     /Unknown rule: NoSuchRule/,
   );
+});
+
+test("rule aliases and canonical property names survive case folding", () => {
+  const expectedAliases = {
+    CyclomaticComplexity: { maximum: "reportlevel" },
+    NPathComplexity: { maximum: "minimum", reportlevel: "minimum" },
+    ExcessiveMethodLength: { maximum: "minimum" },
+    ExcessiveClassLength: { maximum: "minimum" },
+    ExcessiveParameterList: { maximum: "minimum" },
+    ExcessivePublicCount: { maximum: "minimum" },
+    CouplingBetweenObjects: { reportlevel: "maximum" },
+    LackOfCohesionOfMethods: { minimum: "maximum" },
+  };
+  for (const [ruleName, aliases] of Object.entries(expectedAliases)) {
+    const definition = getRuleDefinition(ruleName);
+    assert.ok(definition, ruleName);
+    assert.deepEqual(definition.aliases, aliases, ruleName);
+  }
+
+  assert.equal(canonicalPropertyName("CyclomaticComplexity", "MAXIMUM"), "reportLevel");
+  assert.equal(canonicalPropertyName("NPathComplexity", "reportlevel"), "minimum");
+  assert.equal(canonicalPropertyName("BooleanArgumentFlag", "  Unknown  "), "unknown");
+});
+
+test("runRule applies the definition priority when the selection omits one", () => {
+  const source = writeSource(
+    "default-priority.ts",
+    "export function keepFlag(flag: boolean): void {}\n",
+  );
+  const definition = getRuleDefinition("BooleanArgumentFlag");
+  assert.ok(definition);
+  const file = sourceFileFrom(source);
+
+  const defaultPriority = runRule(
+    definition,
+    { name: "BooleanArgumentFlag", rulesetName: "t", properties: {} },
+    file,
+  );
+  assert.ok(defaultPriority.length > 0);
+  assert.ok(defaultPriority.every((finding) => finding.priority === definition.priority));
 });
