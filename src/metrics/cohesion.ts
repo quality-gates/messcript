@@ -187,16 +187,27 @@ function trivialAccessorField(
   return directFieldAccess(statement.expression.left, methodScope, fields, className, sourceFile);
 }
 
+function collectBindingNames(name: ts.BindingName, names: Set<string>): void {
+  if (ts.isIdentifier(name)) {
+    names.add(name.text);
+    return;
+  }
+  for (const element of name.elements) {
+    if (ts.isOmittedExpression(element)) {
+      continue;
+    }
+    collectBindingNames(element.name, names);
+  }
+}
+
 function collectDeclaredNames(method: ClassMethod): Set<string> {
   const names = new Set<string>();
   for (const parameter of method.parameters) {
-    if (ts.isIdentifier(parameter.name)) {
-      names.add(parameter.name.text);
-    }
+    collectBindingNames(parameter.name, names);
   }
   function visit(node: ts.Node): void {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
-      names.add(node.name.text);
+    if (ts.isVariableDeclaration(node)) {
+      collectBindingNames(node.name, names);
     }
     if (ts.isFunctionDeclaration(node) && node.name) {
       names.add(node.name.text);
@@ -347,7 +358,8 @@ function collectUses(
         (ts.isPropertyDeclaration(parent) && parent.name === node) ||
         (ts.isMethodDeclaration(parent) && parent.name === node) ||
         (ts.isGetAccessorDeclaration(parent) && parent.name === node) ||
-        (ts.isSetAccessorDeclaration(parent) && parent.name === node);
+        (ts.isSetAccessorDeclaration(parent) && parent.name === node) ||
+        ts.isBindingElement(parent);
       if (!isMemberName) {
         const field = fields.get(scopedKey(method.scope, node.text));
         if (field) {

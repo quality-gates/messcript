@@ -516,6 +516,14 @@ export const CohesiveJavaScript = class {
   total() { return this.leftValue() + this.rightValue(); }
 };
 `;
+  const cohesionDestructureSource = `const moduleState = { shared: 1 };
+export class DestructuredCohesion {
+  shared = 0;
+  other = 0;
+  addShared() { this.shared += 1; }
+  addOther() { const { shared } = moduleState; this.other += 1; return shared; }
+}
+`;
   const globalVariableTypeScriptSource = `import type { ImportedType } from "external";
 import importedValue from "external-value";
 
@@ -752,6 +760,7 @@ function visible(value) { if (value) return 1; return 0; }
   writeScanFixture("src/design.ts", designTypeScriptSource);
   writeScanFixture("src/cohesion.ts", cohesionTypeScriptSource);
   writeScanFixture("src/cohesion.js", cohesionJavaScriptSource);
+  writeScanFixture("src/cohesion-destructure.ts", cohesionDestructureSource);
   writeScanFixture("src/global-variable.ts", globalVariableTypeScriptSource);
   writeScanFixture("src/global-script-a.js", globalVariableScriptSource);
   writeScanFixture("src/global-script-b.js", globalVariableMutationSource);
@@ -1480,6 +1489,20 @@ test("design cohesion rule covers JavaScript and TypeScript classes", () => {
   assert.match(result.stdout, /LackOfCohesionOfMethods \[priority 3\].*class DisjointTypeScript.*value of 2/);
   assert.match(result.stdout, /LackOfCohesionOfMethods \[priority 3\].*class DisjointJavaScript.*value of 2/);
   assert.doesNotMatch(result.stdout, /CohesiveTypeScript|CohesiveJavaScript|AccessorTypeScript|CohesionInterface|AmbientCohesion|OverloadCohesion/);
+  assert.equal(result.stderr, "");
+});
+
+test("design cohesion rule ignores destructured locals that shadow fields", () => {
+  const result = runCli([
+    join(scanRoot, "src", "cohesion-destructure.ts"),
+    "text",
+    "design",
+    "--only",
+    "LackOfCohesionOfMethods",
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /LackOfCohesionOfMethods \[priority 3\].*class DestructuredCohesion.*value of 2/);
   assert.equal(result.stderr, "");
 });
 
