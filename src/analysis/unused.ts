@@ -13,6 +13,7 @@ export type UnusedDeclaration = {
   kind: UnusedKind;
   context: string;
   used: boolean;
+  uncertain?: boolean;
 };
 
 type Scope = {
@@ -371,6 +372,17 @@ class UnusedAnalyzer {
     }
   }
 
+  private markClassUncertain(classInfo: ClassInfo | undefined): void {
+    if (!classInfo) {
+      return;
+    }
+    for (const members of classInfo.privateMembers.values()) {
+      for (const member of members) {
+        member.uncertain = true;
+      }
+    }
+  }
+
   private visitFunction(node: FunctionLike): void {
     if (node.type) {
       this.visitReferences(node.type);
@@ -423,8 +435,13 @@ class UnusedAnalyzer {
     }
     if (ts.isElementAccessExpression(node)) {
       this.visitReferences(node.expression);
-      if (node.expression.kind === ts.SyntaxKind.ThisKeyword && node.argumentExpression && ts.isStringLiteral(node.argumentExpression)) {
-        this.markPrivate(scope, node.argumentExpression.text, node);
+      if (node.expression.kind === ts.SyntaxKind.ThisKeyword && node.argumentExpression) {
+        const key = this.unwrapExpression(node.argumentExpression);
+        if (ts.isStringLiteral(key)) {
+          this.markPrivate(scope, key.text, node);
+        } else {
+          this.markClassUncertain(this.currentClass(scope));
+        }
       }
       if (node.argumentExpression) {
         this.visitReferences(node.argumentExpression);
