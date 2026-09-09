@@ -14,7 +14,6 @@ type Binding = {
   name: string;
   node: ts.Identifier;
   sourceFile: ts.SourceFile;
-  mutable: boolean;
 };
 
 type StaticField = {
@@ -22,7 +21,6 @@ type StaticField = {
   node: ts.PropertyDeclaration;
   sourceFile: ts.SourceFile;
   className: string;
-  mutable: boolean;
 };
 
 function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
@@ -123,13 +121,11 @@ function collectBindings(sourceFile: ts.SourceFile): Binding[] {
   const bindings: Binding[] = [];
   function visit(node: ts.Node): void {
     if (ts.isVariableDeclaration(node) && isModuleBinding(node) && !isDeclarationOnly(node)) {
-      const kind = variableKind(node);
       for (const identifier of bindingIdentifiers(node.name)) {
         bindings.push({
           name: identifier.text,
           node: identifier,
           sourceFile,
-          mutable: kind !== "const",
         });
       }
     }
@@ -166,7 +162,6 @@ function collectStaticFields(sourceFile: ts.SourceFile): StaticField[] {
               node: member,
               sourceFile,
               className: owner,
-              mutable: !hasModifier(member, ts.SyntaxKind.ReadonlyKeyword),
             });
           }
         }
@@ -459,7 +454,7 @@ export function findGlobalVariable(
 
   const findings: Finding[] = [];
   for (const binding of bindings) {
-    if ((binding.mutable && mutatedBindings.has(binding)) || reportImmutable) {
+    if (mutatedBindings.has(binding) || reportImmutable) {
       findings.push(
         createDesignFinding(
           binding.node,
@@ -473,7 +468,7 @@ export function findGlobalVariable(
     }
   }
   for (const field of fields) {
-    if ((field.mutable && mutatedFields.has(field)) || reportImmutable) {
+    if (mutatedFields.has(field) || reportImmutable) {
       findings.push(
         createDesignFinding(
           field.node,

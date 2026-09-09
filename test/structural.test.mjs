@@ -560,6 +560,31 @@ class JavaScriptService extends Base {
   cohesionProperties.maximum = 1;
 });
 
+test("global-variable reports mutated const module state", () => {
+  const file = sourceFile(`
+import importedValue from "external";
+export const cache: number[] = [];
+export let mutable = 0;
+export const immutable = 1;
+class StaticState {
+  static readonly cache: number[] = [];
+  static mutate() { this.cache.push(1); }
+}
+cache.push(1);
+mutable += 1;
+`);
+
+  const findings = findGlobalVariable([file]);
+  assert.deepEqual(findings.map((finding) => finding.context), [
+    "global variable cache",
+    "global variable mutable",
+    "static field cache",
+  ]);
+
+  const immutableFindings = findGlobalVariable([file], true);
+  assert.ok(messages(immutableFindings).some((message) => /immutable/.test(message)));
+});
+
 test("coupling ignores the complete built-in type vocabulary", () => {
   const file = sourceFile(`
 class BuiltinTypes {
