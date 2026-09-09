@@ -690,6 +690,25 @@ export function catchNPath(value) {
   <rule ref="rulesets/codesize.xml/CyclomaticComplexity" />
 </ruleset>
 `;
+  const cycleEntryRuleset = `<ruleset name="cycle-entry">
+  <rule ref="ShortClassName" />
+  <rule ref="./cycle-partner.xml" />
+</ruleset>
+`;
+  const cyclePartnerRuleset = `<ruleset name="cycle-partner">
+  <rule ref="./cycle-entry.xml" />
+</ruleset>
+`;
+  const missingFileRuleset = `<ruleset name="missing-file">
+  <rule ref="ShortClassName" />
+  <rule ref="./no-such-ruleset.xml" />
+</ruleset>
+`;
+  const selfCycleRuleset = `<ruleset name="self-cycle">
+  <rule ref="ShortClassName" />
+  <rule ref="./self-cycle.xml" />
+</ruleset>
+`;
   const unknownDirectRuleRuleset = `<ruleset name="invalid">
   <rule name="NoSuchRule" />
 </ruleset>
@@ -775,6 +794,10 @@ function visible(value) { if (value) return 1; return 0; }
   writeScanFixture("rulesets/unknown-reference.xml", unknownReferenceRuleset);
   writeScanFixture("rulesets/unknown-path-reference.xml", unknownPathReferenceRuleset);
   writeScanFixture("rulesets/unknown-direct.xml", unknownDirectRuleRuleset);
+  writeScanFixture("rulesets/cycle-entry.xml", cycleEntryRuleset);
+  writeScanFixture("rulesets/cycle-partner.xml", cyclePartnerRuleset);
+  writeScanFixture("rulesets/self-cycle.xml", selfCycleRuleset);
+  writeScanFixture("rulesets/missing-file.xml", missingFileRuleset);
   writeScanFixture("rulesets/duplicate.xml", duplicateRuleset);
   writeScanFixture("rulesets/xml-features.xml", xmlFeaturesRuleset);
   writeScanFixture("rulesets/malformed.xml", malformedRuleset);
@@ -1696,6 +1719,36 @@ test("unknown ruleset paths are warnings and never substitute a known rule", () 
   assert.equal(quiet.stderr, "");
   assert.equal(verbose.status, 2);
   assert.match(verbose.stderr, /Unknown referenced rule 'LongVariable'/);
+});
+
+test("circular and missing ruleset file references fail as operational errors", () => {
+  const source = join(scanRoot, "src", "naming.ts");
+  const mutual = runCli([source, "text", join(scanRoot, "rulesets", "cycle-entry.xml")]);
+  const selfReferential = runCli([source, "text", join(scanRoot, "rulesets", "self-cycle.xml")]);
+  const ignored = runCli([
+    source,
+    "text",
+    join(scanRoot, "rulesets", "cycle-entry.xml"),
+    "--ignore-errors-on-exit",
+  ]);
+  const acyclic = runCli([source, "text", join(scanRoot, "rulesets", "nested-file.xml")]);
+  const missingFile = runCli([source, "text", join(scanRoot, "rulesets", "missing-file.xml")]);
+
+  assert.equal(mutual.status, 1);
+  assert.equal(mutual.stdout, "");
+  assert.match(mutual.stderr, /Circular ruleset reference/);
+  assert.match(mutual.stderr, /cycle-entry\.xml/);
+  assert.equal(selfReferential.status, 1);
+  assert.equal(selfReferential.stdout, "");
+  assert.match(selfReferential.stderr, /Circular ruleset reference/);
+  assert.equal(ignored.status, 0);
+  assert.match(ignored.stderr, /Circular ruleset reference/);
+  assert.equal(acyclic.status, 2);
+  assert.equal(acyclic.stderr, "");
+  assert.match(acyclic.stdout, /LongVariable/);
+  assert.equal(missingFile.status, 1);
+  assert.equal(missingFile.stdout, "");
+  assert.match(missingFile.stderr, /Unknown referenced ruleset '\.\/no-such-ruleset\.xml'/);
 });
 
 test("ruleset XML boundaries and malformed roots remain observable through the CLI", () => {
