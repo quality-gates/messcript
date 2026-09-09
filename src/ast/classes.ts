@@ -50,12 +50,13 @@ function memberName(node: ClassMethod | ClassField, sourceFile: ts.SourceFile): 
   return undefined;
 }
 
-function isParameterProperty(node: ts.ParameterDeclaration): boolean {
+export function isParameterProperty(node: ts.ParameterDeclaration): boolean {
   return hasAnyModifier(node, [
     ts.SyntaxKind.PublicKeyword,
     ts.SyntaxKind.PrivateKeyword,
     ts.SyntaxKind.ProtectedKeyword,
     ts.SyntaxKind.ReadonlyKeyword,
+    ts.SyntaxKind.OverrideKeyword,
   ]);
 }
 

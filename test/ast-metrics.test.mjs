@@ -297,3 +297,21 @@ test("class metrics cover whitespace, complexity, empty classes, and cohesion bo
   assert.equal(calculateLcom4(sourceFile("class Empty {}").statements[0]), 1);
   assert.equal(calculateLcom4(sourceFile("class Stateless { one() {} two() {} }").statements[0]), 1);
 });
+
+test("getClassFields counts override constructor parameter properties once", () => {
+  const file = sourceFile(`
+class OverrideOnly { constructor(override x: number) {} }
+class PublicOnly { constructor(public x: number) {} }
+class Bare { constructor(x: number) {} }
+class OverrideReadonly { constructor(override readonly x: number) {} }
+class PublicOverride { constructor(public override x: number) {} }
+`);
+  const classes = [];
+  forEachClass(file, (node) => classes.push(node));
+  const names = (node) => getClassFields(node).map((field) => field.name?.getText(file));
+  assert.deepEqual(names(classes[0]), ["x"]);
+  assert.deepEqual(names(classes[1]), ["x"]);
+  assert.deepEqual(names(classes[2]), []);
+  assert.deepEqual(names(classes[3]), ["x"]);
+  assert.deepEqual(names(classes[4]), ["x"]);
+});

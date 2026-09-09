@@ -909,6 +909,21 @@ test("NPath counts the child of a labeled statement like the unlabeled form", ()
   npathProperties.minimum = 200;
 });
 
+test("TooManyFields counts override constructor parameter properties as fields", () => {
+  const previous = fieldsProperties.maxfields;
+  fieldsProperties.maxfields = 0;
+  try {
+    assert.equal(findTooManyFields(sourceFile("class C { constructor(override x: number) {} }")).length, 1);
+    assert.equal(findTooManyFields(sourceFile("class C { constructor(public x: number) {} }")).length, 1);
+    assert.equal(findTooManyFields(sourceFile("class C { constructor(x: number) {} }")).length, 0);
+    assert.equal(findTooManyFields(sourceFile("class C { constructor(override readonly x: number) {} }")).length, 1);
+    assert.equal(findTooManyFields(sourceFile("class C { constructor(public override x: number) {} }")).length, 1);
+    assert.equal(findTooManyFields(sourceFile("class C { constructor(private override x: number) {} }")).length, 1);
+  } finally {
+    fieldsProperties.maxfields = previous;
+  }
+});
+
 test("NPath multiplies nested decisions inside a label and a label alone adds no path", () => {
   const nested = sourceFile(
     "function branch(value) { outer: if (value) { inner: if (value) { first(); } else { second(); } } else { third(); } }",

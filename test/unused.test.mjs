@@ -578,3 +578,15 @@ class Receiver {
   assert.deepEqual(findingNames(findUnusedFormalParameter(file)), ["x", "unused"]);
 });
 
+test("UnusedPrivateField sees private override constructor parameter properties", () => {
+  const file = sourceFile("class C { constructor(private override x: number) {} }");
+  assert.deepEqual(findingNames(findUnusedPrivateField(file)), ["x"]);
+  assert.deepEqual(findingNames(findUnusedFormalParameter(file)), []);
+});
+
+test("override-only constructor parameter properties are fields, not unused formals", () => {
+  const file = sourceFile("class C { constructor(override x: number) {} }");
+  assert.deepEqual(findingNames(findUnusedPrivateField(file)), []);
+  assert.deepEqual(findingNames(findUnusedFormalParameter(file)), []);
+});
+
