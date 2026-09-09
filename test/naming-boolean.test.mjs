@@ -491,13 +491,19 @@ class Example {
   "camelCase" = 2;
   ["computed_name"] = 3;
   [Symbol.iterator] = 4;
+  404 = 5;
 }
 interface Shape {
   "bad_signature": number;
   "goodSignature": number;
+   42: number;
 }
 `);
-  assert.deepEqual(names(findCamelCasePropertyName(file)).sort(), ["bad_signature", "snake_case"]);
+  // Numeric member names have no casing to judge, so they stay uncollected.
+  assert.deepEqual(messages(findCamelCasePropertyName(file)).sort(), [
+    "The property bad_signature is not named in camelCase.",
+    "The property snake_case is not named in camelCase.",
+  ]);
 });
 
 test("ShortVariable and LongVariable see string-literal class fields by their name text", () => {
