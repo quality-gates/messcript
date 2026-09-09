@@ -937,3 +937,30 @@ test("NPath multiplies nested decisions inside a label and a label alone adds no
   assert.equal(findNPathComplexity(nested).length, 0);
   assert.equal(findNPathComplexity(labelOnly).length, 0);
 });
+
+test("IfStatementAssignment flags assignments in for and switch conditions and ignores initializers", () => {
+  const code = `
+function testConditions(n, y) {
+  if (n = 1) {}
+  while (n = 2) {}
+  do {} while (n = 3);
+  for (let i = 0; i = n; i++) {}
+  for (; i = n;) {}
+  for (let i = 0; i < n; i++) {}
+  for (let i = 0; i < n; i = i + 1) {}
+  for (;;) {}
+  switch (n = y) {
+    case (y = 1): break;
+  }
+}
+`;
+  const file = sourceFile(code);
+  const findings = findIfStatementAssignment(file);
+
+  assert.equal(findings.length, 6);
+  assert.ok(findings.every((f) => f.ruleName === "IfStatementAssignment"));
+  assert.ok(findings.every((f) => f.priority === 1));
+  assert.ok(findings.every((f) => f.context === "function testConditions()"));
+  assert.ok(messages(findings).every((message) => /Avoid assigning values to variables in if clauses and the like/.test(message)));
+});
+
