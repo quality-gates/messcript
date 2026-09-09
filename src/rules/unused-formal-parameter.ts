@@ -10,7 +10,7 @@ export const properties = {} as const;
 
 export function findUnusedFormalParameter(sourceFile: ts.SourceFile, declarations = analyzeUnused(sourceFile)): Finding[] {
   return unusedOfKind(declarations, "formal")
-    .filter((declaration) => !declaration.name.startsWith("_"))
+    .filter((declaration) => declaration.name !== "this" && !declaration.name.startsWith("_"))
     .map((declaration) =>
       createUnusedFinding(declaration, sourceFile, ruleName, `Avoid unused parameters such as '${declaration.name}'.`),
     );

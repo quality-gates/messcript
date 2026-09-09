@@ -525,4 +525,24 @@ export class Static {
   assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), ["idle"]);
 });
 
+test("UnusedFormalParameter ignores TypeScript this parameters", () => {
+  const file = sourceFile(`
+function f(this: void, x: number) {
+  return x;
+}
+function g(this: void, x: number) {
+  return 1;
+}
+function h(this: void, _unused: number) {
+  return 1;
+}
+class Receiver {
+  method(this: Receiver, used: number, unused: number) {
+    return used;
+  }
+}
+`);
+  assert.deepEqual(findingNames(findUnusedFormalParameter(file)), ["x", "unused"]);
+});
+
 
