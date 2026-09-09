@@ -893,3 +893,32 @@ class Foo { static prop = 0; }
     );
   }
 });
+
+test("NPath counts the child of a labeled statement like the unlabeled form", () => {
+  const labeled = sourceFile("function branch(value) { skip: if (value) { first(); } else { second(); } }");
+  const unlabeled = sourceFile("function branch(value) { if (value) { first(); } else { second(); } }");
+  const withStatement = sourceFile("function branch(value) { with (value) { if (value) { first(); } else { second(); } } }");
+
+  assert.equal(calculateNPathComplexity(unlabeled.statements[0].body), 2);
+  assert.equal(calculateNPathComplexity(labeled.statements[0].body), 2);
+  assert.equal(calculateNPathComplexity(withStatement.statements[0].body), 2);
+
+  npathProperties.minimum = 2;
+  assert.equal(findNPathComplexity(labeled).length, 1);
+  assert.equal(findNPathComplexity(unlabeled).length, 1);
+  npathProperties.minimum = 200;
+});
+
+test("NPath multiplies nested decisions inside a label and a label alone adds no path", () => {
+  const nested = sourceFile(
+    "function branch(value) { outer: if (value) { inner: if (value) { first(); } else { second(); } } else { third(); } }",
+  );
+  const labelOnly = sourceFile("function branch(value) { only: value(); }");
+
+  assert.equal(calculateNPathComplexity(nested.statements[0].body), 3);
+  assert.equal(calculateNPathComplexity(labelOnly.statements[0].body), 1);
+
+  npathProperties.minimum = 200;
+  assert.equal(findNPathComplexity(nested).length, 0);
+  assert.equal(findNPathComplexity(labelOnly).length, 0);
+});

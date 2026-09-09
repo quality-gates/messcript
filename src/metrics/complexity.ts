@@ -71,6 +71,10 @@ function statementPaths(node: ts.Node): number {
   if (ts.isReturnStatement(node) || ts.isThrowStatement(node)) {
     return 1 + expressionComplexity(node.expression);
   }
+  // A label or a `with` head adds no path. Count the child statement.
+  if (ts.isLabeledStatement(node) || ts.isWithStatement(node)) {
+    return statementPaths(node.statement);
+  }
 
   return 1;
 }
