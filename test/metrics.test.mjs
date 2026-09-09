@@ -127,6 +127,31 @@ class Destructuring {
   assert.equal(findLackOfCohesionOfMethods(sourceFile).length, 1);
 });
 
+test("LCOM4 ignores object literal accessor names that shadow fields", () => {
+  const sourceFile = ts.createSourceFile(
+    "accessor-shadow-cohesion.ts",
+    `class AccessorShadow {
+  shared = 0;
+  other = 0;
+  addShared() { this.shared += 1; }
+  addOther() {
+    const host = {
+      get shared() { return 0; },
+      set shared(value) {},
+    };
+    this.other += 1;
+    return host;
+  }
+}`,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const classNode = sourceFile.statements[0];
+  assert.ok(ts.isClassDeclaration(classNode));
+  assert.equal(calculateLcom4(classNode), 2);
+});
+
 test("LCOM4 still joins methods through bare identifier field reads", () => {
   const sourceFile = ts.createSourceFile(
     "bare-cohesion.ts",
