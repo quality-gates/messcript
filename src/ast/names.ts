@@ -61,7 +61,7 @@ function addFunctionParameters(identifiers: NamedBinding[], node: FunctionLike):
 function addClassFields(identifiers: NamedBinding[], node: ClassLike, sourceFile: ts.SourceFile): void {
   for (const field of node.members) {
     if (ts.isPropertyDeclaration(field)) {
-      addClassField(identifiers, field, sourceFile);
+      addClassField(identifiers, field);
     }
     if (ts.isConstructorDeclaration(field)) {
       for (const parameter of field.parameters) {
@@ -78,18 +78,22 @@ function addClassFields(identifiers: NamedBinding[], node: ClassLike, sourceFile
   }
 }
 
-function addClassField(identifiers: NamedBinding[], field: ClassField, sourceFile: ts.SourceFile): void {
+function isStaticallyKnownMemberName(name: ts.Node): boolean {
+  return ts.isIdentifier(name) || ts.isPrivateIdentifier(name) || ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name);
+}
+
+function addClassField(identifiers: NamedBinding[], field: ClassField): void {
   if (ts.isPropertyDeclaration(field)) {
     const name = field.name;
-    if (ts.isIdentifier(name) || ts.isPrivateIdentifier(name)) {
-      addBinding(identifiers, name, `field ${name.getText(sourceFile)}`);
+    if (isStaticallyKnownMemberName(name)) {
+      addBinding(identifiers, name, `field ${bindingName(name)}`);
     }
   }
 }
 
-function addPropertyName(identifiers: NamedBinding[], node: ts.PropertyDeclaration | ts.PropertySignature, sourceFile: ts.SourceFile): void {
-  if (ts.isIdentifier(node.name) || ts.isPrivateIdentifier(node.name)) {
-    addBinding(identifiers, node.name, `property ${node.name.getText(sourceFile)}`);
+function addPropertyName(identifiers: NamedBinding[], node: ts.PropertyDeclaration | ts.PropertySignature): void {
+  if (isStaticallyKnownMemberName(node.name)) {
+    addBinding(identifiers, node.name, `property ${bindingName(node.name)}`);
   }
 }
 
@@ -150,7 +154,7 @@ export function collectProperties(sourceFile: ts.SourceFile): NamedBinding[] {
   forEachClass(sourceFile, (node) => addClassFields(properties, node, sourceFile));
   function visit(node: ts.Node): void {
     if (ts.isPropertySignature(node)) {
-      addPropertyName(properties, node, sourceFile);
+      addPropertyName(properties, node);
     }
     ts.forEachChild(node, visit);
   }

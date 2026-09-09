@@ -483,3 +483,50 @@ const NamedClass = class {};
   assert.equal(isReactComponentName("Named", file), false);
   assert.equal(isReactComponentName("NamedFunctionDeclaration", namedFunctionDeclaration), true);
 });
+
+test("string-literal property and field names are checked like identifiers of the same text", () => {
+  const file = sourceFile(`
+class Example {
+  "snake_case" = 1;
+  "camelCase" = 2;
+  ["computed_name"] = 3;
+  [Symbol.iterator] = 4;
+}
+interface Shape {
+  "bad_signature": number;
+  "goodSignature": number;
+}
+`);
+  assert.deepEqual(names(findCamelCasePropertyName(file)).sort(), ["bad_signature", "snake_case"]);
+});
+
+test("ShortVariable and LongVariable see string-literal class fields by their name text", () => {
+  const file = sourceFile(`
+class Example {
+  "a" = 1;
+  "aReasonableFieldName" = 2;
+}
+`);
+  assert.deepEqual(names(findShortVariable(file)), ["a"]);
+  longVariableProperties.maximum = 10;
+  try {
+    assert.deepEqual(names(findLongVariable(file)), ["aReasonableFieldName"]);
+  } finally {
+    longVariableProperties.maximum = 20;
+  }
+});
+
+test("allow-underscore exemptions apply to a string-literal property name's text", () => {
+  const file = sourceFile(`
+class Example {
+  "_privateField" = 1;
+}
+`);
+  assert.deepEqual(names(findCamelCasePropertyName(file)), ["_privateField"]);
+  camelCasePropertyProperties["allow-underscore"] = true;
+  try {
+    assert.deepEqual(names(findCamelCasePropertyName(file)), []);
+  } finally {
+    camelCasePropertyProperties["allow-underscore"] = false;
+  }
+});
