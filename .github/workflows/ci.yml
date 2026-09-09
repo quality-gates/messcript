@@ -52,7 +52,7 @@ jobs:
         run: npm ci
 
       - name: Run the production mutation quality gate
-        run: npm run mutation -- --minimum 74.4
+        run: npm run mutation -- --minimum 80
 
       - name: Upload mutation report
         if: always()
