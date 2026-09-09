@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { formatAnsi, formatGithub, formatGitlab, formatHtml } from "../dist/reporters/human.js";
@@ -14,6 +15,10 @@ function finding(path, line, column, ruleName, message, context, priority = 3, s
 
 function error(path, line, column, message) {
   return { path, line, column, message };
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 test("text reports sort findings and errors and preserve empty output", () => {
@@ -35,6 +40,19 @@ test("text reports sort findings and errors and preserve empty output", () => {
       "same.ts:2:3: ZRule [priority 2] z message (context: z context)\n" +
       "z.ts:2:3: ZRule [priority 2] z message (context: z context)\n",
   );
+});
+
+test("text reports normalize cwd paths and leave outside paths alone", () => {
+  const inside = formatText([finding(join(root, "nested", "z.ts"), 2, 3, "ZRule", "z message", "z context")], [
+    error(join(root, "a.ts"), 2, 3, "a error"),
+  ]);
+  assert.match(inside, /nested\/z\.ts:2:3:/);
+  assert.match(inside, /a\.ts:2:3: ProcessingError a error/);
+  assert.doesNotMatch(inside, new RegExp(escapeRegExp(root)));
+
+  const outside = join(tmpdir(), "messcript-text-outside.ts");
+  const outsideReport = formatText([finding(outside, 2, 3, "ZRule", "z message", "z context")], []);
+  assert.match(outsideReport, new RegExp(`${escapeRegExp(outside)}:2:3:`));
 });
 
 test("HTML reports cover escaping, ordering, suppression, errors, and empty documents", () => {

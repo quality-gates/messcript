@@ -33,7 +33,7 @@ function htmlEscape(value: string): string {
     .replaceAll("'", "&#039;");
 }
 
-function normalizeReportPath(path: string): string {
+export function normalizeReportPath(path: string): string {
   const relativePath = relative(process.cwd(), path);
   const normalized = relativePath && !relativePath.startsWith("..") ? relativePath : path;
   return normalized.split(sep).join("/");
