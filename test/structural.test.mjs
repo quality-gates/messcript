@@ -586,6 +586,195 @@ class BuiltinTypes {
   assert.deepEqual(findCouplingBetweenObjects(file, 1), []);
 });
 
+test("coupling bills classes for syntax references, not file-level imports", () => {
+  const imports = Array.from({ length: 13 }, (_, index) => `import { Unused${index} } from "./unused-${index}";`).join("\n");
+
+  const untouchedFile = sourceFile(`${imports}
+export class Untouched { x = 1; }
+`);
+  const untouchedFindings = findCouplingBetweenObjects(untouchedFile);
+  assert.deepEqual(
+    messages(untouchedFindings).filter((message) => /class Untouched/.test(message)),
+    [],
+  );
+  assert.equal(untouchedFindings.length, 1);
+  assert.match(untouchedFindings[0].message, /The module structural has a coupling between objects value of 13/);
+
+  const lightlyCoupledFile = sourceFile(`${imports}
+export class LightlyCoupled { first: Unused0; second = new Unused1(); }
+`);
+  assert.deepEqual(
+    messages(findCouplingBetweenObjects(lightlyCoupledFile)).filter((message) => /class LightlyCoupled/.test(message)),
+    [],
+  );
+
+  const heritageCoupledFile = sourceFile(`${imports}
+@ClassDecorator()
+export class HeavilyCoupled extends CoupledBase implements CoupledContract {
+  field0: CoupledType0;
+  field1: CoupledType1;
+  field2: CoupledType2;
+  field3: CoupledType3;
+  field4: CoupledType4;
+  field5: CoupledType5;
+  field6: CoupledType6;
+  field7: CoupledType7;
+  field8: CoupledType8;
+  field9: CoupledType9;
+  helper = new CoupledHelper();
+  run(value: CoupledValue): CoupledResult {
+    return new CoupledBuilder();
+  }
+}
+`);
+  const heritageFindings = findCouplingBetweenObjects(heritageCoupledFile);
+  assert.match(
+    messages(heritageFindings).find((message) => /class HeavilyCoupled/.test(message)) ?? "",
+    /coupling between objects value of 17/,
+  );
+});
+
+test("coupling excludes builtin base names behind qualified and dotted references", () => {
+  const builtinTails = ["bigint", "boolean", "never", "null", "number", "object", "string", "symbol", "undefined", "unknown", "void"];
+  const tailsSource = builtinTails.map((name, index) => `  field${index}: Wrapper.${name};`).join("\n");
+  assert.deepEqual(findCouplingBetweenObjects(sourceFile(`export class BuiltinTails {\n${tailsSource}\n}\n`), 1), []);
+
+  const dottedBuiltinFile = sourceFile(`
+export class DottedBuiltin { only: Outer.Inner.any; }
+`);
+  assert.deepEqual(findCouplingBetweenObjects(dottedBuiltinFile, 1), []);
+});
+
+test("coupling module pass counts imports, re-exports, requires, and external references", () => {
+  const bareFile = sourceFile(`
+import "side-a";
+import "side-b";
+export class Bare {}
+`);
+  const bareFindings = findCouplingBetweenObjects(bareFile, 1);
+  assert.equal(bareFindings.length, 1);
+  assert.match(bareFindings[0].message, /The module structural has a coupling between objects value of 2/);
+
+  const clauseFile = sourceFile(`
+import { Named } from "./named";
+export class ClauseOnly {}
+`);
+  const clauseFindings = findCouplingBetweenObjects(clauseFile, 1);
+  assert.equal(clauseFindings.length, 1);
+  assert.match(clauseFindings[0].message, /value of 1/);
+
+  const defaultFile = sourceFile(`
+import DefaultThing from "./default";
+`);
+  assert.match(messages(findCouplingBetweenObjects(defaultFile, 1))[0] ?? "", /value of 1/);
+
+  const namespaceFile = sourceFile(`
+import * as Bundle from "./bundle";
+`);
+  assert.match(messages(findCouplingBetweenObjects(namespaceFile, 1))[0] ?? "", /value of 1/);
+
+  const reExportFile = sourceFile(`
+export { Alias as Renamed, Plain } from "./re-export";
+`);
+  assert.match(messages(findCouplingBetweenObjects(reExportFile, 1))[0] ?? "", /value of 2/);
+
+  const requireFile = sourceFile(`
+import "side";
+export const delivered = require("./runtime");
+export const reserve = require("./reserve");
+export function other(value) { return helper("lit"); }
+`);
+  const requireFindings = findCouplingBetweenObjects(requireFile, 1);
+  assert.equal(requireFindings.length, 1);
+  assert.match(requireFindings[0].message, /value of 3/);
+
+  const localFile = sourceFile(`
+type LocalAlias = { value: string };
+interface LocalInterface { run(): void; }
+enum LocalEnum { Ready }
+namespace LocalNamespace { export const item = 1; }
+class LocalClass {}
+const LocalExpr = class LocalExprName {}
+export function use(a: LocalAlias, b: LocalInterface, c: LocalEnum, d: LocalNamespace, e: LocalClass, f: LocalExprName, g: ExternalValue): void {}
+`);
+  const localFindings = findCouplingBetweenObjects(localFile, 1);
+  assert.equal(localFindings.length, 1);
+  assert.match(localFindings[0].message, /value of 1/);
+  assert.equal(localFindings[0].context, "module structural");
+});
+
+test("coupling counts query types, method parameters, require calls, and skips nested classes", () => {
+  const typeQueryFile = sourceFile(`
+export class TypeQuery { value: typeof ExternalValue; }
+`);
+  const typeQueryFindings = findCouplingBetweenObjects(typeQueryFile, 1);
+  assert.equal(typeQueryFindings.length, 1);
+  assert.match(typeQueryFindings[0].message, /class TypeQuery .*value of 1/);
+
+  const requireClassFile = sourceFile(`
+export class NeedsRuntime {
+  load() { return require("./runtime"); }
+  greet() { return helper("lit"); }
+}
+`);
+  const requireClassFindings = findCouplingBetweenObjects(requireClassFile, 1);
+  assert.deepEqual(
+    messages(requireClassFindings).filter((message) => /class NeedsRuntime/.test(message)),
+    ["The class NeedsRuntime has a coupling between objects value of 1. Consider to reduce the number of dependencies under 1."],
+  );
+
+  const parameterFile = sourceFile(`
+export class Runner {
+  run(value: ParamType = new ParamInit()): RetType {
+    return new BodyType();
+  }
+}
+`);
+  const parameterFindings = findCouplingBetweenObjects(parameterFile, 1);
+  assert.match(
+    messages(parameterFindings).find((message) => /class Runner/.test(message)) ?? "",
+    /value of 4/,
+  );
+
+  const nestedFile = sourceFile(`
+export class Outer {
+  factory() {
+    return class Inner {
+      field: InnerType;
+      build() { return new InnerHelper(); }
+    };
+  }
+}
+`);
+  const nestedFindings = findCouplingBetweenObjects(nestedFile, 1);
+  assert.deepEqual(
+    messages(nestedFindings).filter((message) => /class Outer/.test(message)),
+    ["The class Outer has a coupling between objects value of 1. Consider to reduce the number of dependencies under 1."],
+  );
+});
+
+test("coupling module findings report the basename without declaration or packaging extensions", () => {
+  const template = `export class Named { value: ExternalValue; }\n`;
+  const cases = [
+    ["nested/deep/coupling.ts", "coupling"],
+    ["types.d.js", "types"],
+    ["lib.d.jsx", "lib"],
+    ["types.d.mts", "types"],
+    ["types.d.cts", "types"],
+    ["value.js.ts", "value.js"],
+    ["keep.d.ts.lock", "keep.d.ts.lock"],
+  ];
+  for (const [fileName, expected] of cases) {
+    const findings = findCouplingBetweenObjects(sourceFile(template, fileName), 1);
+    const moduleFinding = findings.find((finding) => finding.context === `module ${expected}`);
+    assert.ok(moduleFinding, fileName);
+    assert.ok(
+      moduleFinding.message.includes(`The module ${expected} has a coupling between objects value of 1`),
+      fileName,
+    );
+  }
+});
+
 test("global-variable analysis observes declaration and mutation forms", () => {
   const file = sourceFile(`
 let scalar = 0;
