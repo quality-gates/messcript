@@ -412,4 +412,103 @@ function testInExpression() {
   assert.deepEqual(findings, []);
 });
 
+test("non-literal this[expr] suppresses unused private members without inventing a use", () => {
+  const file = sourceFile(`
+export class C {
+  private secret = 1;
+  private unused = 2;
+  private hidden() { return 1; }
+  read(key: string) {
+    return this[key];
+  }
+}
+`);
+  const declarations = analyzeUnused(file);
+  assert.equal(declarations.find((declaration) => declaration.name === "secret")?.used, false);
+  assert.equal(declarations.find((declaration) => declaration.name === "unused")?.used, false);
+  assert.equal(declarations.find((declaration) => declaration.name === "hidden")?.used, false);
+  assert.deepEqual(findingNames(findUnusedPrivateField(file, declarations)), []);
+  assert.deepEqual(findingNames(findUnusedPrivateMethod(file, declarations)), []);
+  assert.deepEqual(findingNames(findUnusedFormalParameter(file, declarations)), []);
+});
+
+test("asserted this[key as string] suppresses unused private members for that class", () => {
+  const file = sourceFile(`
+export class C {
+  private secret = 1;
+  private unused = 2;
+  private hidden() { return 1; }
+  read(key: string) {
+    return this[key as string];
+  }
+}
+`);
+  assert.deepEqual(findingNames(findUnusedPrivateField(file)), []);
+  assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), []);
+});
+
+test("parenthesized this[(\"secret\")] counts as a use after unwrapping and does not suppress siblings", () => {
+  const file = sourceFile(`
+export class C {
+  private secret = 1;
+  private unused = 2;
+  private hidden() { return 1; }
+  read() {
+    return this[("secret")];
+  }
+}
+`);
+  const declarations = analyzeUnused(file);
+  assert.equal(declarations.find((declaration) => declaration.name === "secret")?.used, true);
+  assert.deepEqual(findingNames(findUnusedPrivateField(file, declarations)), ["unused"]);
+  assert.deepEqual(findingNames(findUnusedPrivateMethod(file, declarations)), ["hidden"]);
+});
+
+test("literal this[\"secret\"] counts as a use and does not suppress other unused privates", () => {
+  const file = sourceFile(`
+export class C {
+  private secret = 1;
+  private unused = 2;
+  private hidden() { return 1; }
+  read() {
+    return this["secret"];
+  }
+}
+`);
+  assert.deepEqual(findingNames(findUnusedPrivateField(file)), ["unused"]);
+  assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), ["hidden"]);
+});
+
+test("classes without dynamic this[expr] still report unused private fields and methods", () => {
+  const file = sourceFile(`
+export class C {
+  private secret = 1;
+  private unused = 2;
+  private hidden() { return 1; }
+  read() {
+    return this.secret;
+  }
+}
+`);
+  assert.deepEqual(findingNames(findUnusedPrivateField(file)), ["unused"]);
+  assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), ["hidden"]);
+});
+
+test("dynamic this[expr] only suppresses the class that contains it", () => {
+  const file = sourceFile(`
+export class Dynamic {
+  private secret = 1;
+  private hidden() { return 1; }
+  read(key: string) { return this[key]; }
+}
+export class Static {
+  private leftover = 1;
+  private idle() { return 1; }
+  read() { return 1; }
+}
+`);
+  assert.deepEqual(findingNames(findUnusedPrivateField(file)), ["leftover"]);
+  assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), ["idle"]);
+});
+
 

@@ -22,5 +22,5 @@ export function createUnusedFinding(
 }
 
 export function unusedOfKind(declarations: readonly UnusedDeclaration[], kind: UnusedKind): UnusedDeclaration[] {
-  return declarations.filter((declaration) => declaration.kind === kind && !declaration.used);
+  return declarations.filter((declaration) => declaration.kind === kind && !declaration.used && !declaration.uncertain);
 }
