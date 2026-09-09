@@ -359,7 +359,7 @@ function collectUses(
         (ts.isMethodDeclaration(parent) && parent.name === node) ||
         (ts.isGetAccessorDeclaration(parent) && parent.name === node) ||
         (ts.isSetAccessorDeclaration(parent) && parent.name === node) ||
-        (ts.isBindingElement(parent) && parent.propertyName === node);
+        ts.isBindingElement(parent);
       if (!isMemberName) {
         const field = fields.get(scopedKey(method.scope, node.text));
         if (field) {
