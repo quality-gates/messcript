@@ -494,6 +494,20 @@ export class C {
   assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), ["hidden"]);
 });
 
+test("non-this element access does not suppress or prove unused private members", () => {
+  const file = sourceFile(`
+export class C {
+  private leftover = 1;
+  private idle() { return 1; }
+  read(obj: Record<string, number>, key: string) {
+    return obj[key] + obj["leftover"];
+  }
+}
+`);
+  assert.deepEqual(findingNames(findUnusedPrivateField(file)), ["leftover"]);
+  assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), ["idle"]);
+});
+
 test("dynamic this[expr] only suppresses the class that contains it", () => {
   const file = sourceFile(`
 export class Dynamic {
