@@ -1,7 +1,7 @@
 // messcript-disable ConstantNamingConventions
 // messcript-disable CouplingBetweenObjects
 import ts from "typescript";
-import { forEachFunction } from "../ast/functions";
+import { forEachFunction, getFunctionName, isFunctionLike } from "../ast/functions";
 import { isBooleanType } from "../metrics/boolean";
 import type { Finding } from "../finding";
 import {
@@ -55,8 +55,8 @@ function isIgnored(node: ts.Node, sourceFile: ts.SourceFile, ignoreRegex: RegExp
   if (ownerName && parseCommaSeparatedNames(properties.exceptions).includes(ownerName)) {
     return true;
   }
-  const methodName = ts.isFunctionLike(node) && node.name && !ts.isComputedPropertyName(node.name)
-    ? node.name.getText(sourceFile)
+  const methodName = isFunctionLike(node) && node.name && !ts.isComputedPropertyName(node.name)
+    ? getFunctionName(node, sourceFile) ?? ""
     : "";
   return testIgnorePattern(ignoreRegex, methodName);
 }
