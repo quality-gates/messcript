@@ -1,6 +1,6 @@
 // messcript-disable CouplingBetweenObjects
 import ts from "typescript";
-import { getClassFields, getClassMethods } from "../ast/classes";
+import { getClassFields, getClassMethods, isParameterProperty } from "../ast/classes";
 import type { ClassField, ClassLike, ClassMethod } from "../ast/classes";
 import { isFunctionLike } from "../ast/functions";
 import type { FunctionLike } from "../ast/functions";
@@ -87,15 +87,6 @@ function bindingName(node: ts.Node): string | undefined {
     return node.text.replace(/^#/, "");
   }
   return undefined;
-}
-
-function isParameterProperty(node: ts.ParameterDeclaration): boolean {
-  return (
-    hasModifier(node, ts.SyntaxKind.PublicKeyword) ||
-    hasModifier(node, ts.SyntaxKind.PrivateKeyword) ||
-    hasModifier(node, ts.SyntaxKind.ProtectedKeyword) ||
-    hasModifier(node, ts.SyntaxKind.ReadonlyKeyword)
-  );
 }
 
 // messcript-disable-next-line ExcessiveClassComplexity
