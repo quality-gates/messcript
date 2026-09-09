@@ -23,6 +23,7 @@ export function compareLocations(left: Located, right: Located): number {
 // line for source that contains U+2028 or U+2029. `locate` computes
 // the line and column from a \n-and-\r\n-only map instead, so findings
 // match the line numbers a diff, an editor, or a CI annotation shows.
+// messcript-disable-next-line GlobalVariable
 const lineStartsByFile = new WeakMap<ts.SourceFile, readonly number[]>();
 
 function computeLineStarts(text: string): number[] {
@@ -64,4 +65,3 @@ export function locate(sourceFile: ts.SourceFile, position: number): ts.LineAndC
   }
   return { line: low, character: position - starts[low] };
 }
-
