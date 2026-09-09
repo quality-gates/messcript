@@ -144,7 +144,6 @@ function collectDecorators(node: ts.Node, sourceFile: ts.SourceFile, dependencie
 function collectClassDependencies(node: ClassLike, sourceFile: ts.SourceFile): Set<string> {
   const dependencies = new Set<string>();
   const ownName = node.name?.text ?? (ts.isClassExpression(node) && ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name) ? node.parent.name.text : undefined);
-  addImportDependencies(sourceFile, dependencies);
   collectDecorators(node, sourceFile, dependencies, ownName);
   for (const heritage of node.heritageClauses ?? []) {
     collectTypeDependencies(heritage, sourceFile, dependencies, ownName);

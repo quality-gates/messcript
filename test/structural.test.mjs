@@ -586,6 +586,54 @@ class BuiltinTypes {
   assert.deepEqual(findCouplingBetweenObjects(file, 1), []);
 });
 
+test("coupling bills classes for syntax references, not file-level imports", () => {
+  const imports = Array.from({ length: 13 }, (_, index) => `import { Unused${index} } from "./unused-${index}";`).join("\n");
+
+  const untouchedFile = sourceFile(`${imports}
+export class Untouched { x = 1; }
+`);
+  const untouchedFindings = findCouplingBetweenObjects(untouchedFile);
+  assert.deepEqual(
+    messages(untouchedFindings).filter((message) => /class Untouched/.test(message)),
+    [],
+  );
+  assert.equal(untouchedFindings.length, 1);
+  assert.match(untouchedFindings[0].message, /The module structural has a coupling between objects value of 13/);
+
+  const lightlyCoupledFile = sourceFile(`${imports}
+export class LightlyCoupled { first: Unused0; second = new Unused1(); }
+`);
+  assert.deepEqual(
+    messages(findCouplingBetweenObjects(lightlyCoupledFile)).filter((message) => /class LightlyCoupled/.test(message)),
+    [],
+  );
+
+  const heritageCoupledFile = sourceFile(`${imports}
+@ClassDecorator()
+export class HeavilyCoupled extends CoupledBase implements CoupledContract {
+  field0: CoupledType0;
+  field1: CoupledType1;
+  field2: CoupledType2;
+  field3: CoupledType3;
+  field4: CoupledType4;
+  field5: CoupledType5;
+  field6: CoupledType6;
+  field7: CoupledType7;
+  field8: CoupledType8;
+  field9: CoupledType9;
+  helper = new CoupledHelper();
+  run(value: CoupledValue): CoupledResult {
+    return new CoupledBuilder();
+  }
+}
+`);
+  const heritageFindings = findCouplingBetweenObjects(heritageCoupledFile);
+  assert.match(
+    messages(heritageFindings).find((message) => /class HeavilyCoupled/.test(message)) ?? "",
+    /coupling between objects value of 17/,
+  );
+});
+
 test("global-variable analysis observes declaration and mutation forms", () => {
   const file = sourceFile(`
 let scalar = 0;
