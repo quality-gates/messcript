@@ -259,6 +259,39 @@ const { [key]: alias = values[key] } = values;
   assert.equal(declarations.some((declaration) => declaration.name === "Imported"), false);
 });
 
+test("string-literal private member names match dot and element access", () => {
+  const file = sourceFile(`
+class Service {
+  private "usedMethod"() {}
+  private "usedField" = 1;
+  private "unusedMethod"() {}
+  private "unusedField" = 2;
+  run() {
+    this.usedMethod();
+    this["usedMethod"]();
+    this.usedField;
+    this["usedField"];
+  }
+}
+`);
+  const declarations = analyzeUnused(file);
+
+  assert.deepEqual(
+    declarations
+      .filter(({ kind }) => kind === "privateMethod" || kind === "privateField")
+      .map(({ kind, name, used }) => ({ kind, name, used }))
+      .sort((left, right) => left.name.localeCompare(right.name)),
+    [
+      { kind: "privateField", name: "unusedField", used: false },
+      { kind: "privateMethod", name: "unusedMethod", used: false },
+      { kind: "privateField", name: "usedField", used: true },
+      { kind: "privateMethod", name: "usedMethod", used: true },
+    ],
+  );
+  assert.deepEqual(findingNames(findUnusedPrivateField(file, declarations)), ["unusedField"]);
+  assert.deepEqual(findingNames(findUnusedPrivateMethod(file, declarations)), ["unusedMethod"]);
+});
+
 test("destructuring this marks private fields and methods as used", () => {
   const file = sourceFile(`
 class Service {
@@ -544,5 +577,4 @@ class Receiver {
 `);
   assert.deepEqual(findingNames(findUnusedFormalParameter(file)), ["x", "unused"]);
 });
-
 

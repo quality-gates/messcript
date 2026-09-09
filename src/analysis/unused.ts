@@ -49,6 +49,9 @@ function nameText(node: ClassField | ClassMethod, sourceFile: ts.SourceFile): st
   if (!node.name || ts.isComputedPropertyName(node.name)) {
     return undefined;
   }
+  if (ts.isStringLiteral(node.name) || ts.isNumericLiteral(node.name) || ts.isNoSubstitutionTemplateLiteral(node.name)) {
+    return node.name.text;
+  }
   return node.name.getText(sourceFile);
 }
 

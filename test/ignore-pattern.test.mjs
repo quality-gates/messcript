@@ -188,6 +188,32 @@ export function keepFlag(flag: boolean): void {}
   assert.equal(result.stderr, "");
 });
 
+test("BooleanArgumentFlag ignorepattern matches identifier and string-literal method names", () => {
+  const source = writeSource(
+    "string-literal-method-name.ts",
+    `class LiteralName {
+  "save"(flag: boolean): void {}
+}
+class IdentifierName {
+  save(flag: boolean): void {}
+}
+`,
+  );
+  const ruleset = writeRuleset(
+    "string-literal-method-name.xml",
+    `<ruleset name="ok">
+  <rule ref="BooleanArgumentFlag">
+    <properties><property name="ignorepattern" value="^save$"/></properties>
+  </rule>
+</ruleset>`,
+  );
+
+  const result = run([source, "text", ruleset]);
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "");
+});
+
 test("valid StaticAccess ignorepattern suppresses matching methods via the CLI", () => {
   const source = writeSource(
     "static-access.ts",

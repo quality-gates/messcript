@@ -50,6 +50,9 @@ export function getFunctionName(node: FunctionLike, sourceFile: ts.SourceFile): 
     return undefined;
   }
 
+  if (ts.isStringLiteral(node.name) || ts.isNumericLiteral(node.name) || ts.isNoSubstitutionTemplateLiteral(node.name)) {
+    return node.name.text;
+  }
   return node.name.getText(sourceFile);
 }
 

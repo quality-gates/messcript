@@ -114,6 +114,21 @@ function catches() {
   developmentProperties.markers = "TODO,FIXME,HACK";
 });
 
+test("ElseExpression uses unquoted string-literal method names", () => {
+  const file = sourceFile(`
+class Service {
+  "save"(value: boolean) {
+    if (value) return 1;
+    else return 0;
+  }
+}
+`);
+
+  const [finding] = findElseExpression(file);
+  assert.equal(finding.context, "method save()");
+  assert.match(finding.message, /The method save uses an else expression/);
+});
+
 test("DevelopmentCodeFragment finds marker comments after template expressions with interpolation", () => {
   const file = sourceFile(`
 const name = "world";
