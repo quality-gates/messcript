@@ -47,6 +47,7 @@ export class IgnorePatternError extends Error {
 
 type CacheEntry = { readonly regex: RegExp } | { readonly error: IgnorePatternError };
 
+// messcript-disable-next-line GlobalVariable
 const compileCache = new Map<string, CacheEntry>();
 
 function syntaxErrorMessage(error: unknown): string {
