@@ -430,7 +430,7 @@ function expandReference(
     return;
   }
   if (parsed.complete) {
-    warn(state, `Unknown referenced ruleset '${reference}' in '${state.path}'.`);
+    state.errors.push(`Unknown referenced ruleset '${reference}' in '${state.path}'.`);
   } else {
     warn(state, `Unknown referenced rule '${directRule}' in '${state.path}'.`);
   }
@@ -487,7 +487,7 @@ function expandCustomFile(
 ): void {
   const fullPath = resolve(path);
   if (state.stack.has(fullPath)) {
-    warn(state, `Circular ruleset reference '${path}' in '${state.path}'.`);
+    state.errors.push(`Circular ruleset reference '${fullPath}' in '${state.path}'.`);
     return;
   }
   state.stack.add(fullPath);
