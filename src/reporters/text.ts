@@ -1,6 +1,7 @@
 import type { ProcessingError } from "../analyzer";
 import type { Finding } from "../finding";
 import { compareLocations } from "../location";
+import { normalizeReportPath } from "./human";
 
 export function formatText(findings: readonly Finding[], errors: readonly ProcessingError[] = []): string {
   const entries = [
@@ -8,13 +9,13 @@ export function formatText(findings: readonly Finding[], errors: readonly Proces
       path: finding.path,
       line: finding.line,
       column: finding.column,
-      text: `${finding.path}:${finding.line}:${finding.column}: ${finding.ruleName} [priority ${finding.priority}]${finding.suppressed ? " [suppressed]" : ""} ${finding.message} (context: ${finding.context})`,
+      text: `${normalizeReportPath(finding.path)}:${finding.line}:${finding.column}: ${finding.ruleName} [priority ${finding.priority}]${finding.suppressed ? " [suppressed]" : ""} ${finding.message} (context: ${finding.context})`,
     })),
     ...errors.map((error) => ({
       path: error.path,
       line: error.line,
       column: error.column,
-      text: `${error.path}:${error.line}:${error.column}: ProcessingError ${error.message}`,
+      text: `${normalizeReportPath(error.path)}:${error.line}:${error.column}: ProcessingError ${error.message}`,
     })),
   ].sort(
     (left, right) =>

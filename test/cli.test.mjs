@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { after, before, test } from "node:test";
@@ -800,6 +800,10 @@ function runCli(args) {
   return { status, stdout: stdout.read(), stderr: stderr.read() };
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 test("a missing command shape is an operational error", () => {
   const result = runCli([]);
 
@@ -1085,6 +1089,43 @@ test("HTML, ANSI, GitHub, and GitLab reports preserve locations and escaping", (
   assert.match(strictHtml.stdout, /suppressed/);
   assert.equal(strict.status, 2);
   assert.equal(JSON.parse(strict.stdout)[0].suppressed, true);
+});
+
+test("text reports use the same cwd-relative paths as the other human formats", () => {
+  const source = join(fixturesRoot, "complex.ts");
+  const relativeSource = relative(process.cwd(), source);
+  const text = runCli([source, "text", "codesize", "--only", "CyclomaticComplexity"]);
+  const textAlways = runCli([source, "text", "codesize", "--only", "CyclomaticComplexity", "--color=always"]);
+  const textNever = runCli([source, "text", "codesize", "--only", "CyclomaticComplexity", "--color=never"]);
+  const ansi = runCli([source, "ansi", "codesize", "--only", "CyclomaticComplexity", "--color=never"]);
+  const github = runCli([source, "github", "codesize", "--only", "CyclomaticComplexity"]);
+  const gitlab = runCli([source, "gitlab", "codesize", "--only", "CyclomaticComplexity"]);
+  const xml = runCli([source, "xml", "codesize", "--only", "CyclomaticComplexity"]);
+
+  const textLines = text.stdout.trim().split("\n");
+  assert.equal(text.status, 2);
+  assert.ok(textLines.length > 0);
+  for (const line of textLines) {
+    assert.match(line, new RegExp(`^${escapeRegExp(relativeSource)}:`));
+  }
+
+  const ansiLines = ansi.stdout.trim().split("\n").map((line) => line.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, ""));
+  assert.deepEqual(ansiLines, textLines);
+
+  const githubFile = github.stdout.match(/file=([^,]+),/)[1];
+  const gitlabPath = JSON.parse(gitlab.stdout)[0].location.path;
+  assert.equal(githubFile, relativeSource);
+  assert.equal(gitlabPath, relativeSource);
+
+  const xmlPaths = [...xml.stdout.matchAll(/<finding path="([^"]+)"/g)].map((match) => match[1]);
+  assert.ok(xmlPaths.length > 0);
+  for (const xmlPath of xmlPaths) {
+    assert.equal(xmlPath, source);
+  }
+
+  const alwaysPlain = textAlways.stdout.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+  assert.equal(alwaysPlain, textNever.stdout);
+  assert.equal(alwaysPlain.split("\n")[0].split(":")[0], relativeSource);
 });
 
 test("recommended language policies tune defaults and opinionated opt-ins", () => {
