@@ -53,10 +53,15 @@ export function findIfStatementAssignment(sourceFile: ts.SourceFile): Finding[] 
       if (isFunctionLike(bodyNode)) {
         return;
       }
-      if (ts.isIfStatement(bodyNode)) {
+      if (
+        ts.isIfStatement(bodyNode) ||
+        ts.isWhileStatement(bodyNode) ||
+        ts.isDoStatement(bodyNode) ||
+        ts.isSwitchStatement(bodyNode)
+      ) {
         addConditionFindings(bodyNode.expression, sourceFile, context, findings);
-      } else if (ts.isWhileStatement(bodyNode) || ts.isDoStatement(bodyNode)) {
-        addConditionFindings(bodyNode.expression, sourceFile, context, findings);
+      } else if (ts.isForStatement(bodyNode) && bodyNode.condition) {
+        addConditionFindings(bodyNode.condition, sourceFile, context, findings);
       }
       ts.forEachChild(bodyNode, visit);
     }
