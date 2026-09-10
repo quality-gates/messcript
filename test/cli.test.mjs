@@ -421,6 +421,25 @@ export function javascriptAssignment(input) {
 
 export const javascriptObject = { "key": 1, key: 2, [dynamicKey]: 3, [dynamicKey]: 4 };
 `;
+  const assignmentConditionSource = `export function assignmentConditions(value) {
+  if (value = 1) {}
+  if (value += 1) {}
+  if (value -= 1) {}
+  if (value *= 1) {}
+  if (value /= 1) {}
+  if (value %= 1) {}
+  if (value **= 1) {}
+  if (value <<= 1) {}
+  if (value >>= 1) {}
+  if (value >>>= 1) {}
+  if (value &= 1) {}
+  if (value |= 1) {}
+  if (value ^= 1) {}
+  if (value ||= 1) {}
+  if (value &&= 1) {}
+  if (value ??= 1) {}
+}
+`;
   const designSource = `export function designRules(items, value) {
   if (value === 0) {
     process.exit(1);
@@ -775,6 +794,7 @@ function visible(value) { if (value) return 1; return 0; }
   writeScanFixture("src/unused.js", unusedJavaScriptSource);
   writeScanFixture("src/clean-code.ts", cleanCodeSource);
   writeScanFixture("src/clean-code.js", cleanCodeJavaScriptSource);
+  writeScanFixture("src/assignment-conditions.ts", assignmentConditionSource);
   writeScanFixture("src/design.js", designSource);
   writeScanFixture("src/design.ts", designTypeScriptSource);
   writeScanFixture("src/cohesion.ts", cohesionTypeScriptSource);
@@ -1446,6 +1466,24 @@ test("cleancode rules cover executable JavaScript and TypeScript constructs cons
   assert.doesNotMatch(result.stdout, /\bCleanCodeInterface\b|\bCleanCodeType\b|\bAmbientCleanCode\b|\bAbstractCleanCode\b/);
   assert.doesNotMatch(result.stdout, /cleanNegative.*ElseExpression|anotherKey|dynamicKey/);
   assert.equal(result.stderr, "");
+});
+
+test("IfStatementAssignment reports every assignment operator in conditions", () => {
+  const result = runCli([
+    join(scanRoot, "src", "assignment-conditions.ts"),
+    "json",
+    "typescript",
+    "--only",
+    "IfStatementAssignment",
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.equal(result.stderr, "");
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.errors, []);
+  assert.equal(report.findings.length, 16);
+  assert.deepEqual(report.findings.map((finding) => finding.line), Array.from({ length: 16 }, (_, index) => index + 2));
+  assert.ok(report.findings.every((finding) => finding.ruleName === "IfStatementAssignment"));
 });
 
 test("design rules cover executable control flow and keep goto inert", () => {
