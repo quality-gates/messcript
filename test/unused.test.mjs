@@ -35,6 +35,49 @@ function loop() {
   }
 });
 
+test("UnusedLocalVariable treats var declarations as function-scoped bindings", () => {
+  const file = sourceFile(`
+function blockScopedVar() {
+  if (true) {
+    var value = 1;
+  }
+  return value;
+}
+
+function redeclaredVar() {
+  var value = 1;
+  var value = 2;
+  return value;
+}
+`);
+
+  assert.deepEqual(findingNames(findUnusedLocalVariable(file)), []);
+});
+
+test("UnusedLocalVariable reports an unused var binding hoisted from a nested block", () => {
+  const file = sourceFile(`
+function unusedVar() {
+  if (true) {
+    var value = 1;
+  }
+}
+`);
+
+  assert.deepEqual(findingNames(findUnusedLocalVariable(file)), ["value"]);
+});
+
+test("unused analysis retains every var redeclaration record", () => {
+  const file = sourceFile(`
+function redeclaredVar() {
+  var value = 1;
+  var value = 2;
+}
+`);
+
+  assert.equal(analyzeUnused(file).filter((declaration) => declaration.kind === "local").length, 2);
+  assert.deepEqual(findingNames(findUnusedLocalVariable(file)), ["value", "value"]);
+});
+
 test("unused analysis distinguishes used, unused, private, local, formal, and uncertain declarations", () => {
   const file = sourceFile(`
 class Service {
@@ -589,4 +632,3 @@ test("override-only constructor parameter properties are fields, not unused form
   assert.deepEqual(findingNames(findUnusedPrivateField(file)), []);
   assert.deepEqual(findingNames(findUnusedFormalParameter(file)), []);
 });
-

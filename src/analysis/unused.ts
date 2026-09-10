@@ -20,13 +20,14 @@ type Scope = {
   parent?: Scope;
   bindings: Map<string, Binding[]>;
   classInfo?: ClassInfo;
+  functionScope?: boolean;
   root: boolean;
 };
 
 type Binding = {
   name: string;
   node: ts.Node;
-  declaration?: UnusedDeclaration;
+  declarations: UnusedDeclaration[];
 };
 
 type ClassInfo = {
@@ -37,6 +38,12 @@ type ClassInfo = {
 function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
   const modifiers = (node as ts.Node & { modifiers?: readonly ts.Modifier[] }).modifiers;
   return modifiers?.some((modifier) => modifier.kind === kind) ?? false;
+}
+
+function isVarDeclaration(node: ts.VariableDeclaration): boolean {
+  const declarationList = node.parent;
+  return ts.isVariableDeclarationList(declarationList) &&
+    (declarationList.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const | ts.NodeFlags.Using)) === 0;
 }
 
 function nameText(node: ClassField | ClassMethod, sourceFile: ts.SourceFile): string | undefined {
@@ -105,7 +112,7 @@ class UnusedAnalyzer {
 
   private addBinding(scope: Scope, name: string, node: ts.Node, declaration?: UnusedDeclaration): void {
     const bindings = scope.bindings.get(name) ?? [];
-    bindings.push({ name, node, declaration });
+    bindings.push({ name, node, declarations: declaration ? [declaration] : [] });
     scope.bindings.set(name, bindings);
     this.declarationNodes.add(node);
     if (declaration) {
@@ -113,11 +120,27 @@ class UnusedAnalyzer {
     }
   }
 
-  private addBindingName(scope: Scope, name: ts.BindingName, kind: UnusedKind | undefined, context: string): void {
+  private addBindingName(
+    scope: Scope,
+    name: ts.BindingName,
+    kind: UnusedKind | undefined,
+    context: string,
+    coalesce = false,
+  ): void {
     for (const identifier of bindingIdentifiers(name)) {
       const declaration = kind
         ? { name: identifier.text, node: identifier, kind, context, used: false }
         : undefined;
+      const bindings = scope.bindings.get(identifier.text);
+      const existing = coalesce ? bindings?.[bindings.length - 1] : undefined;
+      if (existing) {
+        this.declarationNodes.add(identifier);
+        if (declaration) {
+          existing.declarations.push(declaration);
+          this.declarations.push(declaration);
+        }
+        continue;
+      }
       this.addBinding(scope, identifier.text, identifier, declaration);
     }
   }
@@ -135,6 +158,14 @@ class UnusedAnalyzer {
 
   private isLocalScope(scope: Scope): boolean {
     return !scope.root;
+  }
+
+  private nearestFunctionScope(scope: Scope): Scope {
+    let current = scope;
+    while (current.parent && !current.functionScope) {
+      current = current.parent;
+    }
+    return current;
   }
 
   // messcript-disable-next-line CyclomaticComplexity NPathComplexity
@@ -210,7 +241,7 @@ class UnusedAnalyzer {
     if (ts.isFunctionDeclaration(node) && node.name) {
       this.addBinding(parent, node.name.text, node.name);
     }
-    const functionScope: Scope = { parent, bindings: new Map(), root: false };
+    const functionScope: Scope = { parent, bindings: new Map(), functionScope: true, root: false };
     this.scopeByNode.set(node, functionScope);
     if (node.name) {
       this.declarationNodes.add(node.name);
@@ -279,7 +310,15 @@ class UnusedAnalyzer {
       return;
     }
     if (ts.isVariableDeclaration(node)) {
-      this.addBindingName(scope, node.name, this.isLocalScope(scope) ? "local" : undefined, `local variable ${node.name.getText()}`);
+      const varDeclaration = isVarDeclaration(node);
+      const bindingScope = varDeclaration ? this.nearestFunctionScope(scope) : scope;
+      this.addBindingName(
+        bindingScope,
+        node.name,
+        this.isLocalScope(bindingScope) ? "local" : undefined,
+        `local variable ${node.name.getText()}`,
+        varDeclaration,
+      );
       if (node.type) {
         this.build(node.type, scope);
       }
@@ -540,8 +579,8 @@ class UnusedAnalyzer {
         return;
       }
       const binding = this.resolve(scope, node.text);
-      if (binding?.declaration) {
-        binding.declaration.used = true;
+      for (const declaration of binding?.declarations ?? []) {
+        declaration.used = true;
       }
       return;
     }
