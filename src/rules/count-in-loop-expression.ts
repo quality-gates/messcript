@@ -29,9 +29,6 @@ function countName(node: ts.Node): string | undefined {
   if (accessed && countNames.has(accessed)) {
     return accessed;
   }
-  if (ts.isCallExpression(node) && accessedName(node.expression) === "count") {
-    return "count";
-  }
   return undefined;
 }
 
