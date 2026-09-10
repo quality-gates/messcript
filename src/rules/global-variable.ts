@@ -135,11 +135,22 @@ function collectBindings(sourceFile: ts.SourceFile): Binding[] {
   return bindings;
 }
 
+function literalPropertyName(node: ts.Node): string | undefined {
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return node.text;
+  }
+  if (ts.isNumericLiteral(node)) {
+    const value = Number(node.text);
+    return Number.isNaN(value) ? undefined : String(value);
+  }
+  return undefined;
+}
+
 function staticFieldName(node: ts.PropertyDeclaration, sourceFile: ts.SourceFile): string | undefined {
   if (!node.name || ts.isComputedPropertyName(node.name)) {
     return undefined;
   }
-  return node.name.getText(sourceFile);
+  return literalPropertyName(node.name) ?? node.name.getText(sourceFile);
 }
 
 function collectStaticFields(sourceFile: ts.SourceFile): StaticField[] {
@@ -202,10 +213,7 @@ function propertyName(node: ts.PropertyAccessExpression | ts.ElementAccessExpres
   if (ts.isPropertyAccessExpression(node)) {
     return node.name.text;
   }
-  if (node.argumentExpression && (ts.isStringLiteral(node.argumentExpression) || ts.isNoSubstitutionTemplateLiteral(node.argumentExpression))) {
-    return node.argumentExpression.text;
-  }
-  return undefined;
+  return node.argumentExpression ? literalPropertyName(node.argumentExpression) : undefined;
 }
 
 function receiverName(node: ts.Expression): string | undefined {

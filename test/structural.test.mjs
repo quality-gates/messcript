@@ -870,6 +870,24 @@ class StaticState {
   assert.ok(messages(immutable).some((message) => /property/.test(message)));
 });
 
+test("global-variable matches literal static fields to element-access mutations", () => {
+  const file = sourceFile(`
+class LiteralState {
+  static "count" = 0;
+  static 0x10 = 0;
+  static mutate() {
+    this["count"] += 1;
+    this[16] += 1;
+  }
+}
+`);
+
+  assert.deepEqual(findGlobalVariable([file]).map((finding) => finding.context), [
+    "static field count",
+    "static field 16",
+  ]);
+});
+
 test("global-variable analysis observes mutations via destructuring assignments", () => {
   const file = sourceFile(`
 let a = 0, b = 0, c = 0, d = 0, e = 0, f = 0, g = 0, h = 0;
@@ -963,4 +981,3 @@ function testConditions(n, y) {
   assert.ok(findings.every((f) => f.context === "function testConditions()"));
   assert.ok(messages(findings).every((message) => /Avoid assigning values to variables in if clauses and the like/.test(message)));
 });
-
