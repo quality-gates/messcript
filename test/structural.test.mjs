@@ -616,6 +616,32 @@ export function add(value: number, method: string) {
   ]);
 });
 
+test("exit-expression reports exit calls through literal element access", () => {
+  const file = sourceFile(`
+export function shutdown() {
+  process["exit"](1);
+}
+export function halt() {
+  process["abort"]();
+}
+export function stop() {
+  Deno["exit"]();
+}
+export function dynamic(method: string) {
+  process[method](1);
+}
+export function unrelated() {
+  process["nextTick"](() => undefined);
+}
+`);
+
+  assert.deepEqual(findExitExpression(file).map((finding) => finding.context), [
+    "function shutdown()",
+    "function halt()",
+    "function stop()",
+  ]);
+});
+
 test("coupling ignores the complete built-in type vocabulary", () => {
   const file = sourceFile(`
 class BuiltinTypes {
