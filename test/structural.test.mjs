@@ -670,6 +670,33 @@ class Own {
   assert.match(findStaticAccess(file)[0].message, /class 'Logger'/);
 });
 
+test("count-in-loop reports count properties through literal element access", () => {
+  const file = sourceFile(`
+export function run(items) {
+  while (items["length"]) { break; }
+}
+export function template(items) {
+  for (let index = 0; index < items[\`size\`]; index += 1) { work(index); }
+}
+export function called(items) {
+  do { work(); } while (items["count"]());
+}
+export function dynamic(items, key) {
+  while (items[key]) { break; }
+}
+export function unrelated(items) {
+  while (items["ready"]) { break; }
+}
+`);
+
+  const findings = findCountInLoopExpression(file);
+  assert.deepEqual(findings.map((finding) => finding.message), [
+    "Avoid using length in while loops.",
+    "Avoid using size in for loops.",
+    "Avoid using count in do loops.",
+  ]);
+});
+
 test("coupling ignores the complete built-in type vocabulary", () => {
   const file = sourceFile(`
 class BuiltinTypes {

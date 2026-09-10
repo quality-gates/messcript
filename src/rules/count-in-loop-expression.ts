@@ -8,16 +8,29 @@ export const ruleName = "CountInLoopExpression";
 export const priority = 2;
 export const properties = {} as const;
 
-function countName(node: ts.Node): string | undefined {
+const countNames = new Set(["length", "size", "count"]);
+
+function accessedName(node: ts.Node): string | undefined {
   if (ts.isPropertyAccessExpression(node)) {
-    if (node.name.text === "length" || node.name.text === "size" || node.name.text === "count") {
-      return node.name.text;
-    }
+    return node.name.text;
   }
-  if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
-    if (node.expression.name.text === "count") {
-      return "count";
-    }
+  if (!ts.isElementAccessExpression(node)) {
+    return undefined;
+  }
+  const argument = node.argumentExpression;
+  if (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)) {
+    return argument.text;
+  }
+  return undefined;
+}
+
+function countName(node: ts.Node): string | undefined {
+  const accessed = accessedName(node);
+  if (accessed && countNames.has(accessed)) {
+    return accessed;
+  }
+  if (ts.isCallExpression(node) && accessedName(node.expression) === "count") {
+    return "count";
   }
   return undefined;
 }
