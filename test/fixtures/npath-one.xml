@@ -1,0 +1,6 @@
+<ruleset name="npath-one">
+  <rule name="NPathComplexity">
+    <priority>3</priority>
+    <properties><property name="minimum" value="1"/></properties>
+  </rule>
+</ruleset>

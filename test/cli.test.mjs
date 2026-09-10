@@ -1351,6 +1351,21 @@ test("function metrics report exact positive values and ignore idiomatic paramet
   assert.equal(result.stderr, "");
 });
 
+test("NPathComplexity counts empty switches as one feasible path", () => {
+  const result = runCli([
+    join(fixturesRoot, "npath-empty-switch.ts"),
+    "text",
+    join(fixturesRoot, "npath-one.xml"),
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.equal((result.stdout.match(/NPathComplexity/g) ?? []).length, 4);
+  assert.match(result.stdout, /emptySwitch\(\).*NPath complexity of 1/);
+  assert.match(result.stdout, /switchThenBranch\(\).*NPath complexity of 2/);
+  assert.match(result.stdout, /oneCase\(\).*NPath complexity of 1/);
+  assert.equal(result.stderr, "");
+});
+
 test("class metrics cover JavaScript and TypeScript classes without declaration noise", () => {
   const result = runCli([join(scanRoot, "src", "classes.ts") + "," + join(scanRoot, "src", "classes.js"), "text", "codesize"]);
 
