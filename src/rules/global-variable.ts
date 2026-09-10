@@ -426,9 +426,12 @@ function observeMutations(
         markPropertyMutation(operand, sourceFile, bindings, fields, mutatedBindings, mutatedFields);
       }
     }
-    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
-      const method = node.expression.name.text.toLowerCase();
-      if (mutatingMethods.has(method)) {
+    if (
+      ts.isCallExpression(node) &&
+      (ts.isPropertyAccessExpression(node.expression) || ts.isElementAccessExpression(node.expression))
+    ) {
+      const method = propertyName(node.expression)?.toLowerCase();
+      if (method && mutatingMethods.has(method)) {
         const receiver = node.expression.expression;
         if (ts.isIdentifier(receiver)) {
           markBindingMutation(node, receiver.text, bindings, mutatedBindings);
