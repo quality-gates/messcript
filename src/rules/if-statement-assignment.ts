@@ -9,11 +9,15 @@ export const ruleName = "IfStatementAssignment";
 export const priority = 1;
 export const properties = {} as const;
 
+function isAssignmentOperator(kind: ts.SyntaxKind): boolean {
+  return kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment;
+}
+
 function findAssignments(node: ts.Node, assignments: ts.BinaryExpression[]): void {
   if (isFunctionLike(node)) {
     return;
   }
-  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+  if (ts.isBinaryExpression(node) && isAssignmentOperator(node.operatorToken.kind)) {
     assignments.push(node);
   }
   ts.forEachChild(node, (child) => findAssignments(child, assignments));
