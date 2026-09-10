@@ -132,7 +132,7 @@ class UnusedAnalyzer {
         ? { name: identifier.text, node: identifier, kind, context, used: false }
         : undefined;
       const bindings = scope.bindings.get(identifier.text);
-      const existing = coalesce && bindings && bindings.length > 0 ? bindings[bindings.length - 1] : undefined;
+      const existing = coalesce ? bindings?.[bindings.length - 1] : undefined;
       if (existing) {
         this.declarationNodes.add(identifier);
         if (declaration) {
