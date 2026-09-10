@@ -190,6 +190,24 @@ function work() {}
   assert.equal(findDevelopmentCodeFragment(regexLiteralWithSlashEquals).length, 1);
 });
 
+test("DevelopmentCodeFragment finds debug calls through literal element access", () => {
+  const file = sourceFile(`
+console["log"]("debug");
+console[\`debug\`]();
+debug["debug"]();
+logger["trace"]();
+console[method]();
+logger[method]();
+`);
+
+  assert.deepEqual(messages(findDevelopmentCodeFragment(file, "logger.trace")), [
+    "The module calls the typical debug function console.log() which is mostly only used during development.",
+    "The module calls the typical debug function console.debug() which is mostly only used during development.",
+    "The module calls the typical debug function debug.debug() which is mostly only used during development.",
+    "The module calls the typical debug function logger.trace() which is mostly only used during development.",
+  ]);
+});
+
 test("duplicate keys recognize static literals and ignore dynamic keys", () => {
   const file = sourceFile(`
 const value = 1;

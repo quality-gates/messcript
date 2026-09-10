@@ -17,6 +17,14 @@ function callName(node: ts.Expression): string | undefined {
     const parent = callName(node.expression);
     return parent ? `${parent}.${node.name.text}` : undefined;
   }
+  if (ts.isElementAccessExpression(node)) {
+    const argument = node.argumentExpression;
+    if (!ts.isStringLiteral(argument) && !ts.isNoSubstitutionTemplateLiteral(argument)) {
+      return undefined;
+    }
+    const parent = callName(node.expression);
+    return parent ? `${parent}.${argument.text}` : undefined;
+  }
   return undefined;
 }
 
