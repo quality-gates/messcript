@@ -14,6 +14,17 @@ function exceptionNames(): Set<string> {
   return new Set(properties.exceptions.split(",").map((value) => value.trim()).filter(Boolean));
 }
 
+function isNamedAccess(node: ts.Expression): node is ts.PropertyAccessExpression | ts.ElementAccessExpression {
+  if (ts.isPropertyAccessExpression(node)) {
+    return true;
+  }
+  if (!ts.isElementAccessExpression(node)) {
+    return false;
+  }
+  const argument = node.argumentExpression;
+  return ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument);
+}
+
 export function findStaticAccess(sourceFile: ts.SourceFile): Finding[] {
   const findings: Finding[] = [];
   const exceptions = exceptionNames();
@@ -29,7 +40,7 @@ export function findStaticAccess(sourceFile: ts.SourceFile): Finding[] {
       if (bodyNode !== node.body && ts.isFunctionLike(bodyNode)) {
         return;
       }
-      if (ts.isCallExpression(bodyNode) && ts.isPropertyAccessExpression(bodyNode.expression)) {
+      if (ts.isCallExpression(bodyNode) && isNamedAccess(bodyNode.expression)) {
         const receiver = bodyNode.expression.expression;
         if (ts.isIdentifier(receiver) && /^[A-Z]/.test(receiver.text) && receiver.text !== ownClassName && !exceptions.has(receiver.text)) {
           findings.push(

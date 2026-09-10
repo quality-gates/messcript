@@ -642,6 +642,34 @@ export function unrelated() {
   ]);
 });
 
+test("static-access reports class calls through literal element access", () => {
+  const file = sourceFile(`
+export function run() {
+  Logger["log"]("message");
+}
+export function template() {
+  Logger[\`warn\`]("message");
+}
+export function dynamic(method: string) {
+  Logger[method]("message");
+}
+export function lowercase() {
+  logger["log"]("message");
+}
+class Own {
+  run() {
+    Own["log"]("message");
+  }
+}
+`);
+
+  assert.deepEqual(findStaticAccess(file).map((finding) => finding.context), [
+    "function run()",
+    "function template()",
+  ]);
+  assert.match(findStaticAccess(file)[0].message, /class 'Logger'/);
+});
+
 test("coupling ignores the complete built-in type vocabulary", () => {
   const file = sourceFile(`
 class BuiltinTypes {
