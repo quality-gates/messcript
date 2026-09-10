@@ -600,6 +600,22 @@ mutable += 1;
   assert.ok(messages(immutableFindings).some((message) => /immutable/.test(message)));
 });
 
+test("global-variable reports mutating methods through literal element access", () => {
+  const file = sourceFile(`
+export const cache: number[] = [];
+export const untouched: number[] = [];
+export function add(value: number, method: string) {
+  cache["push"](value);
+  untouched["map"](value);
+  untouched[method](value);
+}
+`);
+
+  assert.deepEqual(findGlobalVariable([file]).map((finding) => finding.context), [
+    "global variable cache",
+  ]);
+});
+
 test("coupling ignores the complete built-in type vocabulary", () => {
   const file = sourceFile(`
 class BuiltinTypes {
