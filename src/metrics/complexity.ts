@@ -49,9 +49,12 @@ function statementPaths(node: ts.Node): number {
     return 1 + expressionComplexity(node.expression) + statementPaths(node.statement);
   }
   if (ts.isSwitchStatement(node)) {
+    const clausePaths = node.caseBlock.clauses.length === 0
+      ? 1
+      : node.caseBlock.clauses.reduce((paths, clause) => paths + sequencePaths(clause.statements), 0);
     return (
       expressionComplexity(node.expression) +
-      node.caseBlock.clauses.reduce((paths, clause) => paths + sequencePaths(clause.statements), 0)
+      clausePaths
     );
   }
   if (ts.isTryStatement(node)) {
