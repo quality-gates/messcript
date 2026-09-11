@@ -46,30 +46,37 @@ function addConditionFindings(
   }
 }
 
+function visitExecutableStatements(
+  node: ts.Node,
+  sourceFile: ts.SourceFile,
+  context: string,
+  findings: Finding[],
+): void {
+  if (isFunctionLike(node)) {
+    return;
+  }
+  if (
+    ts.isIfStatement(node) ||
+    ts.isWhileStatement(node) ||
+    ts.isDoStatement(node) ||
+    ts.isSwitchStatement(node)
+  ) {
+    addConditionFindings(node.expression, sourceFile, context, findings);
+  } else if (ts.isForStatement(node) && node.condition) {
+    addConditionFindings(node.condition, sourceFile, context, findings);
+  }
+  ts.forEachChild(node, (child) => visitExecutableStatements(child, sourceFile, context, findings));
+}
+
 export function findIfStatementAssignment(sourceFile: ts.SourceFile): Finding[] {
   const findings: Finding[] = [];
+  visitExecutableStatements(sourceFile, sourceFile, "module", findings);
   forEachFunction(sourceFile, (node) => {
     if (!node.body) {
       return;
     }
     const context = functionContext(node, sourceFile);
-    function visit(bodyNode: ts.Node): void {
-      if (isFunctionLike(bodyNode)) {
-        return;
-      }
-      if (
-        ts.isIfStatement(bodyNode) ||
-        ts.isWhileStatement(bodyNode) ||
-        ts.isDoStatement(bodyNode) ||
-        ts.isSwitchStatement(bodyNode)
-      ) {
-        addConditionFindings(bodyNode.expression, sourceFile, context, findings);
-      } else if (ts.isForStatement(bodyNode) && bodyNode.condition) {
-        addConditionFindings(bodyNode.condition, sourceFile, context, findings);
-      }
-      ts.forEachChild(bodyNode, visit);
-    }
-    visit(node.body);
+    visitExecutableStatements(node.body, sourceFile, context, findings);
   });
   return findings;
 }

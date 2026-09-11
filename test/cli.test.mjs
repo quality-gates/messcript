@@ -421,7 +421,10 @@ export function javascriptAssignment(input) {
 
 export const javascriptObject = { "key": 1, key: 2, [dynamicKey]: 3, [dynamicKey]: 4 };
 `;
-  const assignmentConditionSource = `export function assignmentConditions(value) {
+  const assignmentConditionSource = `let moduleValue = 0;
+if (moduleValue = 1) {}
+
+export function assignmentConditions(value) {
   if (value = 1) {}
   if (value += 1) {}
   if (value -= 1) {}
@@ -438,6 +441,13 @@ export const javascriptObject = { "key": 1, key: 2, [dynamicKey]: 3, [dynamicKey
   if (value ||= 1) {}
   if (value &&= 1) {}
   if (value ??= 1) {}
+}
+
+export class StaticBlockExample {
+  static {
+    let blockValue = 0;
+    if (blockValue = 1) {}
+  }
 }
 `;
   const designSource = `export function designRules(items, value) {
@@ -1561,8 +1571,10 @@ test("IfStatementAssignment reports every assignment operator in conditions", ()
   assert.equal(result.stderr, "");
   const report = JSON.parse(result.stdout);
   assert.deepEqual(report.errors, []);
-  assert.equal(report.findings.length, 16);
-  assert.deepEqual(report.findings.map((finding) => finding.line), Array.from({ length: 16 }, (_, index) => index + 2));
+  assert.equal(report.findings.length, 18);
+  assert.deepEqual(report.findings.map((finding) => finding.line), [2, ...Array.from({ length: 16 }, (_, index) => index + 5), 26]);
+  assert.equal(report.findings.find((finding) => finding.line === 2)?.context, "module");
+  assert.equal(report.findings.find((finding) => finding.line === 26)?.context, "module");
   assert.ok(report.findings.every((finding) => finding.ruleName === "IfStatementAssignment"));
 });
 
