@@ -555,8 +555,21 @@ declare let ambientState: number;
 
 export class GlobalState {
   static count = 0;
+  static blockCount = 0;
+  static blockCompound = 0;
+  static blockUpdated = 0;
+  static blockElement = 0;
+  static blockValues: number[] = [];
   static readonly immutable = 1;
   static #privateCount = 0;
+
+  static {
+    this.blockCount = 1;
+    this.blockCompound += 1;
+    this.blockUpdated++;
+    this["blockElement"] = 1;
+    this.blockValues.push(1);
+  }
 
   static increment() {
     this.count += 1;
@@ -566,6 +579,14 @@ export class GlobalState {
 
 class NeverMutated {
   static count = 0;
+}
+
+class InstanceState {
+  static blockBoundary = 0;
+  blockBoundary = 0;
+  update() {
+    this.blockBoundary = 1;
+  }
 }
 
 function mutateState() {
@@ -1535,7 +1556,13 @@ test("design global-variable rule reports observed mutable module and static sta
   assert.match(result.stdout, /GlobalVariable \[priority 1\].*assignedLater/);
   assert.match(result.stdout, /GlobalVariable \[priority 1\].*objectState/);
   assert.match(result.stdout, /GlobalVariable \[priority 1\].*count/);
+  assert.match(result.stdout, /context: static field blockCount/);
+  assert.match(result.stdout, /context: static field blockCompound/);
+  assert.match(result.stdout, /context: static field blockUpdated/);
+  assert.match(result.stdout, /context: static field blockElement/);
+  assert.match(result.stdout, /context: static field blockValues/);
   assert.match(result.stdout, /GlobalVariable \[priority 1\].*sharedAcrossFiles/);
+  assert.doesNotMatch(result.stdout, /context: static field blockBoundary/);
   assert.doesNotMatch(result.stdout, /ImportedType|importedValue|neverMutated|immutableState|ambientState|immutable|NeverMutated/);
   assert.equal(result.stderr, "");
 });
