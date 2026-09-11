@@ -23,11 +23,17 @@ function staticExpressionKey(node: ts.Expression): string | undefined {
     const value = Number(node.text);
     return Number.isNaN(value) ? undefined : String(value);
   }
+  if (ts.isBigIntLiteral(node)) {
+    return BigInt(node.text.slice(0, -1)).toString();
+  }
   if (node.kind === ts.SyntaxKind.TrueKeyword) {
     return "true";
   }
   if (node.kind === ts.SyntaxKind.FalseKeyword) {
     return "false";
+  }
+  if (node.kind === ts.SyntaxKind.NullKeyword) {
+    return "null";
   }
   if (ts.isPrefixUnaryExpression(node) && (node.operator === ts.SyntaxKind.PlusToken || node.operator === ts.SyntaxKind.MinusToken)) {
     const value = staticExpressionKey(node.operand);
@@ -62,7 +68,7 @@ function propertyName(property: ts.ObjectLiteralElementLike, sourceFile: ts.Sour
   if (ts.isIdentifier(name)) {
     return { key: name.text, display: name.text, node: name, kind };
   }
-  if (ts.isStringLiteral(name) || ts.isNumericLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name)) {
+  if (ts.isStringLiteral(name) || ts.isNumericLiteral(name) || ts.isBigIntLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name)) {
     const key = staticExpressionKey(name);
     return key === undefined ? undefined : { key, display: name.getText(sourceFile), node: name, kind };
   }
