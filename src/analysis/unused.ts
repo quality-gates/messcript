@@ -459,16 +459,18 @@ class UnusedAnalyzer {
     const scope = this.scopeByNode.get(node) ?? this.root;
     if (ts.isPropertyAccessExpression(node)) {
       this.visitReferences(node.expression);
-      if (node.expression.kind === ts.SyntaxKind.ThisKeyword) {
+      const receiver = this.unwrapExpression(node.expression);
+      if (receiver.kind === ts.SyntaxKind.ThisKeyword) {
         this.markPrivate(scope, node.name.getText(), node);
-      } else if (ts.isIdentifier(node.expression)) {
-        this.markPrivate(scope, node.name.getText(), node, this.classesByName.get(node.expression.text));
+      } else if (ts.isIdentifier(receiver)) {
+        this.markPrivate(scope, node.name.getText(), node, this.classesByName.get(receiver.text));
       }
       return;
     }
     if (ts.isElementAccessExpression(node)) {
       this.visitReferences(node.expression);
-      if (node.expression.kind === ts.SyntaxKind.ThisKeyword && node.argumentExpression) {
+      const receiver = this.unwrapExpression(node.expression);
+      if (receiver.kind === ts.SyntaxKind.ThisKeyword && node.argumentExpression) {
         const key = this.unwrapExpression(node.argumentExpression);
         if (ts.isStringLiteral(key)) {
           this.markPrivate(scope, key.text, node);
