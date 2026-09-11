@@ -523,6 +523,26 @@ export class C {
   assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), []);
 });
 
+test("parenthesized and asserted this receivers count as private member uses", () => {
+  const file = sourceFile(`
+export class Point {
+  #x = 1;
+  private y = 2;
+  private helper() { return 3; }
+  run() {
+    return (this).#x + (this as any).y + (this).helper() + (this)["y"];
+  }
+}
+`);
+  const declarations = analyzeUnused(file);
+
+  assert.equal(declarations.find((declaration) => declaration.name === "#x")?.used, true);
+  assert.equal(declarations.find((declaration) => declaration.name === "y")?.used, true);
+  assert.equal(declarations.find((declaration) => declaration.name === "helper")?.used, true);
+  assert.deepEqual(findingNames(findUnusedPrivateField(file, declarations)), []);
+  assert.deepEqual(findingNames(findUnusedPrivateMethod(file, declarations)), []);
+});
+
 test("parenthesized this[(\"secret\")] counts as a use after unwrapping and does not suppress siblings", () => {
   const file = sourceFile(`
 export class C {
