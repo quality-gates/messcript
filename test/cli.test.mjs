@@ -1504,6 +1504,50 @@ test("cleancode rules cover executable JavaScript and TypeScript constructs cons
   assert.equal(result.stderr, "");
 });
 
+test("DuplicatedArrayKey reports BigInt literal and computed null keys via CLI", () => {
+  const fixturePath = join(scanRoot, "src", "duplicated-array-key-repro.ts");
+  writeFileSync(
+    fixturePath,
+    `export const duplicateBigInt = {
+  10n: 1,
+  10n: 2,
+};
+
+export const mixedBigInt = {
+  10n: 1,
+  10: 2,
+};
+
+export const computedNull = {
+  [null]: 1,
+  [null]: 2,
+};
+`,
+  );
+
+  const result = runCli([
+    fixturePath,
+    "json",
+    "cleancode",
+    "--only",
+    "DuplicatedArrayKey",
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.equal(result.stderr, "");
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.errors, []);
+  assert.equal(report.findings.length, 3);
+  assert.deepEqual(
+    report.findings.map((f) => ({ line: f.line, message: f.message })),
+    [
+      { line: 3, message: "Duplicated array key 10n, first declared at line 2." },
+      { line: 8, message: "Duplicated array key 10, first declared at line 7." },
+      { line: 13, message: "Duplicated array key [null], first declared at line 12." },
+    ],
+  );
+});
+
 test("IfStatementAssignment reports every assignment operator in conditions", () => {
   const result = runCli([
     join(scanRoot, "src", "assignment-conditions.ts"),

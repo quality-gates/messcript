@@ -254,6 +254,32 @@ const object = {
   assert.match(gsFindings[2].message, /qux/);
 });
 
+test("DuplicatedArrayKey detects BigInt literal and computed null keys", () => {
+  const file = sourceFile(`
+const object = {
+  10n: 1,
+  10n: 2,
+  [10n]: 3,
+  10: 4,
+  [null]: 1,
+  [null]: 2,
+  null: 3,
+};
+`);
+  const findings = findDuplicatedArrayKey(file);
+  assert.equal(findings.length, 5);
+  assert.deepEqual(
+    findings.map((f) => ({ line: f.line, message: f.message })),
+    [
+      { line: 4, message: "Duplicated array key 10n, first declared at line 3." },
+      { line: 5, message: "Duplicated array key [10n], first declared at line 3." },
+      { line: 6, message: "Duplicated array key 10, first declared at line 3." },
+      { line: 8, message: "Duplicated array key [null], first declared at line 7." },
+      { line: 9, message: "Duplicated array key null, first declared at line 7." },
+    ],
+  );
+});
+
 test("DuplicatedArrayKey preserves original declaration line for third and subsequent duplicate keys", () => {
   const file = sourceFile(`
 const config = {
