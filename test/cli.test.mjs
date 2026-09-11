@@ -934,7 +934,7 @@ test("successful help, version, option boundaries, and parser-error exit handlin
 
   const version = runCli(["-v"]);
   assert.equal(version.status, 0);
-  assert.equal(version.stdout, "messcript 0.1.7\n");
+  assert.equal(version.stdout, "messcript 0.1.8\n");
   assert.equal(version.stderr, "");
   const longVersion = runCli(["--version"]);
   assert.equal(longVersion.status, 0);
@@ -1037,7 +1037,7 @@ test("JSON reports include metadata, findings, and processing errors", () => {
   assert.equal(result.status, 1);
   assert.equal(result.stderr, "");
   const report = JSON.parse(result.stdout);
-  assert.deepEqual(report.tool, { name: "messcript", version: "0.1.7" });
+  assert.deepEqual(report.tool, { name: "messcript", version: "0.1.8" });
   assert.ok(report.findings.some((finding) => finding.ruleName === "CyclomaticComplexity"));
   assert.ok(report.errors.some((error) => error.path.endsWith("broken.ts")));
   assert.equal(report.findings[0].suppressed, false);
@@ -1066,13 +1066,13 @@ test("XML, Checkstyle, SARIF, and report files preserve the report contract", ()
 
   assert.equal(xml.status, 2);
   assert.match(xml.stdout, /^<\?xml version="1\.0" encoding="UTF-8"\?>/);
-  assert.match(xml.stdout, /<messcript version="0\.1\.7">/);
+  assert.match(xml.stdout, /<messcript version="0\.1\.8">/);
   assert.match(xml.stdout, /<finding[^>]+ruleName="CyclomaticComplexity"/);
   assert.equal(xml.stderr, "");
   assert.match(escapedXml.stdout, /ampersand&amp;\.ts/);
 
   assert.equal(checkstyle.status, 1);
-  assert.match(checkstyle.stdout, /^<checkstyle tool="messcript" version="0\.1\.7">/);
+  assert.match(checkstyle.stdout, /^<checkstyle tool="messcript" version="0\.1\.8">/);
   assert.match(checkstyle.stdout, /source="messcript\.CyclomaticComplexity"/);
   assert.match(checkstyle.stdout, /context="function complex\(\)"/);
   assert.match(checkstyle.stdout, /source="messcript\.ProcessingError"/);
