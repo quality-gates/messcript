@@ -63,6 +63,17 @@ function enclosingFunction(node: ts.Node): FunctionLike | undefined {
   return undefined;
 }
 
+function enclosingStaticContext(node: ts.Node): FunctionLike | ts.ClassStaticBlockDeclaration | undefined {
+  let current = node.parent;
+  while (current) {
+    if (isFunctionLike(current) || ts.isClassStaticBlockDeclaration(current)) {
+      return current;
+    }
+    current = current.parent;
+  }
+  return undefined;
+}
+
 function isExternalModule(sourceFile: ts.SourceFile): boolean {
   return Boolean((sourceFile as ts.SourceFile & { externalModuleIndicator?: ts.Node }).externalModuleIndicator);
 }
@@ -236,8 +247,11 @@ function staticThisReceiver(
   if (node.expression.kind !== ts.SyntaxKind.ThisKeyword) {
     return undefined;
   }
-  const functionNode = enclosingFunction(node);
-  if (!functionNode || !hasModifier(functionNode, ts.SyntaxKind.StaticKeyword)) {
+  const staticContext = enclosingStaticContext(node);
+  if (
+    !staticContext ||
+    (!ts.isClassStaticBlockDeclaration(staticContext) && !hasModifier(staticContext, ts.SyntaxKind.StaticKeyword))
+  ) {
     return undefined;
   }
   const owner = enclosingClass(node);
