@@ -1558,6 +1558,50 @@ export const computedNull = {
   );
 });
 
+test("DuplicatedArrayKey reports computed undefined and NaN keys via CLI", () => {
+  const fixturePath = join(scanRoot, "src", "duplicated-array-key-undefined-nan-repro.ts");
+  writeFileSync(
+    fixturePath,
+    `export const duplicateUndefined = {
+  undefined: 1,
+  [undefined]: 2,
+};
+
+export const computedUndefined = {
+  [undefined]: 1,
+  [undefined]: 2,
+};
+
+export const duplicateNaN = {
+  NaN: 1,
+  [NaN]: 2,
+};
+`,
+  );
+
+  const result = runCli([
+    fixturePath,
+    "json",
+    "cleancode",
+    "--only",
+    "DuplicatedArrayKey",
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.equal(result.stderr, "");
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.errors, []);
+  assert.equal(report.findings.length, 3);
+  assert.deepEqual(
+    report.findings.map((f) => ({ line: f.line, message: f.message })),
+    [
+      { line: 3, message: "Duplicated array key [undefined], first declared at line 2." },
+      { line: 8, message: "Duplicated array key [undefined], first declared at line 7." },
+      { line: 13, message: "Duplicated array key [NaN], first declared at line 12." },
+    ],
+  );
+});
+
 test("ElseExpression reports else in module-level statements and class static blocks", () => {
   const fixturePath = join(scanRoot, "src", "else-expression-repro.ts");
   writeFileSync(

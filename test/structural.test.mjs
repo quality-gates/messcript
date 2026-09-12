@@ -312,6 +312,46 @@ const object = {
   );
 });
 
+test("DuplicatedArrayKey detects computed undefined and NaN keys", () => {
+  const file = sourceFile(`
+const object = {
+  undefined: 1,
+  [undefined]: 2,
+  [undefined]: 3,
+  [(undefined)]: 4,
+  NaN: 1,
+  [NaN]: 2,
+  [NaN]: 3,
+  [(NaN)]: 4,
+  "undefined": 5,
+  "NaN": 5,
+};
+const reversed = {
+  [undefined]: 1,
+  undefined: 2,
+  [NaN]: 1,
+  NaN: 2,
+};
+`);
+  const findings = findDuplicatedArrayKey(file);
+  assert.equal(findings.length, 10);
+  assert.deepEqual(
+    findings.map((f) => ({ line: f.line, message: f.message })),
+    [
+      { line: 4, message: "Duplicated array key [undefined], first declared at line 3." },
+      { line: 5, message: "Duplicated array key [undefined], first declared at line 3." },
+      { line: 6, message: "Duplicated array key [(undefined)], first declared at line 3." },
+      { line: 8, message: "Duplicated array key [NaN], first declared at line 7." },
+      { line: 9, message: "Duplicated array key [NaN], first declared at line 7." },
+      { line: 10, message: "Duplicated array key [(NaN)], first declared at line 7." },
+      { line: 11, message: "Duplicated array key \"undefined\", first declared at line 3." },
+      { line: 12, message: "Duplicated array key \"NaN\", first declared at line 7." },
+      { line: 16, message: "Duplicated array key undefined, first declared at line 15." },
+      { line: 18, message: "Duplicated array key NaN, first declared at line 17." },
+    ],
+  );
+});
+
 test("DuplicatedArrayKey preserves original declaration line for third and subsequent duplicate keys", () => {
   const file = sourceFile(`
 const config = {
