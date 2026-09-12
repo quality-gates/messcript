@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { test } from "node:test";
 import { formatAnsi, formatGithub, formatGitlab, formatHtml } from "../dist/reporters/human.js";
 import { formatCheckstyle, formatJson, formatSarif, formatStructured, formatXml } from "../dist/reporters/structured.js";
@@ -212,6 +212,18 @@ test("structured reports preserve metadata, sorting, escaping, suppression, and 
   assert.equal(run.invocations[0].executionSuccessful, false);
   assert.equal(run.invocations[0].toolExecutionNotifications[0].level, "error");
   assert.equal(run.invocations[0].toolExecutionNotifications[0].locations[0].physicalLocation.region.startColumn, 4);
+  const sarifPaths = JSON.parse(formatSarif([
+    finding(join(root, "nested", "a.ts"), 1, 1, "ARule", "a", "a context"),
+    finding(join(root, "..", "external.ts"), 1, 1, "ZRule", "z", "z context"),
+  ], [error(join(root, "nested", "broken.ts"), 4, 5, "bad")], tool)).runs[0];
+  assert.deepEqual(
+    sarifPaths.results.map((result) => result.locations[0].physicalLocation.artifactLocation.uri).sort(),
+    [join(root, "..", "external.ts").split(sep).join("/"), "nested/a.ts"].sort(),
+  );
+  assert.equal(
+    sarifPaths.invocations[0].toolExecutionNotifications[0].locations[0].physicalLocation.artifactLocation.uri,
+    "nested/broken.ts",
+  );
   const cleanSarif = JSON.parse(formatSarif([], [], tool));
   assert.equal(cleanSarif.runs[0].invocations[0].executionSuccessful, true);
   assert.equal("toolExecutionNotifications" in cleanSarif.runs[0].invocations[0], false);

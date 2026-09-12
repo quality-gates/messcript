@@ -1,6 +1,7 @@
 import type { ProcessingError } from "../analyzer";
 import type { Finding } from "../finding";
 import { compareLocations } from "../location";
+import { normalizeReportPath } from "./human";
 
 export type ReportTool = {
   name: string;
@@ -163,7 +164,7 @@ export function formatCheckstyle(
 function sarifLocation(path: string, line: number, column: number): object {
   return {
     physicalLocation: {
-      artifactLocation: { uri: path },
+      artifactLocation: { uri: normalizeReportPath(path) },
       region: { startLine: line, startColumn: column },
     },
   };
