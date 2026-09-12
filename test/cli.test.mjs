@@ -1649,6 +1649,50 @@ export class Example {
   assert.ok(report.findings.every((finding) => /The method module uses an else expression/.test(finding.message)));
 });
 
+test("StaticAccess reports parenthesized and asserted class calls and receivers via CLI", () => {
+  const fixturePath = join(scanRoot, "src", "static-access-repro.ts");
+  writeFileSync(
+    fixturePath,
+    `export class Helper {
+  static run() {}
+}
+
+export class Consumer {
+  test() {
+    (Helper.run)();
+    (Helper).run();
+    (Helper as any).run();
+    (Helper)!.run();
+  }
+}
+`,
+  );
+
+  const result = runCli([
+    fixturePath,
+    "json",
+    "cleancode",
+    "--only",
+    "StaticAccess",
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.equal(result.stderr, "");
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.errors, []);
+  assert.equal(report.findings.length, 4);
+  assert.deepEqual(
+    report.findings.map((finding) => ({ line: finding.line, context: finding.context, ruleName: finding.ruleName })),
+    [
+      { line: 7, context: "method test()", ruleName: "StaticAccess" },
+      { line: 8, context: "method test()", ruleName: "StaticAccess" },
+      { line: 9, context: "method test()", ruleName: "StaticAccess" },
+      { line: 10, context: "method test()", ruleName: "StaticAccess" },
+    ],
+  );
+  assert.ok(report.findings.every((finding) => /class 'Helper' in method 'test'/.test(finding.message)));
+});
+
 test("IfStatementAssignment reports every assignment operator in conditions", () => {
   const result = runCli([
     join(scanRoot, "src", "assignment-conditions.ts"),
