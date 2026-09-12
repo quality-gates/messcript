@@ -129,6 +129,38 @@ class Service {
   assert.match(finding.message, /The method save uses an else expression/);
 });
 
+test("ElseExpression flags else in module-level statements and class static blocks", () => {
+  const file = sourceFile(`let x = 0;
+if (x === 1) {
+  x = 2;
+} else {
+  x = 3;
+}
+
+export class Example {
+  static {
+    let y = 0;
+    if (y === 1) {
+      y = 2;
+    } else {
+      y = 3;
+    }
+  }
+}
+`);
+
+  const findings = findElseExpression(file);
+  assert.equal(findings.length, 2);
+  assert.deepEqual(
+    findings.map((finding) => ({ line: finding.line, context: finding.context, ruleName: finding.ruleName })),
+    [
+      { line: 4, context: "module", ruleName: "ElseExpression" },
+      { line: 13, context: "module", ruleName: "ElseExpression" },
+    ],
+  );
+  assert.ok(findings.every((finding) => /The method module uses an else expression/.test(finding.message)));
+});
+
 test("DevelopmentCodeFragment finds marker comments after template expressions with interpolation", () => {
   const file = sourceFile(`
 const name = "world";

@@ -1558,6 +1558,53 @@ export const computedNull = {
   );
 });
 
+test("ElseExpression reports else in module-level statements and class static blocks", () => {
+  const fixturePath = join(scanRoot, "src", "else-expression-repro.ts");
+  writeFileSync(
+    fixturePath,
+    `let x = 0;
+if (x === 1) {
+  x = 2;
+} else {
+  x = 3;
+}
+
+export class Example {
+  static {
+    let y = 0;
+    if (y === 1) {
+      y = 2;
+    } else {
+      y = 3;
+    }
+  }
+}
+`,
+  );
+
+  const result = runCli([
+    fixturePath,
+    "json",
+    "cleancode",
+    "--only",
+    "ElseExpression",
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.equal(result.stderr, "");
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.errors, []);
+  assert.equal(report.findings.length, 2);
+  assert.deepEqual(
+    report.findings.map((finding) => ({ line: finding.line, context: finding.context, ruleName: finding.ruleName })),
+    [
+      { line: 4, context: "module", ruleName: "ElseExpression" },
+      { line: 13, context: "module", ruleName: "ElseExpression" },
+    ],
+  );
+  assert.ok(report.findings.every((finding) => /The method module uses an else expression/.test(finding.message)));
+});
+
 test("IfStatementAssignment reports every assignment operator in conditions", () => {
   const result = runCli([
     join(scanRoot, "src", "assignment-conditions.ts"),

@@ -35,12 +35,14 @@ function visitExecutableStatements(
 
 export function findElseExpression(sourceFile: ts.SourceFile): Finding[] {
   const findings: Finding[] = [];
+  visitExecutableStatements(sourceFile, sourceFile, "module", "module", findings);
   forEachFunction(sourceFile, (node) => {
-    if (node.body) {
-      const context = functionContext(node, sourceFile);
-      const name = functionName(node, sourceFile);
-      visitExecutableStatements(node.body, sourceFile, context, name, findings);
+    if (!node.body) {
+      return;
     }
+    const context = functionContext(node, sourceFile);
+    const name = functionName(node, sourceFile);
+    visitExecutableStatements(node.body, sourceFile, context, name, findings);
   });
   return findings;
 }
