@@ -826,6 +826,50 @@ class Own {
   assert.match(findStaticAccess(file)[0].message, /class 'Logger'/);
 });
 
+test("static-access reports parenthesized and asserted class calls and receivers", () => {
+  const file = sourceFile(`
+export class Helper {
+  static run() {}
+}
+export function calleeParens() {
+  (Helper.run)();
+}
+export function receiverParens() {
+  (Helper).run();
+}
+export function receiverAs() {
+  (Helper as any).run();
+}
+export function receiverNonNull() {
+  (Helper)!.run();
+}
+export function receiverTypeAssert() {
+  (<any>Helper).run();
+}
+export function nested() {
+  (((Helper as any))!).run();
+}
+export function receiverElement() {
+  (Helper)["run"]();
+}
+export function receiverElementParensKey() {
+  (Helper)[("run")]();
+}
+`);
+
+  assert.deepEqual(findStaticAccess(file).map((finding) => finding.context), [
+    "function calleeParens()",
+    "function receiverParens()",
+    "function receiverAs()",
+    "function receiverNonNull()",
+    "function receiverTypeAssert()",
+    "function nested()",
+    "function receiverElement()",
+    "function receiverElementParensKey()",
+  ]);
+  assert.ok(findStaticAccess(file).every((finding) => /class 'Helper'/.test(finding.message)));
+});
+
 test("count-in-loop reports count properties through literal element access", () => {
   const file = sourceFile(`
 export function run(items) {
