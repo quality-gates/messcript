@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { after, before, test } from "node:test";
@@ -1087,6 +1087,18 @@ test("XML, Checkstyle, SARIF, and report files preserve the report contract", ()
   assert.deepEqual(sarifReport.runs[0].results[0].suppressions, [{ kind: "inSource" }]);
   assert.equal(sarifReport.runs[0].results[0].locations[0].physicalLocation.region.startLine, 2);
   assert.equal(sarif.stderr, "");
+
+  const sarifRelative = runCli([join(fixturesRoot, "complex.ts"), "sarif", "codesize"]);
+  const sarifRelativeReport = JSON.parse(sarifRelative.stdout);
+  assert.equal(
+    sarifRelativeReport.runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri,
+    "test/fixtures/complex.ts",
+  );
+  const sarifOutside = JSON.parse(runCli([broken, "sarif", "codesize"]).stdout);
+  assert.equal(
+    sarifOutside.runs[0].invocations[0].toolExecutionNotifications[0].locations[0].physicalLocation.artifactLocation.uri,
+    broken.split(sep).join("/"),
+  );
 
   assert.equal(ordered.status, 2);
   assert.equal(reversed.status, 2);
