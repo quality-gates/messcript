@@ -160,6 +160,7 @@ function isSimpleAccessorValue(node: ts.Expression): boolean {
   return ts.isIdentifier(expression) || ts.isLiteralExpression(expression);
 }
 
+// messcript-disable-next-line CyclomaticComplexity
 function trivialAccessorField(
   method: ClassMethod,
   methodScope: Scope,

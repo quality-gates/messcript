@@ -474,9 +474,11 @@ class Small {
   assert.equal(calculateClassComplexity(smallClass), 1);
 
   cyclomaticProperties.reportLevel = 2;
+  assert.equal(findCyclomaticComplexity(file).length, 1);
+  cyclomaticProperties.reportLevel = 3;
   assert.equal(findCyclomaticComplexity(file).length, 0);
   cyclomaticProperties.reportLevel = 1;
-  assert.equal(findCyclomaticComplexity(file).length, 1);
+  assert.equal(findCyclomaticComplexity(file).length, 4);
   cyclomaticProperties.reportLevel = 10;
 
   npathProperties.minimum = 2;

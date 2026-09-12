@@ -151,6 +151,7 @@ export function discoverSourceFiles(inputPaths: readonly string[], discoveryOpti
   };
 }
 
+// messcript-disable-next-line CyclomaticComplexity
 export function scriptKindForPath(path: string, suffixes: readonly string[] = sourceSuffixes): ts.ScriptKind {
   const suffix = normalizedSuffixes(suffixes).find((candidate) => path.toLowerCase().endsWith(candidate));
 
