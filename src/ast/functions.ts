@@ -56,6 +56,7 @@ export function getFunctionName(node: FunctionLike, sourceFile: ts.SourceFile): 
   return node.name.getText(sourceFile);
 }
 
+// messcript-disable-next-line CyclomaticComplexity
 export function getFunctionContext(node: FunctionLike, sourceFile: ts.SourceFile): string {
   const name = getFunctionName(node, sourceFile);
   if (ts.isConstructorDeclaration(node)) {

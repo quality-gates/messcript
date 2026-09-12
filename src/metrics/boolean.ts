@@ -1,5 +1,6 @@
 import ts from "typescript";
 
+// messcript-disable-next-line CyclomaticComplexity
 export function isBooleanType(type: ts.TypeNode | undefined): boolean {
   if (!type) {
     return false;

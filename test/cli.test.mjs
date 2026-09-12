@@ -1729,6 +1729,77 @@ test("DevelopmentCodeFragment reports parenthesized and asserted debug calls via
   assert.ok(report.findings.every((finding) => /calls the typical debug function console\.log\(\)/.test(finding.message)));
 });
 
+test("CyclomaticComplexity reports callables whose complexity reaches the configured threshold via CLI", () => {
+  const fixturePath = join(scanRoot, "src", "cyclomatic-threshold-repro.ts");
+  writeFileSync(
+    fixturePath,
+    `export function atThreshold(a: boolean[]): boolean {
+  return !!(a[0] && a[1] && a[2] && a[3] && a[4] && a[5] && a[6] && a[7] && a[8] && a[9]);
+}
+
+export function belowThreshold(a: boolean[]): boolean {
+  return !!(a[0] && a[1] && a[2] && a[3] && a[4] && a[5] && a[6] && a[7] && a[8]);
+}
+
+export function aboveThreshold(a: boolean[]): boolean {
+  return !!(a[0] && a[1] && a[2] && a[3] && a[4] && a[5] && a[6] && a[7] && a[8] && a[9] && a[10]);
+}
+`,
+  );
+
+  const defaultResult = runCli([
+    fixturePath,
+    "json",
+    "codesize",
+    "--only",
+    "CyclomaticComplexity",
+  ]);
+
+  assert.equal(defaultResult.status, 2);
+  assert.equal(defaultResult.stderr, "");
+  const defaultReport = JSON.parse(defaultResult.stdout);
+  assert.deepEqual(defaultReport.errors, []);
+  assert.equal(defaultReport.findings.length, 2);
+  assert.deepEqual(
+    defaultReport.findings.map((f) => ({ line: f.line, context: f.context })),
+    [
+      { line: 1, context: "function atThreshold()" },
+      { line: 9, context: "function aboveThreshold()" },
+    ],
+  );
+  assert.match(
+    defaultReport.findings[0].message,
+    /The function atThreshold\(\) has a Cyclomatic Complexity of 10\. The configured cyclomatic complexity threshold is 10\./,
+  );
+  assert.match(
+    defaultReport.findings[1].message,
+    /The function aboveThreshold\(\) has a Cyclomatic Complexity of 11\. The configured cyclomatic complexity threshold is 10\./,
+  );
+
+  const rulesetPath = join(scanRoot, "src", "cc-custom.xml");
+  writeFileSync(
+    rulesetPath,
+    `<ruleset name="cc-custom"><rule ref="CyclomaticComplexity"><properties><property name="reportLevel" value="9"/></properties></rule></ruleset>`,
+  );
+
+  const customResult = runCli([
+    fixturePath,
+    "json",
+    rulesetPath,
+  ]);
+  assert.equal(customResult.status, 2);
+  const customReport = JSON.parse(customResult.stdout);
+  assert.equal(customReport.findings.length, 3);
+  assert.deepEqual(
+    customReport.findings.map((f) => ({ line: f.line, context: f.context })),
+    [
+      { line: 1, context: "function atThreshold()" },
+      { line: 5, context: "function belowThreshold()" },
+      { line: 9, context: "function aboveThreshold()" },
+    ],
+  );
+});
+
 test("IfStatementAssignment reports every assignment operator in conditions", () => {
   const result = runCli([
     join(scanRoot, "src", "assignment-conditions.ts"),

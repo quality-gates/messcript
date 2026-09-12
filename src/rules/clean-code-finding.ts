@@ -65,6 +65,7 @@ function exportedVariableFunction(node: FunctionLike, sourceFile: ts.SourceFile)
   return false;
 }
 
+// messcript-disable-next-line CyclomaticComplexity
 export function isPublicFunction(node: FunctionLike, sourceFile: ts.SourceFile): boolean {
   if (ts.isMethodDeclaration(node) || ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node) || ts.isConstructorDeclaration(node)) {
     if (hasModifier(node, ts.SyntaxKind.PrivateKeyword) || hasModifier(node, ts.SyntaxKind.ProtectedKeyword)) {

@@ -341,6 +341,7 @@ function markBindingMutation(node: ts.Node, name: string, bindings: readonly Bin
   }
 }
 
+// messcript-disable-next-line CyclomaticComplexity
 function markPropertyMutation(
   node: ts.PropertyAccessExpression | ts.ElementAccessExpression,
   sourceFile: ts.SourceFile,

@@ -30,7 +30,7 @@ export function findCyclomaticComplexity(sourceFile: ts.SourceFile): Finding[] {
     const body = node.body;
     if (body) {
       const complexity = calculateCyclomaticComplexity(body);
-      if (complexity > threshold) {
+      if (complexity >= threshold) {
         findings.push(createCyclomaticComplexityFinding(node, sourceFile, complexity, threshold));
       }
     }

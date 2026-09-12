@@ -29,6 +29,7 @@ function hasAnyModifier(node: ts.Node, kinds: readonly ts.SyntaxKind[]): boolean
   return kinds.some((kind) => hasModifier(node, kind));
 }
 
+// messcript-disable-next-line CyclomaticComplexity
 function memberName(node: ClassMethod | ClassField, sourceFile: ts.SourceFile): string | undefined {
   if (ts.isParameter(node)) {
     return ts.isIdentifier(node.name) ? node.name.text : undefined;

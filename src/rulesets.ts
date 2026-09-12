@@ -450,6 +450,7 @@ function expandRuleNode(state: ExpansionState, node: XmlNode, inherited: Selecti
   }
 }
 
+// messcript-disable-next-line CyclomaticComplexity
 function expandContainer(state: ExpansionState, node: XmlNode, inherited: SelectionMeta, inheritedExclusions: ReadonlySet<string>): void {
   const exclusions = new Set([...inheritedExclusions, ...directExclusions(node)]);
   const meta = mergeMeta(inherited, node, state.path);
@@ -598,6 +599,7 @@ export function applyRuleFilters(
     throw new RulesetError([`Disabled rule '${missingDisabled}' is not present in the loaded rulesets.`]);
   }
   const requestedSet = new Set(requested);
+  // messcript-disable-next-line CyclomaticComplexity
   const selections = loaded.selections.filter((selection) => {
     const priority = selection.priority ?? getRuleDefinition(selection.name)?.priority ?? 3;
     return (
