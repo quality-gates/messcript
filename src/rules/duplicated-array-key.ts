@@ -35,6 +35,14 @@ function staticExpressionKey(node: ts.Expression): string | undefined {
   if (node.kind === ts.SyntaxKind.NullKeyword) {
     return "null";
   }
+  if (ts.isIdentifier(node)) {
+    if (node.text === "undefined") {
+      return "undefined";
+    }
+    if (node.text === "NaN") {
+      return "NaN";
+    }
+  }
   if (ts.isPrefixUnaryExpression(node) && (node.operator === ts.SyntaxKind.PlusToken || node.operator === ts.SyntaxKind.MinusToken)) {
     const value = staticExpressionKey(node.operand);
     if (value === undefined || !/^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value)) {
