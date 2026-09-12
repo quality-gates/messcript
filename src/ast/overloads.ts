@@ -40,25 +40,12 @@ function nodeLine(sourceFile: ts.SourceFile, node: ts.Node): number {
   return locate(sourceFile, node.getStart(sourceFile)).line + 1;
 }
 
-function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
-  const modifiers = (node as ts.Node & { modifiers?: readonly ts.Modifier[] }).modifiers;
-  return modifiers?.some((modifier) => modifier.kind === kind) ?? false;
+function isStaticMember(node: ts.MethodDeclaration): boolean {
+  return (node.modifiers ?? []).some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword);
 }
 
 function memberNameText(name: ts.PropertyName | ts.BindingName | undefined, sourceFile: ts.SourceFile): string {
-  if (!name) {
-    return "";
-  }
-  if (
-    ts.isIdentifier(name) ||
-    ts.isPrivateIdentifier(name) ||
-    ts.isStringLiteral(name) ||
-    ts.isNumericLiteral(name) ||
-    ts.isNoSubstitutionTemplateLiteral(name)
-  ) {
-    return name.text;
-  }
-  return name.getText(sourceFile);
+  return name ? name.getText(sourceFile) : "";
 }
 
 function getSignatureLines(
@@ -88,7 +75,7 @@ function groupFunctionDeclarations(
 
   for (const statement of statements) {
     if (ts.isFunctionDeclaration(statement)) {
-      const name = statement.name ? memberNameText(statement.name, sourceFile) : "__default__";
+      const name = statement.name ? statement.name.text : "";
       const list = groups.get(name);
       if (list) {
         list.push(statement);
@@ -135,7 +122,7 @@ function groupClassMembers(
 
   for (const member of members) {
     if (ts.isMethodDeclaration(member)) {
-      const isStatic = hasModifier(member, ts.SyntaxKind.StaticKeyword);
+      const isStatic = isStaticMember(member);
       const name = memberNameText(member.name, sourceFile);
       const key = isStatic ? `static:${name}` : `instance:${name}`;
       const list = methodGroups.get(key);
@@ -177,7 +164,7 @@ function groupClassMembers(
         signatures: constructorGroup,
         declarationLines: lines,
       });
-    } else if (item.kind === "accessor") {
+    } else {
       const lines = getSignatureLines([item.member], sourceFile);
       callableGroups.push({
         primaryDeclaration: item.member,
@@ -253,7 +240,7 @@ function groupTypeMembers(
         signatures: callSigGroup,
         declarationLines: lines,
       });
-    } else if (item.kind === "construct") {
+    } else {
       const lines = getSignatureLines(constructSigGroup, sourceFile);
       parameterizedGroups.push({
         signatures: constructSigGroup,

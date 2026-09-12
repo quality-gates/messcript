@@ -20,6 +20,6 @@ export function createNamingFinding(
     priority,
     context,
     message,
-    ...(declarationLines && declarationLines.length > 0 ? { declarationLines } : {}),
+    ...(declarationLines !== undefined ? { declarationLines } : {}),
   };
 }

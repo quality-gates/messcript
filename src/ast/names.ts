@@ -53,7 +53,7 @@ function addBinding(
       name,
       node,
       context,
-      ...(declarationLines && declarationLines.length > 0 ? { declarationLines } : {}),
+      ...(declarationLines !== undefined ? { declarationLines } : {}),
     });
   }
 }

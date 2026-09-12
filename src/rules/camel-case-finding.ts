@@ -19,6 +19,6 @@ export function createCamelCaseFinding(
     priority: 1,
     context,
     message,
-    ...(declarationLines && declarationLines.length > 0 ? { declarationLines } : {}),
+    ...(declarationLines !== undefined ? { declarationLines } : {}),
   };
 }

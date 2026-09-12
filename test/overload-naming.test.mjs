@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import ts from "typescript";
 import { analyze } from "../dist/analyzer.js";
+import { analyzeOverloads } from "../dist/ast/overloads.js";
 import { findShortMethodName } from "../dist/rules/short-method-name.js";
 import { findShortVariable } from "../dist/rules/short-variable.js";
 import { findCamelCaseMethodName } from "../dist/rules/camel-case-method-name.js";
@@ -23,6 +24,7 @@ export function ov(a: unknown): unknown { return a; }
 `);
   const findings = findShortMethodName(file);
   assert.equal(findings.length, 1, `expected 1 ShortMethodName finding, got ${findings.length}`);
+  assert.deepEqual(findings[0].declarationLines, [2, 3, 4]);
 });
 
 test("parameter naming rules emit at most one finding per parameter across overloads", () => {
@@ -33,6 +35,7 @@ export function ov(a: unknown): unknown { return a; }
 `);
   const findings = findShortVariable(file);
   assert.equal(findings.length, 1, `expected 1 ShortVariable finding for parameter a, got ${findings.length}`);
+  assert.deepEqual(findings[0].declarationLines, [2, 3, 4]);
 });
 
 test("ambient function overloads emit at most one finding per declared name", () => {
@@ -42,8 +45,10 @@ declare function ov(a: number): number;
 `);
   const methodFindings = findShortMethodName(file);
   assert.equal(methodFindings.length, 1, `expected 1 ShortMethodName finding, got ${methodFindings.length}`);
+  assert.deepEqual(methodFindings[0].declarationLines, [2, 3]);
   const paramFindings = findShortVariable(file);
   assert.equal(paramFindings.length, 1, `expected 1 ShortVariable finding for parameter a, got ${paramFindings.length}`);
+  assert.deepEqual(paramFindings[0].declarationLines, [2, 3]);
 });
 
 test("class method overloads emit at most one finding per method and per parameter", () => {
@@ -60,9 +65,13 @@ class Service {
 `);
   const methodFindings = findShortMethodName(file);
   assert.equal(methodFindings.length, 2, `expected 2 findings (1 static, 1 instance), got ${methodFindings.length}`);
+  assert.deepEqual(methodFindings[0].declarationLines, [3, 4, 5]);
+  assert.deepEqual(methodFindings[1].declarationLines, [7, 8, 9]);
 
   const paramFindings = findShortVariable(file);
   assert.equal(paramFindings.length, 2, `expected 2 findings (1 for static param, 1 for instance param), got ${paramFindings.length}`);
+  assert.deepEqual(paramFindings[0].declarationLines, [3, 4, 5]);
+  assert.deepEqual(paramFindings[1].declarationLines, [7, 8, 9]);
 });
 
 test("constructor overloads deduplicate parameter findings across signatures", () => {
@@ -75,6 +84,7 @@ class Service {
 `);
   const paramFindings = findShortVariable(file);
   assert.equal(paramFindings.length, 1, `expected 1 finding for constructor parameter a, got ${paramFindings.length}`);
+  assert.deepEqual(paramFindings[0].declarationLines, [3, 4, 5]);
 });
 
 test("interface method signature overloads emit at most one finding per name", () => {
@@ -86,9 +96,11 @@ interface Handler {
 `);
   const methodFindings = findCamelCaseMethodName(file);
   assert.equal(methodFindings.length, 1, `expected 1 CamelCaseMethodName finding, got ${methodFindings.length}`);
+  assert.deepEqual(methodFindings[0].declarationLines, [3, 4]);
 
   const paramFindings = findShortVariable(file);
   assert.equal(paramFindings.length, 1, `expected 1 ShortVariable finding for parameter a, got ${paramFindings.length}`);
+  assert.deepEqual(paramFindings[0].declarationLines, [3, 4]);
 });
 
 test("CamelCaseParameterName deduplicates parameter findings across overloads", () => {
@@ -99,6 +111,7 @@ function test(bad_param: unknown): unknown { return bad_param; }
 `);
   const findings = findCamelCaseParameterName(file);
   assert.equal(findings.length, 1, `expected 1 CamelCaseParameterName finding, got ${findings.length}`);
+  assert.deepEqual(findings[0].declarationLines, [2, 3, 4]);
 });
 
 test("BooleanGetMethodName evaluates overloaded methods with implementation body once", () => {
@@ -110,6 +123,90 @@ function getFlag(): boolean { return true; }
   const findings = findBooleanGetMethodName(file);
   assert.equal(findings.length, 1, `expected 1 BooleanGetMethodName finding, got ${findings.length}`);
   assert.equal(findings[0].line, 2);
+  assert.deepEqual(findings[0].declarationLines, [2, 3, 4]);
+});
+
+test("BooleanGetMethodName evaluates overloaded class methods with implementation body once", () => {
+  const file = sourceFile(`
+class Service {
+  getFlag(): boolean;
+  getFlag(): boolean;
+  getFlag(): boolean { return true; }
+}
+`);
+  const findings = findBooleanGetMethodName(file);
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].line, 3);
+  assert.deepEqual(findings[0].declarationLines, [3, 4, 5]);
+});
+
+test("call signatures and construct signatures in interfaces deduplicate parameters", () => {
+  const file = sourceFile(`
+interface Callable {
+  (a: string): string;
+  (a: number): number;
+}
+interface Constructable {
+  new (a: string): unknown;
+  new (a: number): unknown;
+}
+`);
+  const paramFindings = findShortVariable(file);
+  assert.equal(paramFindings.length, 2);
+  assert.deepEqual(paramFindings[0].declarationLines, [3, 4]);
+  assert.deepEqual(paramFindings[1].declarationLines, [7, 8]);
+});
+
+test("type literal method signatures deduplicate findings", () => {
+  const file = sourceFile(`
+type Handler = {
+  bad_name(a: string): string;
+  bad_name(a: number): number;
+};
+`);
+  const methodFindings = findCamelCaseMethodName(file);
+  assert.equal(methodFindings.length, 1);
+  assert.deepEqual(methodFindings[0].declarationLines, [3, 4]);
+  const paramFindings = findShortVariable(file);
+  assert.equal(paramFindings.length, 1);
+  assert.deepEqual(paramFindings[0].declarationLines, [3, 4]);
+});
+
+test("arrow functions, function expressions, and type nodes evaluate parameters and names", () => {
+  const file = sourceFile(`
+const arrow = (p: string) => p;
+const expr = function(p: number) { return p; };
+type FnType = (p: boolean) => void;
+type CtorType = new (p: symbol) => void;
+`);
+  const paramFindings = findShortVariable(file);
+  assert.equal(paramFindings.length, 4);
+  assert.deepEqual(paramFindings[0].declarationLines, [2]);
+  assert.deepEqual(paramFindings[1].declarationLines, [3]);
+  assert.deepEqual(paramFindings[2].declarationLines, [4]);
+  assert.deepEqual(paramFindings[3].declarationLines, [5]);
+});
+
+test("class accessors evaluate names and parameters", () => {
+  const file = sourceFile(`
+class Service {
+  get bad_get(): number { return 1; }
+  set bad_set(p: number) {}
+}
+`);
+  const methodFindings = findCamelCaseMethodName(file);
+  assert.equal(methodFindings.length, 2);
+  assert.deepEqual(methodFindings[0].declarationLines, [3]);
+  assert.deepEqual(methodFindings[1].declarationLines, [4]);
+
+  const paramFindings = findShortVariable(file);
+  assert.equal(paramFindings.length, 1);
+  assert.deepEqual(paramFindings[0].declarationLines, [4]);
+});
+
+test("analyzeOverloads caches results per source file", () => {
+  const file = sourceFile("function test() {}");
+  assert.equal(analyzeOverloads(file), analyzeOverloads(file));
 });
 
 test("functions and methods without overloads continue to be evaluated as before", () => {
@@ -177,6 +274,40 @@ export function multiLine(p: unknown): unknown { return p; }
     const res4 = analyze([file4], ["naming"], {});
     const paramFindings4 = res4.findings.filter((f) => f.ruleName === "ShortVariable");
     assert.equal(paramFindings4.length, 0, `expected 0 ShortVariable findings, got ${paramFindings4.length}`);
+
+    const file5 = join(dir, "camel-suppressed.ts");
+    writeFileSync(file5, `
+// messcript-disable-next-line CamelCaseMethodName
+export function bad_name(a: string): string;
+export function bad_name(a: number): number;
+export function bad_name(a: unknown): unknown { return a; }
+`);
+    const res5 = analyze([file5], ["naming"], {});
+    const camelFindings5 = res5.findings.filter((f) => f.ruleName === "CamelCaseMethodName");
+    assert.equal(camelFindings5.length, 0);
+
+    const file6 = join(dir, "camel-impl-suppressed.ts");
+    writeFileSync(file6, `
+export function bad_name(a: string): string;
+export function bad_name(a: number): number;
+// messcript-disable-next-line CamelCaseMethodName
+export function bad_name(a: unknown): unknown { return a; }
+`);
+    const res6 = analyze([file6], ["naming"], {});
+    const camelFindings6 = res6.findings.filter((f) => f.ruleName === "CamelCaseMethodName");
+    assert.equal(camelFindings6.length, 0);
+
+    const file7 = join(dir, "interface-suppressed.ts");
+    writeFileSync(file7, `
+interface Handler {
+  // messcript-disable-next-line CamelCaseMethodName
+  bad_name(a: string): string;
+  bad_name(a: number): number;
+}
+`);
+    const res7 = analyze([file7], ["naming"], {});
+    const camelFindings7 = res7.findings.filter((f) => f.ruleName === "CamelCaseMethodName");
+    assert.equal(camelFindings7.length, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
