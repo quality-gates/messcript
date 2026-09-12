@@ -758,6 +758,46 @@ export function unrelated() {
   ]);
 });
 
+test("exit-expression reports parenthesized exit calls and receivers", () => {
+  const file = sourceFile(`
+export function calleeParens() {
+  (process.exit)(1);
+}
+export function receiverProperty() {
+  (process).exit(1);
+}
+export function receiverElement() {
+  (process)["exit"](1);
+}
+export function receiverElementParensKey() {
+  (process)[("exit")](1);
+}
+export function receiverElementTemplateKey() {
+  (process)[\`exit\`](1);
+}
+export function nestedParens() {
+  (((process))["abort"])();
+}
+export function denoReceiver() {
+  (Deno).exit();
+}
+export function bareExit() {
+  (exit)(1);
+}
+`);
+
+  assert.deepEqual(findExitExpression(file).map((finding) => finding.context), [
+    "function calleeParens()",
+    "function receiverProperty()",
+    "function receiverElement()",
+    "function receiverElementParensKey()",
+    "function receiverElementTemplateKey()",
+    "function nestedParens()",
+    "function denoReceiver()",
+    "function bareExit()",
+  ]);
+});
+
 test("static-access reports class calls through literal element access", () => {
   const file = sourceFile(`
 export function run() {

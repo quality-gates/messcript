@@ -9,11 +9,19 @@ export const properties = {} as const;
 
 const exitTargets = new Set(["process.exit", "process.abort", "Deno.exit"]);
 
+function unwrapParenthesized(node: ts.Expression): ts.Expression {
+  let current = node;
+  while (ts.isParenthesizedExpression(current)) {
+    current = current.expression;
+  }
+  return current;
+}
+
 function propertyName(node: ts.PropertyAccessExpression | ts.ElementAccessExpression): string | undefined {
   if (ts.isPropertyAccessExpression(node)) {
     return node.name.text;
   }
-  const argument = node.argumentExpression;
+  const argument = unwrapParenthesized(node.argumentExpression);
   if (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)) {
     return argument.text;
   }
@@ -21,17 +29,19 @@ function propertyName(node: ts.PropertyAccessExpression | ts.ElementAccessExpres
 }
 
 function isExitCall(node: ts.CallExpression): boolean {
-  if (ts.isIdentifier(node.expression)) {
-    return node.expression.text === "exit";
+  const callee = unwrapParenthesized(node.expression);
+  if (ts.isIdentifier(callee)) {
+    return callee.text === "exit";
   }
-  if (!ts.isPropertyAccessExpression(node.expression) && !ts.isElementAccessExpression(node.expression)) {
+  if (!ts.isPropertyAccessExpression(callee) && !ts.isElementAccessExpression(callee)) {
     return false;
   }
-  if (!ts.isIdentifier(node.expression.expression)) {
+  const receiver = unwrapParenthesized(callee.expression);
+  if (!ts.isIdentifier(receiver)) {
     return false;
   }
-  const property = propertyName(node.expression);
-  return property !== undefined && exitTargets.has(`${node.expression.expression.text}.${property}`);
+  const property = propertyName(callee);
+  return property !== undefined && exitTargets.has(`${receiver.text}.${property}`);
 }
 
 export function findExitExpression(sourceFile: ts.SourceFile): Finding[] {
