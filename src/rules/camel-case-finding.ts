@@ -8,6 +8,7 @@ export function createCamelCaseFinding(
   ruleName: string,
   context: string,
   message: string,
+  declarationLines?: readonly number[],
 ): Finding {
   const position = locate(sourceFile, node.getStart(sourceFile));
   return {
@@ -18,5 +19,6 @@ export function createCamelCaseFinding(
     priority: 1,
     context,
     message,
+    ...(declarationLines && declarationLines.length > 0 ? { declarationLines } : {}),
   };
 }

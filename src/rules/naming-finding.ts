@@ -9,6 +9,7 @@ export function createNamingFinding(
   priority: number,
   context: string,
   message: string,
+  declarationLines?: readonly number[],
 ): Finding {
   const position = locate(sourceFile, node.getStart(sourceFile));
   return {
@@ -19,5 +20,6 @@ export function createNamingFinding(
     priority,
     context,
     message,
+    ...(declarationLines && declarationLines.length > 0 ? { declarationLines } : {}),
   };
 }

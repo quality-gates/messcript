@@ -29,6 +29,7 @@ export function findLongVariable(sourceFile: ts.SourceFile): Finding[] {
         priority,
         binding.context,
         `Avoid excessively long variable names like ${binding.name}. Keep variable name length under ${properties.maximum}.`,
+        binding.declarationLines,
       ),
     );
   }
