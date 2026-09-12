@@ -7,4 +7,5 @@ export type Finding = {
   message: string;
   context: string;
   suppressed?: boolean;
+  declarationLines?: readonly number[];
 };

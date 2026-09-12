@@ -1,6 +1,7 @@
 // messcript-disable ConstantNamingConventions
 import ts from "typescript";
-import { forEachFunctionLike, getFunctionContext } from "../ast/functions";
+import { getFunctionContext } from "../ast/functions";
+import { forEachCallableDeclaration, forEachMethodSignatureDeclaration } from "../ast/overloads";
 import { getFunctionBindingName } from "../ast/names";
 import type { Finding } from "../finding";
 import { createCamelCaseFinding } from "./camel-case-finding";
@@ -15,7 +16,7 @@ export function findCamelCaseMethodName(sourceFile: ts.SourceFile): Finding[] {
   const allowUnderscore =
     properties["allow-underscore"] || (properties["allow-underscore-test"] && isTestContextFileName(sourceFile.fileName));
   const findings: Finding[] = [];
-  forEachFunctionLike(sourceFile, (node) => {
+  forEachCallableDeclaration(sourceFile, (node, declarationLines) => {
     if (!ts.isFunctionDeclaration(node) && !ts.isMethodDeclaration(node) && !ts.isGetAccessorDeclaration(node) && !ts.isSetAccessorDeclaration(node)) {
       return;
     }
@@ -24,11 +25,11 @@ export function findCamelCaseMethodName(sourceFile: ts.SourceFile): Finding[] {
       return;
     }
     findings.push(
-      createCamelCaseFinding(node, sourceFile, ruleName, getFunctionContext(node, sourceFile), `The method ${name} is not named in camelCase.`),
+      createCamelCaseFinding(node, sourceFile, ruleName, getFunctionContext(node, sourceFile), `The method ${name} is not named in camelCase.`, declarationLines),
     );
   });
-  function visitSignature(node: ts.Node): void {
-    if (ts.isMethodSignature(node) && node.name && !ts.isComputedPropertyName(node.name)) {
+  forEachMethodSignatureDeclaration(sourceFile, (node, declarationLines) => {
+    if (node.name && !ts.isComputedPropertyName(node.name)) {
       const name =
         ts.isIdentifier(node.name) ||
         ts.isStringLiteral(node.name) ||
@@ -37,11 +38,9 @@ export function findCamelCaseMethodName(sourceFile: ts.SourceFile): Finding[] {
           ? node.name.text
           : node.name.getText(sourceFile);
       if (!isCamelCaseName(name, allowUnderscore)) {
-        findings.push(createCamelCaseFinding(node, sourceFile, ruleName, `method ${name}()`, `The method ${name} is not named in camelCase.`));
+        findings.push(createCamelCaseFinding(node, sourceFile, ruleName, `method ${name}()`, `The method ${name} is not named in camelCase.`, declarationLines));
       }
     }
-    ts.forEachChild(node, visitSignature);
-  }
-  visitSignature(sourceFile);
+  });
   return findings;
 }

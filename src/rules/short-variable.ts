@@ -29,6 +29,7 @@ export function findShortVariable(sourceFile: ts.SourceFile): Finding[] {
         priority,
         binding.context,
         `Avoid variables with short names like ${binding.name}. Configured minimum length is ${properties.minimum}.`,
+        binding.declarationLines,
       ),
     );
   }

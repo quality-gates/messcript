@@ -1,6 +1,7 @@
 // messcript-disable ConstantNamingConventions
 import ts from "typescript";
-import { forEachFunctionLike, getFunctionContext } from "../ast/functions";
+import { getFunctionContext } from "../ast/functions";
+import { forEachCallableDeclaration } from "../ast/overloads";
 import { getFunctionBindingName, getNameWithoutSigil, isReactComponentName } from "../ast/names";
 import type { Finding } from "../finding";
 import { createNamingFinding } from "./naming-finding";
@@ -13,7 +14,7 @@ export const properties = { minimum: 3, exceptions: "" } as const;
 export function findShortMethodName(sourceFile: ts.SourceFile): Finding[] {
   const findings: Finding[] = [];
   const exceptions = parseCommaSeparatedNames(properties.exceptions);
-  forEachFunctionLike(sourceFile, (node) => {
+  forEachCallableDeclaration(sourceFile, (node, declarationLines) => {
     const name = getFunctionBindingName(node, sourceFile);
     if (
       !name ||
@@ -32,6 +33,7 @@ export function findShortMethodName(sourceFile: ts.SourceFile): Finding[] {
         priority,
         getFunctionContext(node, sourceFile),
         `Avoid using short method names like ${name}(). The configured minimum method name length is ${properties.minimum}.`,
+        declarationLines,
       ),
     );
   });

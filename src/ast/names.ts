@@ -4,11 +4,13 @@ import { forEachFunctionLike, isFunctionLike } from "./functions";
 import type { FunctionLike } from "./functions";
 import { forEachClass, getClassContext } from "./classes";
 import type { ClassField, ClassLike } from "./classes";
+import { analyzeOverloads } from "./overloads";
 
 export type NamedBinding = {
   name: string;
   node: ts.Node;
   context: string;
+  declarationLines?: readonly number[];
 };
 
 export type NamedType = ClassLike | ts.InterfaceDeclaration;
@@ -39,22 +41,31 @@ function bindingName(node: ts.Node): string | undefined {
   return undefined;
 }
 
-function addBinding(identifiers: NamedBinding[], node: ts.Node, context: string): void {
+function addBinding(
+  identifiers: NamedBinding[],
+  node: ts.Node,
+  context: string,
+  declarationLines?: readonly number[],
+): void {
   const name = bindingName(node);
   if (name) {
-    identifiers.push({ name, node, context });
+    identifiers.push({
+      name,
+      node,
+      context,
+      ...(declarationLines !== undefined ? { declarationLines } : {}),
+    });
   }
 }
 
-function addBindingName(identifiers: NamedBinding[], name: ts.BindingName, context: string): void {
+function addBindingName(
+  identifiers: NamedBinding[],
+  name: ts.BindingName,
+  context: string,
+  declarationLines?: readonly number[],
+): void {
   for (const identifier of bindingIdentifiers(name)) {
-    addBinding(identifiers, identifier, context);
-  }
-}
-
-function addFunctionParameters(identifiers: NamedBinding[], node: FunctionLike): void {
-  for (const parameter of node.parameters) {
-    addBindingName(identifiers, parameter.name, `parameter ${parameter.name.getText()}`);
+    addBinding(identifiers, identifier, context, declarationLines);
   }
 }
 
@@ -128,24 +139,25 @@ export function collectVariables(sourceFile: ts.SourceFile): NamedBinding[] {
 
 export function collectParameters(sourceFile: ts.SourceFile): NamedBinding[] {
   const parameters: NamedBinding[] = [];
-  function visit(node: ts.Node): void {
-    if (isFunctionLike(node)) {
-      addFunctionParameters(parameters, node);
-    }
-    if (
-      ts.isMethodSignature(node) ||
-      ts.isCallSignatureDeclaration(node) ||
-      ts.isConstructSignatureDeclaration(node) ||
-      ts.isFunctionTypeNode(node) ||
-      ts.isConstructorTypeNode(node)
-    ) {
-      for (const parameter of node.parameters) {
-        addBindingName(parameters, parameter.name, `parameter ${parameter.name.getText()}`);
+  const analysis = analyzeOverloads(sourceFile);
+  for (const group of analysis.parameterizedGroups) {
+    const seenInGroup = new Set<string>();
+    for (const signature of group.signatures) {
+      for (const parameter of signature.parameters) {
+        for (const identifier of bindingIdentifiers(parameter.name)) {
+          if (!seenInGroup.has(identifier.text)) {
+            seenInGroup.add(identifier.text);
+            addBinding(
+              parameters,
+              identifier,
+              `parameter ${parameter.name.getText()}`,
+              group.declarationLines,
+            );
+          }
+        }
       }
     }
-    ts.forEachChild(node, visit);
   }
-  visit(sourceFile);
   return deduplicateBindings(parameters, sourceFile);
 }
 

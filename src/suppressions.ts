@@ -137,7 +137,11 @@ export function applySuppressions(
 ): Finding[] {
   const suppressedByLine = suppressedRulesByLine(sourceFile);
   return findings.flatMap((finding) => {
-    if (!suppressedByLine.get(finding.line)?.has(finding.ruleName.toLowerCase())) {
+    const linesToCheck = finding.declarationLines ?? [finding.line];
+    const isSuppressed = linesToCheck.some((line) =>
+      suppressedByLine.get(line)?.has(finding.ruleName.toLowerCase()),
+    );
+    if (!isSuppressed) {
       return [finding];
     }
     return strict ? [{ ...finding, suppressed: true }] : [];

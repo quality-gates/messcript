@@ -17,7 +17,14 @@ export function findCamelCaseParameterName(sourceFile: ts.SourceFile): Finding[]
       continue;
     }
     findings.push(
-      createCamelCaseFinding(parameter.node, sourceFile, ruleName, parameter.context, `The parameter ${parameter.name} is not named in camelCase.`),
+      createCamelCaseFinding(
+        parameter.node,
+        sourceFile,
+        ruleName,
+        parameter.context,
+        `The parameter ${parameter.name} is not named in camelCase.`,
+        parameter.declarationLines,
+      ),
     );
   }
   return findings;
