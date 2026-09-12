@@ -240,6 +240,36 @@ logger[method]();
   ]);
 });
 
+test("DevelopmentCodeFragment finds parenthesized and asserted debug calls and receivers", () => {
+  const file = sourceFile(`
+export function debug() {
+  (console.log)("test");
+  (console).log("test");
+  (console)["log"]("test");
+  (console as any).log("test");
+  (console)!.log("test");
+  (<any>console).log("test");
+  (((console))).log("test");
+  (debug)["debug"]();
+  (console).log(\`template\`);
+  (logger).trace("test");
+}
+`);
+
+  assert.deepEqual(messages(findDevelopmentCodeFragment(file, "logger.trace")), [
+    "The function debug() calls the typical debug function console.log() which is mostly only used during development.",
+    "The function debug() calls the typical debug function console.log() which is mostly only used during development.",
+    "The function debug() calls the typical debug function console.log() which is mostly only used during development.",
+    "The function debug() calls the typical debug function console.log() which is mostly only used during development.",
+    "The function debug() calls the typical debug function console.log() which is mostly only used during development.",
+    "The function debug() calls the typical debug function console.log() which is mostly only used during development.",
+    "The function debug() calls the typical debug function console.log() which is mostly only used during development.",
+    "The function debug() calls the typical debug function debug.debug() which is mostly only used during development.",
+    "The function debug() calls the typical debug function console.log() which is mostly only used during development.",
+    "The function debug() calls the typical debug function logger.trace() which is mostly only used during development.",
+  ]);
+});
+
 test("duplicate keys recognize static literals and ignore dynamic keys", () => {
   const file = sourceFile(`
 const value = 1;

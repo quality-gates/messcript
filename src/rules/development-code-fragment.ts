@@ -9,20 +9,29 @@ export const properties = { "unwanted-functions": "", markers: "TODO,FIXME,HACK"
 
 const defaultFunctions = new Set(["console.log", "console.debug", "debug.log", "debug.debug"]);
 
+function unwrapExpression(node: ts.Expression): ts.Expression {
+  let current = node;
+  while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current)) {
+    current = current.expression;
+  }
+  return current;
+}
+
 function callName(node: ts.Expression): string | undefined {
-  if (ts.isIdentifier(node)) {
-    return node.text;
+  const unwrapped = unwrapExpression(node);
+  if (ts.isIdentifier(unwrapped)) {
+    return unwrapped.text;
   }
-  if (ts.isPropertyAccessExpression(node)) {
-    const parent = callName(node.expression);
-    return parent ? `${parent}.${node.name.text}` : undefined;
+  if (ts.isPropertyAccessExpression(unwrapped)) {
+    const parent = callName(unwrapped.expression);
+    return parent ? `${parent}.${unwrapped.name.text}` : undefined;
   }
-  if (ts.isElementAccessExpression(node)) {
-    const argument = node.argumentExpression;
+  if (ts.isElementAccessExpression(unwrapped)) {
+    const argument = unwrapExpression(unwrapped.argumentExpression);
     if (!ts.isStringLiteral(argument) && !ts.isNoSubstitutionTemplateLiteral(argument)) {
       return undefined;
     }
-    const parent = callName(node.expression);
+    const parent = callName(unwrapped.expression);
     return parent ? `${parent}.${argument.text}` : undefined;
   }
   return undefined;

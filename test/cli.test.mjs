@@ -1693,6 +1693,42 @@ export class Consumer {
   assert.ok(report.findings.every((finding) => /class 'Helper' in method 'test'/.test(finding.message)));
 });
 
+test("DevelopmentCodeFragment reports parenthesized and asserted debug calls via CLI", () => {
+  const fixturePath = join(scanRoot, "src", "development-code-fragment-repro.ts");
+  writeFileSync(
+    fixturePath,
+    `export function debug() {
+  (console.log)("test");
+  (console).log("test");
+  (console)["log"]("test");
+}
+`,
+  );
+
+  const result = runCli([
+    fixturePath,
+    "json",
+    "design",
+    "--only",
+    "DevelopmentCodeFragment",
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.equal(result.stderr, "");
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.errors, []);
+  assert.equal(report.findings.length, 3);
+  assert.deepEqual(
+    report.findings.map((finding) => ({ line: finding.line, context: finding.context, ruleName: finding.ruleName })),
+    [
+      { line: 2, context: "function debug()", ruleName: "DevelopmentCodeFragment" },
+      { line: 3, context: "function debug()", ruleName: "DevelopmentCodeFragment" },
+      { line: 4, context: "function debug()", ruleName: "DevelopmentCodeFragment" },
+    ],
+  );
+  assert.ok(report.findings.every((finding) => /calls the typical debug function console\.log\(\)/.test(finding.message)));
+});
+
 test("IfStatementAssignment reports every assignment operator in conditions", () => {
   const result = runCli([
     join(scanRoot, "src", "assignment-conditions.ts"),
