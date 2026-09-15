@@ -1868,6 +1868,37 @@ export function asAnyAbort() {
   assert.ok(report.findings.every((finding) => finding.ruleName === "ExitExpression"));
 });
 
+test("CountInLoopExpression reports parenthesized and asserted count properties", () => {
+  const assertedCountSource = `export function iterate(arr: any[], i: number) {
+  for (let index = 0; index < arr[("length")]; index++) {}
+  for (let index = 0; index < arr["length" as any]; index++) {}
+  for (let index = 0; index < (arr as any)[("length")]; index++) {}
+  for (let index = 0; index < arr[<any>"length"]; index++) {}
+  for (let index = 0; index < arr!["length"!]; index++) {}
+  while (i < arr[("size")]) { i++; }
+  do { i++; } while (i < arr[("count")]);
+  while (i < arr[("ready")]) { i++; }
+}
+`;
+  writeFileSync(join(scanRoot, "src", "count-asserted.ts"), assertedCountSource);
+  const result = runCli([join(scanRoot, "src", "count-asserted.ts"), "json", "design", "--only", "CountInLoopExpression"]);
+
+  assert.equal(result.status, 2);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(report.findings.map((finding) => finding.line), [2, 3, 4, 5, 6, 7, 8]);
+  assert.deepEqual(report.findings.map((finding) => finding.message), [
+    "Avoid using length in for loops.",
+    "Avoid using length in for loops.",
+    "Avoid using length in for loops.",
+    "Avoid using length in for loops.",
+    "Avoid using length in for loops.",
+    "Avoid using size in while loops.",
+    "Avoid using count in do loops.",
+  ]);
+  assert.ok(report.findings.every((finding) => finding.ruleName === "CountInLoopExpression"));
+});
+
 test("design rules cover executable control flow and keep goto inert", () => {
   const result = runCli([
     join(scanRoot, "src", "design.js") + "," + join(scanRoot, "src", "design.ts"),
