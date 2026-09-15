@@ -146,6 +146,14 @@ function collectBindings(sourceFile: ts.SourceFile): Binding[] {
   return bindings;
 }
 
+function unwrapExpression(node: ts.Expression): ts.Expression {
+  let current = node;
+  while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current)) {
+    current = current.expression;
+  }
+  return current;
+}
+
 function literalPropertyName(node: ts.Node): string | undefined {
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
     return node.text;
@@ -224,7 +232,7 @@ function propertyName(node: ts.PropertyAccessExpression | ts.ElementAccessExpres
   if (ts.isPropertyAccessExpression(node)) {
     return node.name.text;
   }
-  return node.argumentExpression ? literalPropertyName(node.argumentExpression) : undefined;
+  return node.argumentExpression ? literalPropertyName(unwrapExpression(node.argumentExpression)) : undefined;
 }
 
 function receiverName(node: ts.Expression): string | undefined {
@@ -434,7 +442,7 @@ function observeMutations(
       });
     }
     if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) && updateOperator(node.operator)) {
-      const operand = node.operand;
+      const operand = unwrapExpression(node.operand);
       if (ts.isIdentifier(operand)) {
         markBindingMutation(operand, operand.text, bindings, mutatedBindings);
       } else if (ts.isPropertyAccessExpression(operand) || ts.isElementAccessExpression(operand)) {
@@ -447,7 +455,7 @@ function observeMutations(
     ) {
       const method = propertyName(node.expression)?.toLowerCase();
       if (method && mutatingMethods.has(method)) {
-        const receiver = node.expression.expression;
+        const receiver = unwrapExpression(node.expression.expression);
         if (ts.isIdentifier(receiver)) {
           markBindingMutation(node, receiver.text, bindings, mutatedBindings);
         } else if (ts.isPropertyAccessExpression(receiver) || ts.isElementAccessExpression(receiver)) {

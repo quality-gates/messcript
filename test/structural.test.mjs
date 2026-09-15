@@ -1243,6 +1243,25 @@ class StaticState {
   assert.ok(messages(immutable).some((message) => /property/.test(message)));
 });
 
+test("global-variable reports mutations through parenthesized and asserted expressions", () => {
+  const cases = [
+    ["parenthesized update", "let counter = 0; (counter)++;", "global variable counter"],
+    ["asserted update", "let counter = 0; (counter as number)++;", "global variable counter"],
+    ["type-asserted update", "let counter = 0; (<number>counter)++;", "global variable counter"],
+    ["parenthesized receiver", "const items: number[] = []; (items).push(1);", "global variable items"],
+    ["asserted receiver", "const items: number[] = []; (items as number[]).push(1);", "global variable items"],
+    ["non-null receiver", "const items: number[] = []; items!.push(1);", "global variable items"],
+    ["parenthesized method key", "const items: number[] = []; items[(\"push\")](1);", "global variable items"],
+    ["parenthesized static update", "class Storage { static count = 0; } (Storage.count)++;", "static field count"],
+    ["parenthesized static receiver", "class Storage { static entries: string[] = []; } (Storage.entries).push(\"val\");", "static field entries"],
+  ];
+
+  for (const [name, source, context] of cases) {
+    const file = sourceFile(source, `${name}.ts`);
+    assert.deepEqual(findGlobalVariable([file]).map((finding) => finding.context), [context], name);
+  }
+});
+
 test("global-variable matches literal static fields to element-access mutations", () => {
   const file = sourceFile(`
 class LiteralState {
