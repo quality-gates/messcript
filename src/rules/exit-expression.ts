@@ -11,7 +11,7 @@ const exitTargets = new Set(["process.exit", "process.abort", "Deno.exit"]);
 
 function unwrapParenthesized(node: ts.Expression): ts.Expression {
   let current = node;
-  while (ts.isParenthesizedExpression(current)) {
+  while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current)) {
     current = current.expression;
   }
   return current;
