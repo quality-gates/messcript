@@ -10,6 +10,14 @@ export const properties = {} as const;
 
 const countNames = new Set(["length", "size", "count"]);
 
+function unwrapParenthesized(node: ts.Expression): ts.Expression {
+  let current = node;
+  while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current)) {
+    current = current.expression;
+  }
+  return current;
+}
+
 function accessedName(node: ts.Node): string | undefined {
   if (ts.isPropertyAccessExpression(node)) {
     return node.name.text;
@@ -17,7 +25,7 @@ function accessedName(node: ts.Node): string | undefined {
   if (!ts.isElementAccessExpression(node)) {
     return undefined;
   }
-  const argument = node.argumentExpression;
+  const argument = unwrapParenthesized(node.argumentExpression);
   if (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)) {
     return argument.text;
   }
