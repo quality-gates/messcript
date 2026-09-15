@@ -12,6 +12,9 @@ export function isBooleanType(type: ts.TypeNode | undefined): boolean {
   ) {
     return true;
   }
+  if (ts.isLiteralTypeNode(type)) {
+    return type.literal.kind === ts.SyntaxKind.TrueKeyword || type.literal.kind === ts.SyntaxKind.FalseKeyword;
+  }
   if (ts.isTypeReferenceNode(type) && ts.isIdentifier(type.typeName)) {
     return type.typeName.text === "Boolean";
   }
