@@ -1832,6 +1832,42 @@ test("IfStatementAssignment reports every assignment operator in conditions", ()
   assert.ok(report.findings.every((finding) => finding.ruleName === "IfStatementAssignment"));
 });
 
+test("ExitExpression reports asserted and non-null exit calls and receivers", () => {
+  const assertedExitSource = `export function asAnyReceiver() {
+  (process as any).exit(1);
+}
+export function asUnknownReceiver() {
+  (process as unknown as NodeJS.Process).exit(1);
+}
+export function typeAssertionReceiver() {
+  (<any>process).exit(1);
+}
+export function nonNullReceiver() {
+  process!.exit(1);
+}
+export function asAnyCallee() {
+  (process.exit as any)(1);
+}
+export function denoAsAnyReceiver() {
+  (Deno as any).exit(1);
+}
+export function denoNonNullReceiver() {
+  Deno!.exit(1);
+}
+export function asAnyAbort() {
+  (process as any).abort(1);
+}
+`;
+  writeFileSync(join(scanRoot, "src", "exit-asserted.ts"), assertedExitSource);
+  const result = runCli([join(scanRoot, "src", "exit-asserted.ts"), "json", "design", "--only", "ExitExpression"]);
+
+  assert.equal(result.status, 2);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(report.findings.map((finding) => finding.line), [2, 5, 8, 11, 14, 17, 20, 23]);
+  assert.ok(report.findings.every((finding) => finding.ruleName === "ExitExpression"));
+});
+
 test("design rules cover executable control flow and keep goto inert", () => {
   const result = runCli([
     join(scanRoot, "src", "design.js") + "," + join(scanRoot, "src", "design.ts"),

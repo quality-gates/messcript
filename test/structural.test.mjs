@@ -830,6 +830,50 @@ export function bareExit() {
   ]);
 });
 
+test("exit-expression reports asserted and non-null exit calls and receivers", () => {
+  const file = sourceFile(`
+export function asAnyReceiver() {
+  (process as any).exit(1);
+}
+export function asUnknownReceiver() {
+  (process as unknown as NodeJS.Process).exit(1);
+}
+export function typeAssertionReceiver() {
+  (<any>process).exit(1);
+}
+export function nonNullReceiver() {
+  process!.exit(1);
+}
+export function asAnyCallee() {
+  (process.exit as any)(1);
+}
+export function denoAsAnyReceiver() {
+  (Deno as any).exit(1);
+}
+export function denoNonNullReceiver() {
+  Deno!.exit(1);
+}
+export function asAnyAbort() {
+  (process as any).abort(1);
+}
+export function assertedElementKey() {
+  process["exit" as string](1);
+}
+`);
+
+  assert.deepEqual(findExitExpression(file).map((finding) => finding.context), [
+    "function asAnyReceiver()",
+    "function asUnknownReceiver()",
+    "function typeAssertionReceiver()",
+    "function nonNullReceiver()",
+    "function asAnyCallee()",
+    "function denoAsAnyReceiver()",
+    "function denoNonNullReceiver()",
+    "function asAnyAbort()",
+    "function assertedElementKey()",
+  ]);
+});
+
 test("static-access reports class calls through literal element access", () => {
   const file = sourceFile(`
 export function run() {
