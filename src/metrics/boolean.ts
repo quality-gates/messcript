@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-// messcript-disable-next-line CyclomaticComplexity
+// messcript-disable-next-line CyclomaticComplexity NPathComplexity
 export function isBooleanType(type: ts.TypeNode | undefined): boolean {
   if (!type) {
     return false;
@@ -11,6 +11,9 @@ export function isBooleanType(type: ts.TypeNode | undefined): boolean {
     type.kind === ts.SyntaxKind.FalseKeyword
   ) {
     return true;
+  }
+  if (ts.isLiteralTypeNode(type)) {
+    return type.literal.kind === ts.SyntaxKind.TrueKeyword || type.literal.kind === ts.SyntaxKind.FalseKeyword;
   }
   if (ts.isTypeReferenceNode(type) && ts.isIdentifier(type.typeName)) {
     return type.typeName.text === "Boolean";

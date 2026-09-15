@@ -59,7 +59,12 @@ test("boolean types, expressions, and function return boundaries are precise", (
   assert.equal(isBooleanType(sourceFile("let value: String;").statements[0].declarationList.declarations[0].type), false);
   assert.equal(isBooleanType(sourceFile("let value: boolean | null;").statements[0].declarationList.declarations[0].type), true);
   assert.equal(isBooleanType(sourceFile("let value: boolean | 1;").statements[0].declarationList.declarations[0].type), false);
-  assert.equal(isBooleanType(sourceFile("let value: true;").statements[0].declarationList.declarations[0].type), false);
+  assert.equal(isBooleanType(sourceFile("let value: true;").statements[0].declarationList.declarations[0].type), true);
+  assert.equal(isBooleanType(sourceFile("let value: false;").statements[0].declarationList.declarations[0].type), true);
+  assert.equal(isBooleanType(sourceFile("let value: true | false;").statements[0].declarationList.declarations[0].type), true);
+  assert.equal(isBooleanType(sourceFile("let value: boolean | false;").statements[0].declarationList.declarations[0].type), true);
+  assert.equal(isBooleanType(sourceFile("let value: true | undefined;").statements[0].declarationList.declarations[0].type), true);
+  assert.equal(isBooleanType(sourceFile("let value: false | string;").statements[0].declarationList.declarations[0].type), false);
   assert.equal(isBooleanType(sourceFile("let value: Boolean;").statements[0].declarationList.declarations[0].type), true);
   assert.equal(isBooleanType(sourceFile("let value: (boolean);").statements[0].declarationList.declarations[0].type), true);
 
@@ -126,6 +131,23 @@ class Service {
   const parameterizedFindings = findBooleanGetMethodName(file);
   assert.deepEqual(names(parameterizedFindings).sort(), ["getConditional", "getFlag", "getFlag", "getParameter", "getParens"]);
   booleanGetProperties.checkParameterizedMethods = false;
+});
+
+test("boolean rules recognize boolean literal types", () => {
+  const file = sourceFile(`
+export function toggle(flag: true) {}
+export function setVisible(visible: true | false) {}
+export function setStatus(ready: boolean | false) {}
+export class Controller {
+  private _active: boolean = false;
+  getReady(): true {
+    return this._active as any;
+  }
+}
+`);
+
+  assert.deepEqual(names(findBooleanArgumentFlag(file)), ["flag", "visible", "ready"]);
+  assert.deepEqual(names(findBooleanGetMethodName(file)), ["getReady"]);
 });
 
 test("boolean argument flags ignore parameters with non-boolean union members", () => {
