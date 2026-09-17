@@ -430,7 +430,12 @@ class UnusedAnalyzer {
 
   private unwrapExpression(expr: ts.Expression): ts.Expression {
     let cur = expr;
-    while (ts.isParenthesizedExpression(cur) || ts.isAsExpression(cur) || ts.isTypeAssertionExpression(cur)) {
+    while (
+      ts.isParenthesizedExpression(cur) ||
+      ts.isAsExpression(cur) ||
+      ts.isTypeAssertionExpression(cur) ||
+      ts.isNonNullExpression(cur)
+    ) {
       cur = cur.expression;
     }
     return cur;
