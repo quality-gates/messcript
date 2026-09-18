@@ -72,7 +72,27 @@ test("boolean types, expressions, and function return boundaries are precise", (
   assert.equal(isBooleanType(nullUndefined), false);
 
   const expression = (value) => sourceFile(`const result = ${value};`).statements[0].declarationList.declarations[0].initializer;
-  for (const value of ["true", "false", "!value", "left === right", "left < right", "value in object", "value instanceof Type", "Boolean(value)", "(left === right)", "((true))", "(!value)"]) {
+  for (const value of [
+    "true",
+    "false",
+    "!value",
+    "left === right",
+    "left < right",
+    "value in object",
+    "value instanceof Type",
+    "Boolean(value)",
+    "(left === right)",
+    "((true))",
+    "(!value)",
+    "true as const",
+    "false as const",
+    "<const>true",
+    "<const>false",
+    "true!",
+    "false!",
+    "(left === right)!",
+    "(true as const)!",
+  ]) {
     assert.equal(isBooleanExpression(expression(value)), true, value);
   }
   assert.equal(isBooleanExpression(expression("value")), false);
@@ -80,6 +100,9 @@ test("boolean types, expressions, and function return boundaries are precise", (
   assert.equal(isBooleanExpression(expression("value ? true : false")), true);
   assert.equal(isBooleanExpression(expression("value ? true : 1")), false);
   assert.equal(isBooleanExpression(expression("NotBoolean(value)")), false);
+  assert.equal(isBooleanExpression(expression("\"hello\" as const")), false);
+  assert.equal(isBooleanExpression(expression("1 as const")), false);
+  assert.equal(isBooleanExpression(expression("\"hello\"!")), false);
 
   const booleanExpression = () => true;
   const booleanType = () => false;
@@ -171,6 +194,54 @@ export function setOptions({ verbose = true as const }: any = {}) {}
   assert.deepEqual(
     names(findBooleanArgumentFlag(file)).sort(),
     ["active", "debug", "disabled", "enabled", "hidden", "ready", "verbose", "visible"],
+  );
+});
+
+test("BooleanGetMethodName flags methods returning non-null asserted or const-asserted boolean expressions", () => {
+  const file = sourceFile(`
+export class StatusService {
+  private active = true;
+  private typed: boolean;
+  private count = 1;
+  private loop = this.loop;
+
+  getConstTrue() {
+    return true as const;
+  }
+
+  getConstFalse() {
+    return false as const;
+  }
+
+  getActiveNonNull() {
+    return this.active!;
+  }
+
+  getReady() {
+    return (this.active === true)!;
+  }
+
+  getTyped() {
+    return this.typed!;
+  }
+
+  getElementAccess() {
+    return this["active"]!;
+  }
+
+  getCount() {
+    return this.count!;
+  }
+
+  getLoop() {
+    return this.loop!;
+  }
+}
+`);
+
+  assert.deepEqual(
+    names(findBooleanGetMethodName(file)).sort(),
+    ["getActiveNonNull", "getConstFalse", "getConstTrue", "getElementAccess", "getReady", "getTyped"],
   );
 });
 
