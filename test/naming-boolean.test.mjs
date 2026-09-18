@@ -150,6 +150,24 @@ export class Controller {
   assert.deepEqual(names(findBooleanGetMethodName(file)), ["getReady"]);
 });
 
+test("boolean argument flags recognize parenthesized, asserted, and non-null default initializers", () => {
+  const file = sourceFile(`
+export function setVisible(visible = (true)) {}
+export function setHidden(hidden = (false)) {}
+export function setEnabled(enabled = true as const) {}
+export function setDisabled(disabled = false as const) {}
+export function setActive(active = true!) {}
+export function setReady(ready = true as boolean) {}
+export function setConfig({ debug = (true) }: any = {}) {}
+export function setOptions({ verbose = true as const }: any = {}) {}
+`);
+
+  assert.deepEqual(
+    names(findBooleanArgumentFlag(file)).sort(),
+    ["active", "debug", "disabled", "enabled", "hidden", "ready", "verbose", "visible"],
+  );
+});
+
 test("boolean argument flags ignore parameters with non-boolean union members", () => {
   const file = sourceFile("export function mixed(value: boolean | string) {}");
 

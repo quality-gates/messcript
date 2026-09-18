@@ -19,14 +19,28 @@ export const ruleName = "BooleanArgumentFlag";
 export const priority = 1;
 export const properties = { exceptions: "", ignorepattern: "" } as const;
 
+function unwrapExpression(node: ts.Expression): ts.Expression {
+  let current = node;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isNonNullExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
 function isBooleanInitializer(node: ts.Expression | undefined): boolean {
   if (!node) {
     return false;
   }
+  const expression = unwrapExpression(node);
   return (
-    node.kind === ts.SyntaxKind.TrueKeyword ||
-    node.kind === ts.SyntaxKind.FalseKeyword ||
-    (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.ExclamationToken)
+    expression.kind === ts.SyntaxKind.TrueKeyword ||
+    expression.kind === ts.SyntaxKind.FalseKeyword ||
+    (ts.isPrefixUnaryExpression(expression) && expression.operator === ts.SyntaxKind.ExclamationToken)
   );
 }
 
