@@ -36,9 +36,65 @@ export function isBooleanType(type: ts.TypeNode | undefined): boolean {
 }
 
 // messcript-disable-next-line CyclomaticComplexity NPathComplexity
-export function isBooleanExpression(expression: ts.Expression): boolean {
+function getThisPropertyName(expression: ts.Expression): string | undefined {
+  if (ts.isPropertyAccessExpression(expression) && expression.expression.kind === ts.SyntaxKind.ThisKeyword) {
+    return expression.name.text;
+  }
+  if (
+    ts.isElementAccessExpression(expression) &&
+    expression.expression.kind === ts.SyntaxKind.ThisKeyword &&
+    ts.isStringLiteral(expression.argumentExpression)
+  ) {
+    return expression.argumentExpression.text;
+  }
+  return undefined;
+}
+
+// messcript-disable-next-line CyclomaticComplexity NPathComplexity
+function resolveThisProperty(expression: ts.Expression, visited: Set<ts.Node>): boolean {
+  const propName = getThisPropertyName(expression);
+  if (!propName) {
+    return false;
+  }
+  let parent: ts.Node | undefined = expression.parent;
+  while (parent && !ts.isClassDeclaration(parent) && !ts.isClassExpression(parent)) {
+    parent = parent.parent;
+  }
+  if (!parent) {
+    return false;
+  }
+  for (const member of parent.members) {
+    if (
+      ts.isPropertyDeclaration(member) &&
+      member.name &&
+      ts.isIdentifier(member.name) &&
+      member.name.text === propName
+    ) {
+      if (visited.has(member)) {
+        return false;
+      }
+      visited.add(member);
+      if (isBooleanType(member.type)) {
+        return true;
+      }
+      if (member.initializer && isBooleanExpression(member.initializer, visited)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// messcript-disable-next-line CyclomaticComplexity NPathComplexity
+export function isBooleanExpression(
+  expression: ts.Expression,
+  visited: Set<ts.Node> = new Set(),
+): boolean {
   if (ts.isParenthesizedExpression(expression)) {
-    return isBooleanExpression(expression.expression);
+    return isBooleanExpression(expression.expression, visited);
+  }
+  if (ts.isNonNullExpression(expression)) {
+    return isBooleanExpression(expression.expression, visited);
   }
   if (expression.kind === ts.SyntaxKind.TrueKeyword || expression.kind === ts.SyntaxKind.FalseKeyword) {
     return true;
@@ -61,13 +117,19 @@ export function isBooleanExpression(expression: ts.Expression): boolean {
     ].includes(expression.operatorToken.kind);
   }
   if (ts.isConditionalExpression(expression)) {
-    return isBooleanExpression(expression.whenTrue) && isBooleanExpression(expression.whenFalse);
+    return isBooleanExpression(expression.whenTrue, visited) && isBooleanExpression(expression.whenFalse, visited);
   }
   if (ts.isAsExpression(expression) || ts.isTypeAssertionExpression(expression)) {
-    return isBooleanType(expression.type);
+    return (
+      isBooleanType(expression.type) ||
+      (ts.isConstTypeReference(expression.type) && isBooleanExpression(expression.expression, visited))
+    );
   }
   if (ts.isCallExpression(expression) && ts.isIdentifier(expression.expression)) {
     return expression.expression.text === "Boolean";
+  }
+  if (resolveThisProperty(expression, visited)) {
+    return true;
   }
   return false;
 }
