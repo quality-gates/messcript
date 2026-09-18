@@ -443,6 +443,33 @@ const obj = {
   );
 });
 
+test("DuplicatedArrayKey unwraps asserted and non-null computed keys", () => {
+  const file = sourceFile(`
+export const config = {
+  ["key"]: 1,
+  ["key" as any]: 2,
+  [<any>"key"]: 3,
+  ["key"!]: 4,
+  ["key" as string]: 5,
+  [1]: 1,
+  [1 as any]: 2,
+  [1!]: 3,
+};
+`);
+  const findings = findDuplicatedArrayKey(file);
+  assert.deepEqual(
+    findings.map((f) => ({ line: f.line, message: f.message })),
+    [
+      { line: 4, message: 'Duplicated array key ["key" as any], first declared at line 3.' },
+      { line: 5, message: 'Duplicated array key [<any>"key"], first declared at line 3.' },
+      { line: 6, message: 'Duplicated array key ["key"!], first declared at line 3.' },
+      { line: 7, message: 'Duplicated array key ["key" as string], first declared at line 3.' },
+      { line: 9, message: "Duplicated array key [1 as any], first declared at line 8." },
+      { line: 10, message: "Duplicated array key [1!], first declared at line 8." },
+    ],
+  );
+});
+
 test("CyclomaticComplexity handles deeply nested statements", () => {
   const depth = 830;
   const file = sourceFile(`function nested(value) {${"if (value) {".repeat(depth)}return 0;${"}".repeat(depth)}}`);

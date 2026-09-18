@@ -13,7 +13,12 @@ type StaticKey = { key: string; display: string; node: ts.Node; kind: KeyKind };
 
 // messcript-disable-next-line CyclomaticComplexity NPathComplexity
 function staticExpressionKey(node: ts.Expression): string | undefined {
-  if (ts.isParenthesizedExpression(node)) {
+  if (
+    ts.isParenthesizedExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isTypeAssertionExpression(node) ||
+    ts.isNonNullExpression(node)
+  ) {
     return staticExpressionKey(node.expression);
   }
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
