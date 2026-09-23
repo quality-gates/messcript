@@ -261,3 +261,136 @@ function add(amount) { total += amount; }
 `, "typescript");
   assert.deepEqual(found.filter((message) => message.includes("Implicit")), []);
 });
+
+test("closure over a per-iteration let loop variable is not an implicit input when mutated only in loop update", () => {
+  assert.deepEqual(messages("loop-closure.js", `export function handlers(n) {
+  const hs = [];
+  for (let i = 0; i < n; i++) {
+    hs.push(() => i);
+  }
+  return hs;
+}
+`), []);
+
+  assert.deepEqual(messages("loop-variants.js", `export function variants(n) {
+  const hs = [];
+  for (let i = 0; i < n; i += 1) {
+    hs.push(() => i);
+  }
+  for (let j = 0; j < n; ++j) {
+    hs.push(() => j);
+  }
+  for (let k = 0; k < n; k = k + 1) {
+    hs.push(() => k);
+  }
+  for (let a = 0, b = 0; a < n; a++, b += 2) {
+    hs.push(() => a + b);
+  }
+  return hs;
+}
+`), []);
+});
+
+test("nested functions and callbacks reading a per-iteration loop variable have no finding", () => {
+  assert.deepEqual(messages("nested-loop-closure.js", `export function create(n) {
+  const hs = [];
+  for (let i = 0; i < n; i++) {
+    function factory() {
+      return () => i;
+    }
+    hs.push(factory());
+  }
+  return hs;
+}
+`), []);
+});
+
+test("closures capturing a loop variable mutated in the loop body still report ImplicitInput", () => {
+  assert.deepEqual(messages("loop-body-mutation.js", `export function bodyMutation(n) {
+  const hs = [];
+  for (let i = 0; i < n; i++) {
+    i++;
+    hs.push(() => i);
+  }
+  return hs;
+}
+`), [
+    "5:ImplicitInput: The arrow function anonymous() reads i, an implicit input.",
+  ]);
+
+  assert.deepEqual(messages("loop-body-reassign.js", `export function bodyReassign(n) {
+  const hs = [];
+  for (let i = 0; i < n; i++) {
+    i = 0;
+    hs.push(() => i);
+  }
+  return hs;
+}
+`), [
+    "5:ImplicitInput: The arrow function anonymous() reads i, an implicit input.",
+  ]);
+
+  assert.deepEqual(messages("loop-nested-mutation.js", `export function nestedMutation(n) {
+  const hs = [];
+  for (let i = 0; i < n; i++) {
+    function mutate() { i++; }
+    hs.push(() => i);
+  }
+  return hs;
+}
+`), [
+    "4:ImplicitInput: The function mutate() reads i, an implicit input.",
+    "4:ImplicitOutput: The function mutate() writes i, an implicit output.",
+    "5:ImplicitInput: The arrow function anonymous() reads i, an implicit input.",
+  ]);
+
+  assert.deepEqual(messages("loop-incrementor-closure-mutation.js", `export function incClosureMutation(n) {
+  const hs = [];
+  for (let i = 0; i < n; (() => { i++; })()) {
+    hs.push(() => i);
+  }
+  return hs;
+}
+`), [
+    "3:ImplicitInput: The arrow function anonymous() reads i, an implicit input.",
+    "3:ImplicitOutput: The arrow function anonymous() writes i, an implicit output.",
+    "4:ImplicitInput: The arrow function anonymous() reads i, an implicit input.",
+  ]);
+
+  assert.deepEqual(messages("loop-toplevel-mutation.js", `for (let i = 0; i < 10; i++) {
+  i++;
+  const f = () => i;
+}
+`), [
+    "3:ImplicitInput: The arrow function f() reads i, an implicit input.",
+  ]);
+});
+
+
+
+test("closures capturing a var loop variable or loop variable declared outside continue to report ImplicitInput", () => {
+  assert.deepEqual(messages("var-loop.js", `export function varHandlers(n) {
+  const hs = [];
+  for (var i = 0; i < n; i++) {
+    hs.push(() => i);
+  }
+  return hs;
+}
+`), [
+    "4:ImplicitInput: The arrow function anonymous() reads i, an implicit input.",
+  ]);
+
+  assert.deepEqual(messages("outer-loop-var.js", `export function outerHandlers(n) {
+  const hs = [];
+  let i;
+  for (i = 0; i < n; i++) {
+    hs.push(() => i);
+  }
+  return hs;
+}
+`), [
+    "5:ImplicitInput: The arrow function anonymous() reads i, an implicit input.",
+  ]);
+});
+
+
