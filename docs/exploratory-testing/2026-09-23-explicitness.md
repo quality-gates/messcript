@@ -133,5 +133,8 @@ and one observation (O2).
 
 ## Issues filed
 
-None. The bug is in unmerged branch code and is fixed on that branch. U1 needs a
-product decision before it can be an issue.
+Confirmed bug 1 is not filed. It was in unmerged branch code and is fixed on that
+branch.
+
+- U1: [#210](https://github.com/quality-gates/messcript/issues/210)
+- O2: [#211](https://github.com/quality-gates/messcript/issues/211)
