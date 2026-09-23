@@ -167,6 +167,72 @@ function width() { return window.innerWidth; }
   ]);
 });
 
+test("every listed host object, sink, and nondeterministic call is recognised", () => {
+  assert.deepEqual(messages("ambient-lists.js", `function hosts() { return [globalThis.a, localStorage.a, location.a, process.a, self.a, sessionStorage.a]; }
+function sinks(callback) { queueMicrotask(callback); requestAnimationFrame(callback); setInterval(callback, 1); }
+function random(buffer) { return [crypto.getRandomValues(buffer), crypto.randomUUID(), performance.now()]; }
+`), [
+    "1:ImplicitInput: The function hosts() reads globalThis, an implicit input.",
+    "1:ImplicitInput: The function hosts() reads localStorage, an implicit input.",
+    "1:ImplicitInput: The function hosts() reads location, an implicit input.",
+    "1:ImplicitInput: The function hosts() reads process, an implicit input.",
+    "1:ImplicitInput: The function hosts() reads self, an implicit input.",
+    "1:ImplicitInput: The function hosts() reads sessionStorage, an implicit input.",
+    "2:ImplicitOutput: The function sinks() uses queueMicrotask, an implicit output.",
+    "2:ImplicitOutput: The function sinks() uses requestAnimationFrame, an implicit output.",
+    "2:ImplicitOutput: The function sinks() uses setInterval, an implicit output.",
+    "3:ImplicitInput: The function random() calls crypto.getRandomValues(), an implicit input.",
+    "3:ImplicitInput: The function random() calls crypto.randomUUID(), an implicit input.",
+    "3:ImplicitInput: The function random() calls performance.now(), an implicit input.",
+  ]);
+});
+
+test("every listed mutating method mutates its receiver", () => {
+  const methods = [
+    "add", "append", "appendChild", "clear", "copyWithin", "delete", "fill", "insertBefore", "pop", "prepend", "push",
+    "remove", "removeAttribute", "removeChild", "removeItem", "replaceChildren", "reverse", "set", "setAttribute",
+    "setItem", "shift", "sort", "splice", "unshift", "write", "writeln",
+  ];
+  const source = methods.map((method) => `function ${method}Call(target) { target.${method}(); }\n`).join("");
+  assert.deepEqual(messages("mutating-methods.js", source), methods.map((method, index) =>
+    `${index + 1}:ImplicitOutput: The function ${method}Call() mutates argument target, an implicit output.`));
+});
+
+test("reads, calls, and operators that do not write are not outputs", () => {
+  assert.deepEqual(messages("non-writes.ts", `let count = 0;
+const config = { debug: false };
+function bump() { count ^= 1; }
+function negate() { return !count; }
+function check(value: object) { return count in value || count instanceof Object; }
+function keys() { return Object.keys(config); }
+function pick(source: { count: number }) { const { count: value } = source; return value; }
+function empty() { return String(); }
+function schedule(run: (clock: () => number) => number) { return run(Date.now); }
+function nudge(point: { x: number }) { point.x += 1; }
+function shadowFunction() { function count() { return 1; } return count(); }
+function caught() { try { return 1; } catch (count) { return 2; } finally { void count; } }
+`), [
+    "3:ImplicitInput: The function bump() reads count, an implicit input.",
+    "3:ImplicitOutput: The function bump() writes count, an implicit output.",
+    "4:ImplicitInput: The function negate() reads count, an implicit input.",
+    "5:ImplicitInput: The function check() reads count, an implicit input.",
+    "10:ImplicitOutput: The function nudge() mutates argument point, an implicit output.",
+    "12:ImplicitInput: The function caught() reads count, an implicit input.",
+  ]);
+});
+
+test("writes through parentheses and type assertions reach the written binding", () => {
+  assert.deepEqual(messages("wrapped-writes.ts", `const config = { debug: false };
+function paren() { (config).debug = true; }
+function cast() { (config as { debug: boolean }).debug = true; }
+function angle() { (<{ debug: boolean }>config).debug = true; }
+`), [
+    "2:ImplicitOutput: The function paren() writes config, an implicit output.",
+    "3:ImplicitOutput: The function cast() writes config, an implicit output.",
+    "4:ImplicitOutput: The function angle() writes config, an implicit output.",
+  ]);
+});
+
 const classSource = `class Counter {
   constructor() { this.count = 0; }
   increment() { this.count += 1; return this.format(); }
