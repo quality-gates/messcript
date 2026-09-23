@@ -65,6 +65,8 @@ executable metric findings. Prefer `typescript` for mixed JS/TS repositories.
 | `controversial` | `CamelCasePropertyName` | 1 | `allow-underscore=false`, `allow-underscore-test=false` | Flags property names that are not camelCase, with the same conservative exemptions. `allow-underscore` and `allow-underscore-test` behave as for `CamelCaseMethodName`. |
 | `controversial` | `CamelCaseParameterName` | 1 | `allow-underscore=false` | Flags parameter names that are not camelCase, after ordinary short-name exemptions. `allow-underscore` permits a single leading underscore. |
 | `controversial` | `CamelCaseVariableName` | 1 | `allow-underscore=false` | Flags variable names that are not camelCase, after ordinary short-name and constant exemptions. `allow-underscore` permits a single leading underscore. |
+| `explicitness` | `ImplicitInput` | 3 | `include-this=false` | Flags data that enters a function other than through its arguments: reads of outer or module bindings that are mutated somewhere in the file, reads of host objects (`window`, `document`, `process`, storage, and similar), and nondeterministic calls (`Date.now()`, `Math.random()`, `new Date()`, and similar). Set `include-this=true` to also flag `this.x` reads outside constructors. |
+| `explicitness` | `ImplicitOutput` | 3 | `include-this=false` | Flags data that leaves a function other than through its return value: writes to outer or module bindings, mutation of an argument (reassignment is not an output), writes to host objects, and use of sinks (`console`, `fetch`, `alert`, timers), also through `window`, `globalThis`, or `self`. Set `include-this=true` to also flag `this.x` writes outside constructors. |
 
 ## Built-in rulesets
 
@@ -77,4 +79,32 @@ Pass one or more of these as the third CLI argument. Comma-separate to compose.
 - **`codesize`** — How big and branchy callables and classes have become. `CyclomaticComplexity`, `NPathComplexity`, `ExcessiveMethodLength`, `ExcessiveClassLength`, `ExcessiveParameterList`, `ExcessivePublicCount`, `TooManyFields`, `TooManyMethods`, `TooManyPublicMethods`, `ExcessiveClassComplexity`
 - **`controversial`** — Strict PascalCase classes and camelCase identifiers. `CamelCaseClassName`, `CamelCaseMethodName`, `CamelCasePropertyName`, `CamelCaseParameterName`, `CamelCaseVariableName`
 - **`javascript`** / **`typescript`** — Recommended low-noise defaults. Same membership: all component rules except the `opinionated` set below, with `LongVariable.maximum=35`. `typescript` adds TypeScript-aware treatment of declarations, overloads, accessibility, parameter properties, enums, namespaces, and type-only syntax.
+- **`explicitness`** — Implicit inputs and outputs of functions, after *Grokking Simplicity*. Not part of the recommended sets; combine as `typescript,explicitness`. `ImplicitInput`, `ImplicitOutput`
 - **`opinionated`** — Stricter checks left out of the recommended sets; combine as `typescript,opinionated`. `ShortVariable`, `UnusedFormalParameter`, `BooleanArgumentFlag`, `ElseExpression`, `StaticAccess`, `CountInLoopExpression`, `ExitExpression`
+
+### Explicitness
+
+A function's explicit inputs are its arguments, and its explicit output is its
+return value. Any other data flow is implicit. Each finding names the function
+and the data, one finding per function for each distinct flow.
+
+Imports and `const` bindings are reported only when the file mutates them.
+Calls to other functions are not reported. messcript does not follow calls, so
+a call to a function that itself has implicit inputs or outputs is only reported
+inside that function.
+
+To also treat class state as implicit, set `include-this`:
+
+```xml
+<ruleset name="strict explicitness">
+  <rule ref="rulesets/explicitness.xml/ImplicitInput">
+    <properties><property name="include-this" value="true" /></properties>
+  </rule>
+  <rule ref="rulesets/explicitness.xml/ImplicitOutput">
+    <properties><property name="include-this" value="true" /></properties>
+  </rule>
+</ruleset>
+```
+
+With `include-this=true`, `this.count` reads are inputs and writes are outputs.
+Calls such as `this.format()` and all code in constructors are not reported.

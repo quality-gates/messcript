@@ -35,6 +35,8 @@ import * as exitExpression from "./exit-expression";
 import * as globalVariable from "./global-variable";
 import * as gotoStatement from "./goto-statement";
 import * as ifStatementAssignment from "./if-statement-assignment";
+import * as implicitInput from "./implicit-input";
+import * as implicitOutput from "./implicit-output";
 import * as lackOfCohesionOfMethods from "./lack-of-cohesion-of-methods";
 import * as longClassName from "./long-class-name";
 import * as longVariable from "./long-variable";
@@ -68,6 +70,8 @@ import { findExitExpression } from "./exit-expression";
 import { findGlobalVariable } from "./global-variable";
 import { findGotoStatement } from "./goto-statement";
 import { findIfStatementAssignment } from "./if-statement-assignment";
+import { findImplicitInput } from "./implicit-input";
+import { findImplicitOutput } from "./implicit-output";
 import { findLongClassName } from "./long-class-name";
 import { findLongVariable } from "./long-variable";
 import { findNPathComplexity } from "./npath-complexity";
@@ -162,6 +166,8 @@ const definitions: RuleDefinition[] = [
   moduleDefinition(camelCasePropertyName, findCamelCasePropertyName),
   moduleDefinition(camelCaseParameterName, findCamelCaseParameterName),
   moduleDefinition(camelCaseVariableName, findCamelCaseVariableName),
+  moduleDefinition(implicitInput, findImplicitInput),
+  moduleDefinition(implicitOutput, findImplicitOutput),
 ];
 
 const definitionsByName = new Map(definitions.map((definition) => [definition.name.toLowerCase(), definition]));
@@ -211,6 +217,7 @@ export const componentRulesets: Readonly<Record<string, readonly string[]>> = {
   javascript: languagePolicies.javascript.rules,
   typescript: languagePolicies.typescript.rules,
   opinionated: opinionatedRules,
+  explicitness: ["ImplicitInput", "ImplicitOutput"],
 };
 
 export function getRuleDefinition(name: string): RuleDefinition | undefined {

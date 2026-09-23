@@ -48,6 +48,7 @@ Field-level shapes for every format are in [reports.md](reports.md).
 | `cleancode` | Boolean flags, dead `else`, static access, assignment-in-condition, duplicate object keys. |
 | `design` | Exits, empty handlers, coupling, globals, cohesion, development leftovers. |
 | `controversial` | camelCase identifiers and PascalCase classes. |
+| `explicitness` | Implicit inputs and outputs of functions. Opt-in; combine as `typescript,explicitness`. |
 
 Comma-separated values may mix built-ins and custom XML paths:
 

@@ -22,7 +22,8 @@
       "test/structural.test.mjs",
       "test/discovery.test.mjs",
       "test/rulesets.test.mjs",
-      "test/overload-naming.test.mjs"
+      "test/overload-naming.test.mjs",
+      "test/explicitness.test.mjs"
     ]
   },
   "coverageAnalysis": "perTest",
