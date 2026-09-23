@@ -23,8 +23,3 @@ Fleet runs many repositories concurrently on an 8-core macOS host. During iterat
 ```
 
 Use the changed-file and line-range behavior in `scripts/changed-production-files.mjs`. Use the whole changed file for a new production file. Run the covered-MSI score command separately when you need a score. Use the direct Stryker command rather than appending mutation options to `npm run mutation -- ...`: the npm script contains `stryker run && node scripts/covered-msi.mjs ...`, so appended arguments reach the score command after `&&`.
-
-### Exploratory testing feedback
-
-Past exploratory passes, what they exercised, and the issues they filed are
-indexed in `docs/exploratory-testing/README.md`.
