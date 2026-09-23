@@ -169,6 +169,29 @@ function assignmentTargets(node: ts.Expression): ts.Expression[] {
   return ts.isOmittedExpression(target) ? [] : [target];
 }
 
+function isLoopUpdateWrite(target: ts.Node, binding: Binding): boolean {
+  if (!ts.isForStatement(binding.scope) || !binding.scope.incrementor) {
+    return false;
+  }
+  const incrementor = binding.scope.incrementor;
+  if (!isInside(target, incrementor)) {
+    return false;
+  }
+  for (let current: ts.Node | undefined = target; current && current !== incrementor; current = current.parent) {
+    if (isFunctionLike(current)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function markMutated(analysis: Analysis, current: ts.Identifier): void {
+  const binding = resolve(analysis, current);
+  if (binding && !isLoopUpdateWrite(current, binding)) {
+    binding.mutated = true;
+  }
+}
+
 // messcript-disable-next-line CyclomaticComplexity
 function recordWrite(analysis: Analysis, target: ts.Expression, contentsOnly: boolean, compound: boolean): void {
   let current = unwrap(target);
@@ -182,9 +205,8 @@ function recordWrite(analysis: Analysis, target: ts.Expression, contentsOnly: bo
     return;
   }
   analysis.writes.set(current, { viaCall, reassign, compound });
-  const binding = ts.isIdentifier(current) && !viaCall ? resolve(analysis, current) : undefined;
-  if (binding) {
-    binding.mutated = true;
+  if (ts.isIdentifier(current) && !viaCall) {
+    markMutated(analysis, current);
   }
 }
 
