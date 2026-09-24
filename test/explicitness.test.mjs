@@ -167,6 +167,31 @@ function width() { return window.innerWidth; }
   ]);
 });
 
+test("sinks accessed via element access and parenthesized or asserted globals are outputs", () => {
+  assert.deepEqual(messages("element-sinks.ts", `function f1() { window['alert']('hello'); }
+function f2() { (window).alert('hello'); }
+function f3() { globalThis['fetch']('/api'); }
+function f4() { (globalThis as any).fetch('/api'); }
+function f5() { (globalThis!).fetch('/api'); }
+function f6() { window['console'].log('hello'); }
+function f7() { self[\`queueMicrotask\`](() => {}); }
+function f8() { (window as any)['alert']('hello'); }
+function f9(k: string) { window[k]('hello'); }
+function f10() { return window['innerWidth']; }
+`), [
+    "1:ImplicitOutput: The function f1() uses alert, an implicit output.",
+    "2:ImplicitOutput: The function f2() uses alert, an implicit output.",
+    "3:ImplicitOutput: The function f3() uses fetch, an implicit output.",
+    "4:ImplicitOutput: The function f4() uses fetch, an implicit output.",
+    "5:ImplicitOutput: The function f5() uses fetch, an implicit output.",
+    "6:ImplicitOutput: The function f6() uses console, an implicit output.",
+    "7:ImplicitOutput: The function f7() uses queueMicrotask, an implicit output.",
+    "8:ImplicitOutput: The function f8() uses alert, an implicit output.",
+    "9:ImplicitInput: The function f9() reads window, an implicit input.",
+    "10:ImplicitInput: The function f10() reads window, an implicit input.",
+  ]);
+});
+
 test("every listed host object, sink, and nondeterministic call is recognised", () => {
   assert.deepEqual(messages("ambient-lists.js", `function hosts() { return [globalThis.a, localStorage.a, location.a, process.a, self.a, sessionStorage.a]; }
 function sinks(callback) { queueMicrotask(callback); requestAnimationFrame(callback); setInterval(callback, 1); }
