@@ -53,13 +53,15 @@ const mutatingMethods = new Set([
   "setItem", "shift", "sort", "splice", "unshift", "write", "writeln",
 ]);
 
+function isWrapper(node: ts.Node): boolean {
+  return ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) ||
+    ts.isNonNullExpression(node) || ts.isSatisfiesExpression(node);
+}
+
 function unwrap(node: ts.Expression): ts.Expression {
   let current = node;
-  while (
-    ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isTypeAssertionExpression(current) ||
-    ts.isNonNullExpression(current) || ts.isSatisfiesExpression(current)
-  ) {
-    current = current.expression;
+  while (isWrapper(current)) {
+    current = (current as ts.ParenthesizedExpression).expression;
   }
   return current;
 }
@@ -297,9 +299,24 @@ function ambientCallDescription(node: ts.Identifier): string | undefined {
 }
 
 function sinkName(node: ts.Identifier): string {
-  const parent = node.parent;
-  const viaGlobal = globalObjects.has(node.text) && ts.isPropertyAccessExpression(parent) && parent.expression === node;
-  return viaGlobal ? parent.name.text : node.text;
+  if (!globalObjects.has(node.text)) {
+    return node.text;
+  }
+  let current: ts.Node = node;
+  while (isWrapper(current.parent)) {
+    current = current.parent;
+  }
+  const parent = current.parent;
+  if (ts.isPropertyAccessExpression(parent) && parent.expression === current) {
+    return parent.name.text;
+  }
+  if (ts.isElementAccessExpression(parent) && parent.expression === current) {
+    const argument = unwrap(parent.argumentExpression);
+    if (ts.isStringLiteralLike(argument)) {
+      return argument.text;
+    }
+  }
+  return node.text;
 }
 
 function ambientFlow(node: ts.Identifier, write: Write | undefined): [ImplicitFlowKind, string] | undefined {
