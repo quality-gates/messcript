@@ -283,28 +283,69 @@ function isValueReference(node: ts.Identifier): boolean {
   return !named && !propertyName && !label;
 }
 
+type MemberAccess = ts.PropertyAccessExpression | ts.ElementAccessExpression;
+
+function memberAccess(node: ts.Identifier): MemberAccess | undefined {
+  let receiver: ts.Expression = node;
+  while (true) {
+    const parent = receiver.parent;
+    const wrapsReceiver = (
+      ts.isParenthesizedExpression(parent) || ts.isAsExpression(parent) || ts.isTypeAssertionExpression(parent) ||
+      ts.isNonNullExpression(parent) || ts.isSatisfiesExpression(parent)
+    ) && parent.expression === receiver;
+    if (wrapsReceiver) {
+      receiver = parent;
+      continue;
+    }
+    return (ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) && parent.expression === receiver
+      ? parent
+      : undefined;
+  }
+}
+
+function memberName(access: MemberAccess): string | undefined {
+  if (ts.isPropertyAccessExpression(access)) {
+    return access.name.text;
+  }
+  const argument = access.argumentExpression ? unwrap(access.argumentExpression) : undefined;
+  return argument && ts.isStringLiteralLike(argument) ? argument.text : undefined;
+}
+
 // messcript-disable-next-line CyclomaticComplexity
 function ambientCallDescription(node: ts.Identifier): string | undefined {
   const parent = node.parent;
   if (node.text === "Date" && (ts.isNewExpression(parent) || ts.isCallExpression(parent)) && parent.expression === node) {
     return (parent.arguments?.length ?? 0) === 0 ? `calls ${ts.isNewExpression(parent) ? "new " : ""}Date()` : undefined;
   }
-  if (!ts.isPropertyAccessExpression(parent) || !ts.isCallExpression(parent.parent) || parent.parent.expression !== parent) {
+  const access = memberAccess(node);
+  if (!access || !ts.isCallExpression(access.parent) || access.parent.expression !== access) {
     return undefined;
   }
-  const name = `${node.text}.${parent.name.text}`;
+  const member = memberName(access);
+  if (!member) {
+    return undefined;
+  }
+  const name = `${node.text}.${member}`;
   return nondeterministicCalls.has(name) ? `calls ${name}()` : undefined;
 }
 
 function sinkName(node: ts.Identifier): string {
+  const access = globalObjects.has(node.text) ? memberAccess(node) : undefined;
+  return access ? memberName(access) ?? node.text : node.text;
+}
+
+function isDynamicGlobalKey(node: ts.Identifier): boolean {
   const parent = node.parent;
-  const viaGlobal = globalObjects.has(node.text) && ts.isPropertyAccessExpression(parent) && parent.expression === node;
-  return viaGlobal ? parent.name.text : node.text;
+  if (!ts.isElementAccessExpression(parent) || !parent.argumentExpression || unwrap(parent.argumentExpression) !== node) {
+    return false;
+  }
+  const receiver = unwrap(parent.expression);
+  return ts.isIdentifier(receiver) && globalObjects.has(receiver.text);
 }
 
 function ambientFlow(node: ts.Identifier, write: Write | undefined): [ImplicitFlowKind, string] | undefined {
   const sink = sinkName(node);
-  if (outputSinks.has(sink)) {
+  if (outputSinks.has(sink) && !isDynamicGlobalKey(node)) {
     return ["output", `uses ${sink}`];
   }
   if (hostObjects.has(node.text)) {

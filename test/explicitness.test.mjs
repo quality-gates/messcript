@@ -167,6 +167,42 @@ function width() { return window.innerWidth; }
   ]);
 });
 
+test("sinks reached through element access and wrapped global objects are outputs", () => {
+  assert.deepEqual(messages("global-sink-access.ts", `function bracketAlert() { window['alert']('hello'); }
+function bracketFetch() { globalThis["fetch"]('/api'); }
+function templateAlert() { window[\`alert\`]('hello'); }
+function parenthesizedAlert() { (window).alert('hello'); }
+function assertedFetch() { (globalThis as typeof globalThis).fetch('/api'); }
+function nonNullFetch() { (globalThis!).fetch('/api'); }
+function bracketConsole() { window['console'].log('hello'); }
+function dynamicSink(key: string) { window[key]('hello'); }
+function dynamicGlobalKey() { window[alert]('hello'); }
+`), [
+    "1:ImplicitOutput: The function bracketAlert() uses alert, an implicit output.",
+    "2:ImplicitOutput: The function bracketFetch() uses fetch, an implicit output.",
+    "3:ImplicitOutput: The function templateAlert() uses alert, an implicit output.",
+    "4:ImplicitOutput: The function parenthesizedAlert() uses alert, an implicit output.",
+    "5:ImplicitOutput: The function assertedFetch() uses fetch, an implicit output.",
+    "6:ImplicitOutput: The function nonNullFetch() uses fetch, an implicit output.",
+    "7:ImplicitOutput: The function bracketConsole() uses console, an implicit output.",
+    "8:ImplicitInput: The function dynamicSink() reads window, an implicit input.",
+    "9:ImplicitInput: The function dynamicGlobalKey() reads window, an implicit input.",
+  ]);
+});
+
+test("nondeterministic calls through element access and wrapped globals are inputs", () => {
+  assert.deepEqual(messages("nondeterministic-access.ts", `function dateBracket() { return Date['now'](); }
+function dateParenthesized() { return (Date).now(); }
+function randomBracket() { return Math['random'](); }
+function randomParenthesized() { return (Math).random(); }
+`), [
+    "1:ImplicitInput: The function dateBracket() calls Date.now(), an implicit input.",
+    "2:ImplicitInput: The function dateParenthesized() calls Date.now(), an implicit input.",
+    "3:ImplicitInput: The function randomBracket() calls Math.random(), an implicit input.",
+    "4:ImplicitInput: The function randomParenthesized() calls Math.random(), an implicit input.",
+  ]);
+});
+
 test("every listed host object, sink, and nondeterministic call is recognised", () => {
   assert.deepEqual(messages("ambient-lists.js", `function hosts() { return [globalThis.a, localStorage.a, location.a, process.a, self.a, sessionStorage.a]; }
 function sinks(callback) { queueMicrotask(callback); requestAnimationFrame(callback); setInterval(callback, 1); }
@@ -392,5 +428,3 @@ test("closures capturing a var loop variable or loop variable declared outside c
     "5:ImplicitInput: The arrow function anonymous() reads i, an implicit input.",
   ]);
 });
-
-
