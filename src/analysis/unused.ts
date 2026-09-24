@@ -434,7 +434,8 @@ class UnusedAnalyzer {
       ts.isParenthesizedExpression(cur) ||
       ts.isAsExpression(cur) ||
       ts.isTypeAssertionExpression(cur) ||
-      ts.isNonNullExpression(cur)
+      ts.isNonNullExpression(cur) ||
+      ts.isSatisfiesExpression(cur)
     ) {
       cur = cur.expression;
     }
