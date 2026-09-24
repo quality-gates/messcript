@@ -245,6 +245,114 @@ export class StatusService {
   );
 });
 
+test("BooleanGetMethodName recognizes boolean returns from private fields and wrapped this receivers", () => {
+  const file = sourceFile(`
+class Validator {
+  #isValid = true;
+  #isActive: boolean;
+  #count = 1;
+  #label = "validator";
+  isValid = true;
+  count = 1;
+
+  getValidPrivate() {
+    return this.#isValid;
+  }
+
+  getActivePrivate() {
+    return this.#isActive;
+  }
+
+  getWrappedNonNull() {
+    return this!.isValid;
+  }
+
+  getWrappedParen() {
+    return (this).isValid;
+  }
+
+  getWrappedSatisfies() {
+    return (this satisfies any).isValid;
+  }
+
+  getWrappedTypeAssertion() {
+    return (<any>this).isValid;
+  }
+
+  getWrappedAs() {
+    return (this as any).isValid;
+  }
+
+  getWrappedNested() {
+    return ((this as any)!).isValid;
+  }
+
+  getWrappedPrivate() {
+    return (this).#isValid;
+  }
+
+  getWrappedPrivateSatisfies() {
+    return (this satisfies any).#isValid;
+  }
+
+  getWrappedElementAccess() {
+    return (this)["isValid"];
+  }
+
+  getWrappedElementAccessSatisfies() {
+    return (this satisfies any)["isValid"];
+  }
+
+  // Non-boolean private fields: should NOT be flagged
+  getCount() {
+    return this.#count;
+  }
+
+  getLabel() {
+    return this.#label;
+  }
+
+  // Non-this receivers: should NOT be flagged
+  getOtherInstance() {
+    const other = new Validator();
+    return other.isValid;
+  }
+
+  getOtherElement() {
+    const other = new Validator();
+    return other["isValid"];
+  }
+
+  // Non-get methods returning boolean private fields: should NOT be flagged
+  isValidMethod() {
+    return this.#isValid;
+  }
+
+  checkStatus() {
+    return this.#isActive;
+  }
+}
+`);
+
+  assert.deepEqual(
+    names(findBooleanGetMethodName(file)).sort(),
+    [
+      "getActivePrivate",
+      "getValidPrivate",
+      "getWrappedAs",
+      "getWrappedElementAccess",
+      "getWrappedElementAccessSatisfies",
+      "getWrappedNested",
+      "getWrappedNonNull",
+      "getWrappedParen",
+      "getWrappedPrivate",
+      "getWrappedPrivateSatisfies",
+      "getWrappedSatisfies",
+      "getWrappedTypeAssertion",
+    ],
+  );
+});
+
 test("boolean rules honor visibility, exceptions, ignore patterns, computed names, and parameter configuration", () => {
   const file = sourceFile(`
 class IgnoredService { publicFlag(flag: boolean) {} }

@@ -35,14 +35,31 @@ export function isBooleanType(type: ts.TypeNode | undefined): boolean {
   return false;
 }
 
+function unwrapExpression(node: ts.Expression): ts.Expression {
+  let current = node;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isNonNullExpression(current) ||
+    ts.isSatisfiesExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
 // messcript-disable-next-line CyclomaticComplexity NPathComplexity
 function getThisPropertyName(expression: ts.Expression): string | undefined {
-  if (ts.isPropertyAccessExpression(expression) && expression.expression.kind === ts.SyntaxKind.ThisKeyword) {
+  if (
+    ts.isPropertyAccessExpression(expression) &&
+    unwrapExpression(expression.expression).kind === ts.SyntaxKind.ThisKeyword
+  ) {
     return expression.name.text;
   }
   if (
     ts.isElementAccessExpression(expression) &&
-    expression.expression.kind === ts.SyntaxKind.ThisKeyword &&
+    unwrapExpression(expression.expression).kind === ts.SyntaxKind.ThisKeyword &&
     ts.isStringLiteral(expression.argumentExpression)
   ) {
     return expression.argumentExpression.text;
@@ -67,7 +84,7 @@ function resolveThisProperty(expression: ts.Expression, visited: Set<ts.Node>): 
     if (
       ts.isPropertyDeclaration(member) &&
       member.name &&
-      ts.isIdentifier(member.name) &&
+      (ts.isIdentifier(member.name) || ts.isPrivateIdentifier(member.name)) &&
       member.name.text === propName
     ) {
       if (visited.has(member)) {
