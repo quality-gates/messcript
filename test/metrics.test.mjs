@@ -82,6 +82,52 @@ test("LCOM4 ignores helpers and accessors while joining receiver calls", () => {
   assert.equal(findLackOfCohesionOfMethods(sourceFile, 2).length, 0);
 });
 
+test("LCOM4 unwraps non-null, satisfies, and chained asserted this receivers", () => {
+  const sourceFile = ts.createSourceFile(
+    "asserted-cohesion.ts",
+    `class ConnectedNonNull {
+  fieldA = 0;
+  fieldB = 0;
+  methodA() { this.fieldA; this!.methodB(); }
+  methodB() { this.fieldB; }
+}
+class ConnectedSatisfies {
+  fieldA = 0;
+  fieldB = 0;
+  methodA() { this.fieldA; (this satisfies ConnectedSatisfies).methodB(); }
+  methodB() { this.fieldB; }
+}
+class ConnectedNested {
+  fieldA = 0;
+  fieldB = 0;
+  methodA() { this.fieldA; (this! as any)!.methodB(); }
+  methodB() { this.fieldB; }
+}
+class DisjointNonNull {
+  fieldA = 0;
+  fieldB = 0;
+  methodA() { return this!.fieldA * 2; }
+  methodB() { return this.fieldB * 2; }
+}
+class DisjointSatisfies {
+  fieldA = 0;
+  fieldB = 0;
+  methodA() { return (this satisfies DisjointSatisfies).fieldA * 2; }
+  methodB() { return this.fieldB * 2; }
+}`,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const classes = sourceFile.statements.filter(ts.isClassDeclaration);
+  assert.deepEqual(classes.map(calculateLcom4), [1, 1, 1, 2, 2]);
+  const findings = findLackOfCohesionOfMethods(sourceFile);
+  assert.deepEqual(
+    findings.map((finding) => finding.message.match(/The class ([A-Za-z0-9_]+)/)?.[1]),
+    ["DisjointNonNull", "DisjointSatisfies"],
+  );
+});
+
 test("LCOM4 keeps static and instance state relationships separate", () => {
   const sourceFile = ts.createSourceFile(
     "static-cohesion.ts",
