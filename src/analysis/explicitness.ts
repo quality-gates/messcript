@@ -53,7 +53,9 @@ const mutatingMethods = new Set([
   "setItem", "shift", "sort", "splice", "unshift", "write", "writeln",
 ]);
 
-function isWrapper(node: ts.Node): boolean {
+type ExpressionWrapper = ts.Expression & { expression: ts.Expression };
+
+function isWrapper(node: ts.Node): node is ExpressionWrapper {
   return ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) ||
     ts.isNonNullExpression(node) || ts.isSatisfiesExpression(node);
 }
@@ -61,7 +63,15 @@ function isWrapper(node: ts.Node): boolean {
 function unwrap(node: ts.Expression): ts.Expression {
   let current = node;
   while (isWrapper(current)) {
-    current = (current as ts.ParenthesizedExpression).expression;
+    current = current.expression;
+  }
+  return current;
+}
+
+function outerExpression(node: ts.Expression): ts.Expression {
+  let current = node;
+  while (isWrapper(current.parent)) {
+    current = current.parent;
   }
   return current;
 }
@@ -286,16 +296,45 @@ function isValueReference(node: ts.Identifier): boolean {
 }
 
 // messcript-disable-next-line CyclomaticComplexity
-function ambientCallDescription(node: ts.Identifier): string | undefined {
-  const parent = node.parent;
-  if (node.text === "Date" && (ts.isNewExpression(parent) || ts.isCallExpression(parent)) && parent.expression === node) {
-    return (parent.arguments?.length ?? 0) === 0 ? `calls ${ts.isNewExpression(parent) ? "new " : ""}Date()` : undefined;
-  }
-  if (!ts.isPropertyAccessExpression(parent) || !ts.isCallExpression(parent.parent) || parent.parent.expression !== parent) {
+function dateCallDescription(expression: ts.Expression): string | undefined {
+  const parent = expression.parent;
+  if ((!ts.isNewExpression(parent) && !ts.isCallExpression(parent)) || parent.expression !== expression) {
     return undefined;
   }
-  const name = `${node.text}.${parent.name.text}`;
-  return nondeterministicCalls.has(name) ? `calls ${name}()` : undefined;
+  if ((parent.arguments?.length ?? 0) !== 0) {
+    return undefined;
+  }
+  return `calls ${ts.isNewExpression(parent) ? "new " : ""}Date()`;
+}
+
+function ambientMethodCallName(expression: ts.Expression): string | undefined {
+  const access = outerExpression(expression).parent;
+  if (!ts.isPropertyAccessExpression(access) && !ts.isElementAccessExpression(access)) {
+    return undefined;
+  }
+  const callee = outerExpression(access);
+  const call = callee.parent;
+  if (!ts.isCallExpression(call) || call.expression !== callee) {
+    return undefined;
+  }
+  const method = methodName(access);
+  const receiver = unwrap(access.expression);
+  if (!method || !ts.isIdentifier(receiver)) {
+    return undefined;
+  }
+  return `${receiver.text}.${method}`;
+}
+
+function ambientCallDescription(node: ts.Identifier): string | undefined {
+  const expression = outerExpression(node);
+  if (node.text === "Date") {
+    const dateCall = dateCallDescription(expression);
+    if (dateCall) {
+      return dateCall;
+    }
+  }
+  const name = ambientMethodCallName(expression);
+  return name && nondeterministicCalls.has(name) ? `calls ${name}()` : undefined;
 }
 
 function sinkName(node: ts.Identifier): string {

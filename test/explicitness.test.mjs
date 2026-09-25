@@ -125,6 +125,21 @@ function send(body) { return fetch("/api", { body }); }
   ]);
 });
 
+test("nondeterministic calls through wrapped receivers and literal element access are inputs", () => {
+  assert.deepEqual(messages("wrapped-ambient.ts", `function f1() { return (Date).now(); }
+function f2() { return Date["now"](); }
+function f3() { return (Math).random(); }
+function f4() { return Math["random"](); }
+function f5() { return new (Date)(); }
+`), [
+    "1:ImplicitInput: The function f1() calls Date.now(), an implicit input.",
+    "2:ImplicitInput: The function f2() calls Date.now(), an implicit input.",
+    "3:ImplicitInput: The function f3() calls Math.random(), an implicit input.",
+    "4:ImplicitInput: The function f4() calls Math.random(), an implicit input.",
+    "5:ImplicitInput: The function f5() calls new Date(), an implicit input.",
+  ]);
+});
+
 test("lexical scopes and write forms decide which references are implicit", () => {
   assert.deepEqual(messages("scopes.ts", `let count = 0;
 const config = { debug: false };
@@ -417,5 +432,3 @@ test("closures capturing a var loop variable or loop variable declared outside c
     "5:ImplicitInput: The arrow function anonymous() reads i, an implicit input.",
   ]);
 });
-
-
