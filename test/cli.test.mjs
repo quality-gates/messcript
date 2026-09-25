@@ -1457,6 +1457,39 @@ test("naming rules cover language roles and idiomatic names", () => {
   assert.equal(result.stderr, "");
 });
 
+test("BooleanGetMethodName reports satisfies returns and computed this keys", () => {
+  const path = join(scanRoot, "src", "boolean-get-232.ts");
+  writeFileSync(path, `class ValidatorService {
+  isValid = true;
+
+  getValid() {
+    return (1 === 1) satisfies boolean;
+  }
+
+  getTrue() {
+    return true satisfies boolean;
+  }
+
+  getStatus() {
+    return this[\`isValid\`];
+  }
+
+  getParenthesizedStatus() {
+    return this[("isValid")];
+  }
+}
+`);
+
+  const result = runCli([path, "text", "naming"]);
+
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /BooleanGetMethodName \[priority 4\].*getValid\(\)/);
+  assert.match(result.stdout, /BooleanGetMethodName \[priority 4\].*getTrue\(\)/);
+  assert.match(result.stdout, /BooleanGetMethodName \[priority 4\].*getStatus\(\)/);
+  assert.match(result.stdout, /BooleanGetMethodName \[priority 4\].*getParenthesizedStatus\(\)/);
+  assert.equal(result.stderr, "");
+});
+
 test("controversial rules distinguish camel-case roles and skip computed names", () => {
   const result = runCli([
     join(scanRoot, "src", "controversial.ts") + "," + join(scanRoot, "src", "controversial.js"),
