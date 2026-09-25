@@ -245,6 +245,35 @@ export class StatusService {
   );
 });
 
+test("BooleanGetMethodName recognizes satisfies boolean expressions and wrapped this element keys", () => {
+  const file = sourceFile(`
+class ValidatorService {
+  isValid = true;
+
+  getValid() {
+    return (1 === 1) satisfies boolean;
+  }
+
+  getSatisfiedTrue() {
+    return true satisfies boolean;
+  }
+
+  getStatus() {
+    return this[\`isValid\`];
+  }
+
+  getParenthesizedStatus() {
+    return this[("isValid")];
+  }
+}
+`);
+
+  assert.deepEqual(
+    names(findBooleanGetMethodName(file)).sort(),
+    ["getParenthesizedStatus", "getSatisfiedTrue", "getStatus", "getValid"],
+  );
+});
+
 test("BooleanGetMethodName recognizes boolean returns from private fields and wrapped this receivers", () => {
   const file = sourceFile(`
 class Validator {

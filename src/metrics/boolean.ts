@@ -60,9 +60,12 @@ function getThisPropertyName(expression: ts.Expression): string | undefined {
   if (
     ts.isElementAccessExpression(expression) &&
     unwrapExpression(expression.expression).kind === ts.SyntaxKind.ThisKeyword &&
-    ts.isStringLiteral(expression.argumentExpression)
+    expression.argumentExpression
   ) {
-    return expression.argumentExpression.text;
+    const argument = unwrapExpression(expression.argumentExpression);
+    if (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)) {
+      return argument.text;
+    }
   }
   return undefined;
 }
@@ -135,6 +138,9 @@ export function isBooleanExpression(
   }
   if (ts.isConditionalExpression(expression)) {
     return isBooleanExpression(expression.whenTrue, visited) && isBooleanExpression(expression.whenFalse, visited);
+  }
+  if (ts.isSatisfiesExpression(expression)) {
+    return isBooleanType(expression.type) || isBooleanExpression(expression.expression, visited);
   }
   if (ts.isAsExpression(expression) || ts.isTypeAssertionExpression(expression)) {
     return (
