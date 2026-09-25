@@ -355,11 +355,21 @@ class Validator {
 
 test("BooleanGetMethodName recognizes satisfies returns and static this element-access keys", () => {
   const file = sourceFile(`
+declare const booleanValue: boolean;
+
 class Validator {
   isValid = true;
 
   getSatisfies() {
     return (1 === 1) satisfies boolean;
+  }
+
+  getSatisfiesTypeOnly() {
+    return booleanValue satisfies boolean;
+  }
+
+  getSatisfiesNonBoolean() {
+    return "ready" satisfies unknown;
   }
 
   getTemplateKey() {
@@ -378,7 +388,7 @@ class Validator {
 
   assert.deepEqual(
     names(findBooleanGetMethodName(file)).sort(),
-    ["getParenthesizedKey", "getSatisfies", "getStringKey", "getTemplateKey"],
+    ["getParenthesizedKey", "getSatisfies", "getSatisfiesTypeOnly", "getStringKey", "getTemplateKey"],
   );
 });
 
