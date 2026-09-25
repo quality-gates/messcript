@@ -353,6 +353,35 @@ class Validator {
   );
 });
 
+test("BooleanGetMethodName recognizes satisfies returns and static this element-access keys", () => {
+  const file = sourceFile(`
+class Validator {
+  isValid = true;
+
+  getSatisfies() {
+    return (1 === 1) satisfies boolean;
+  }
+
+  getTemplateKey() {
+    return this[\`isValid\`];
+  }
+
+  getParenthesizedKey() {
+    return this[("isValid")];
+  }
+
+  getStringKey() {
+    return this["isValid"];
+  }
+}
+`);
+
+  assert.deepEqual(
+    names(findBooleanGetMethodName(file)).sort(),
+    ["getParenthesizedKey", "getSatisfies", "getStringKey", "getTemplateKey"],
+  );
+});
+
 test("boolean rules honor visibility, exceptions, ignore patterns, computed names, and parameter configuration", () => {
   const file = sourceFile(`
 class IgnoredService { publicFlag(flag: boolean) {} }
