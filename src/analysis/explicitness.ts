@@ -419,7 +419,10 @@ function flowsFor(analysis: Analysis, node: ts.Node, functionNode: FunctionLike,
  * Arguments are explicit inputs. The return value is the explicit output.
  * Each function gets one flow for each kind and description.
  */
-export function collectImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): ImplicitFlow[] {
+// messcript-disable-next-line GlobalVariable
+const flowCacheByFile = new WeakMap<ts.SourceFile, Map<boolean, readonly ImplicitFlow[]>>();
+
+function analyzeImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): ImplicitFlow[] {
   const analysis: Analysis = { scopes: new Map(), writes: new Map() };
   collectDeclarations(analysis, sourceFile);
   collectWrites(analysis, sourceFile);
@@ -446,5 +449,27 @@ export function collectImplicitFlows(sourceFile: ts.SourceFile, includeThis: boo
     ts.forEachChild(node, (child) => visit(child, childFunction));
   }
   visit(sourceFile, undefined);
+  return flows;
+}
+
+/**
+ * Find the implicit inputs and implicit outputs of each function in a source file.
+ * Arguments are explicit inputs. The return value is the explicit output.
+ * Each function gets one flow for each kind and description.
+ */
+export function collectImplicitFlows(
+  sourceFile: ts.SourceFile,
+  includeThis: boolean = false,
+): readonly ImplicitFlow[] {
+  let cachedByThis = flowCacheByFile.get(sourceFile);
+  if (!cachedByThis) {
+    cachedByThis = new Map();
+    flowCacheByFile.set(sourceFile, cachedByThis);
+  }
+  let flows = cachedByThis.get(includeThis);
+  if (!flows) {
+    flows = analyzeImplicitFlows(sourceFile, includeThis);
+    cachedByThis.set(includeThis, flows);
+  }
   return flows;
 }
