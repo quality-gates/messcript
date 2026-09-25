@@ -718,3 +718,66 @@ test("override-only constructor parameter properties are fields, not unused form
   assert.deepEqual(findingNames(findUnusedPrivateField(file)), []);
   assert.deepEqual(findingNames(findUnusedFormalParameter(file)), []);
 });
+
+test("analyzeUnused caches analysis per SourceFile instance", () => {
+  const file = sourceFile("function f(x: number) { const y = 1; return x; }");
+  const first = analyzeUnused(file);
+  const second = analyzeUnused(file);
+  assert.equal(first, second);
+
+  const anotherFile = sourceFile("function f(x: number) { const y = 1; return x; }");
+  const distinct = analyzeUnused(anotherFile);
+  assert.notEqual(first, distinct);
+});
+
+test("unused rules accept synthetic declarations and bypass cached analysis", () => {
+  const file = sourceFile("function f(unusedParam: number) { const unusedLocal = 1; }");
+  // Calling analyzeUnused populates the cache for file
+  const cached = analyzeUnused(file);
+  assert.equal(cached.length, 2);
+
+  // Passing synthetic fixture to rules bypasses cached declarations
+  const syntheticFormal = [
+    {
+      name: "syntheticParam",
+      node: file.statements[0],
+      kind: "formal",
+      context: "formal parameter syntheticParam",
+      used: false,
+    },
+  ];
+  const findings = findUnusedFormalParameter(file, syntheticFormal);
+  assert.deepEqual(findingNames(findings), ["syntheticParam"]);
+
+  // Original cached declarations are untouched
+  assert.equal(analyzeUnused(file), cached);
+});
+
+test("multi-rule unused passes share cached declarations without re-analysis", () => {
+  const file = sourceFile(`
+class Counter {
+  private unusedField = 1;
+  private unusedMethod() {}
+  calc(unusedParam: number) {
+    const unusedLocal = 2;
+    return 42;
+  }
+}
+`);
+  const fields = findUnusedPrivateField(file);
+  const methods = findUnusedPrivateMethod(file);
+  const locals = findUnusedLocalVariable(file);
+  const formals = findUnusedFormalParameter(file);
+
+  assert.deepEqual(findingNames(fields), ["unusedField"]);
+  assert.deepEqual(findingNames(methods), ["unusedMethod"]);
+  assert.deepEqual(findingNames(locals), ["unusedLocal"]);
+  assert.deepEqual(findingNames(formals), ["unusedParam"]);
+
+  // The cached declarations match the same object reference
+  const cached = analyzeUnused(file);
+  assert.equal(cached.length, 4);
+});
+
+
+

@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import { after, before, test } from "node:test";
+import ts from "typescript";
+import { collectImplicitFlows } from "../dist/analysis/explicitness.js";
 import { runCli as runCliInProcess } from "../dist/cli.js";
+import { findImplicitInput } from "../dist/rules/implicit-input.js";
+import { findImplicitOutput } from "../dist/rules/implicit-output.js";
+
 
 let workspace;
 let strictRuleset;
@@ -432,3 +437,59 @@ test("closures capturing a var loop variable or loop variable declared outside c
     "5:ImplicitInput: The arrow function anonymous() reads i, an implicit input.",
   ]);
 });
+
+test("collectImplicitFlows caches analysis per SourceFile and reuses results when options match", () => {
+  const file = ts.createSourceFile("cache-test.ts", `
+let total = 0;
+class Counter {
+  count = 0;
+  increment() {
+    this.count++;
+    total++;
+  }
+}
+`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+
+  // Calling with false caches result
+  const withoutThis1 = collectImplicitFlows(file, false);
+  const withoutThis2 = collectImplicitFlows(file, false);
+  assert.equal(withoutThis1, withoutThis2);
+
+  // Calling without second argument defaults to includeThis: false and reuses cache
+  const defaultCall = collectImplicitFlows(file);
+  assert.equal(defaultCall, withoutThis1);
+
+  // Calling with true caches separately
+  const withThis1 = collectImplicitFlows(file, true);
+  const withThis2 = collectImplicitFlows(file, true);
+  assert.equal(withThis1, withThis2);
+  assert.notEqual(withThis1, withoutThis1);
+
+  // Distinct SourceFile instances produce distinct cached entries
+  const file2 = ts.createSourceFile("cache-test-2.ts", `let total = 0; function f() { total++; }`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const file2Flows = collectImplicitFlows(file2, false);
+  assert.notEqual(file2Flows, withoutThis1);
+});
+
+test("findImplicitInput and findImplicitOutput reuse cached collectImplicitFlows results", () => {
+  const file = ts.createSourceFile("rules-cache.ts", `
+let total = 0;
+function f() {
+  total++;
+}
+`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+
+  const inputs = findImplicitInput(file);
+  const outputs = findImplicitOutput(file);
+  assert.equal(inputs.length, 1);
+  assert.match(inputs[0].message, /reads total/);
+  assert.equal(outputs.length, 1);
+  assert.match(outputs[0].message, /writes total/);
+
+  // Directly check that collectImplicitFlows(file, false) returns the same cached flows
+  const cachedFlows = collectImplicitFlows(file, false);
+  assert.equal(cachedFlows.length, 2);
+  assert.deepEqual(cachedFlows.map((f) => f.description).sort(), ["reads total", "writes total"]);
+});
+
+

@@ -596,6 +596,15 @@ class UnusedAnalyzer {
   }
 }
 
-export function analyzeUnused(sourceFile: ts.SourceFile): UnusedDeclaration[] {
-  return new UnusedAnalyzer().analyze(sourceFile);
+// messcript-disable-next-line GlobalVariable ConstantNamingConventions
+const unusedCache = new WeakMap<ts.SourceFile, readonly UnusedDeclaration[]>();
+
+export function analyzeUnused(sourceFile: ts.SourceFile): readonly UnusedDeclaration[] {
+  let result = unusedCache.get(sourceFile);
+  if (!result) {
+    result = new UnusedAnalyzer().analyze(sourceFile);
+    unusedCache.set(sourceFile, result);
+  }
+  return result;
 }
+
