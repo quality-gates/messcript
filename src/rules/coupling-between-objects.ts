@@ -35,6 +35,12 @@ function entityNameText(node: ts.EntityName | ts.Expression, sourceFile: ts.Sour
   if (ts.isIdentifier(node)) {
     return node.text;
   }
+  if (
+    ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) ||
+    ts.isNonNullExpression(node) || ts.isSatisfiesExpression(node)
+  ) {
+    return entityNameText(node.expression, sourceFile);
+  }
   if (ts.isQualifiedName(node) || ts.isPropertyAccessExpression(node)) {
     return node.getText(sourceFile);
   }

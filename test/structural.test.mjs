@@ -1193,6 +1193,23 @@ export class Outer {
   );
 });
 
+test("coupling counts constructor dependencies through wrapped and asserted expressions", () => {
+  const file = sourceFile(`
+export class Client {
+  run() {
+    new (Parenthesized)();
+    new (AsAssertion as any)();
+    new (<any>TypeAssertion)();
+    new NonNullAssertion!();
+    new (SatisfiesAssertion satisfies any)();
+  }
+}
+`);
+  const classFinding = findCouplingBetweenObjects(file, 1).find((finding) => finding.context === "class Client");
+  assert.ok(classFinding);
+  assert.match(classFinding.message, /coupling between objects value of 5/);
+});
+
 test("coupling module findings report the basename without declaration or packaging extensions", () => {
   const template = `export class Named { value: ExternalValue; }\n`;
   const cases = [
