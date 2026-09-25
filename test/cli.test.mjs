@@ -1944,6 +1944,44 @@ test("design global-variable rule reports observed mutable module and static sta
   assert.equal(result.stderr, "");
 });
 
+test("design global-variable rule detects mutations through wrapped static this receivers", () => {
+  const file = join(scanRoot, "src", "static-this-receivers.ts");
+  writeFileSync(
+    file,
+    `class ParenthesizedReceiver {
+  static parenthesizedValue = 0;
+  static mutate() { (this).parenthesizedValue += 1; }
+}
+
+class AssertedReceiver {
+  static assertedValue = 0;
+  static mutate() { (this as any).assertedValue += 1; }
+}
+
+class NonNullReceiver {
+  static nonNullValue = 0;
+  static mutate() { this!.nonNullValue += 1; }
+}
+
+class SatisfiesReceiver {
+  static satisfiesValue = 0;
+  static mutate() { (this satisfies any).satisfiesValue += 1; }
+}
+`,
+  );
+
+  const result = runCli([file, "text", "design", "--only", "GlobalVariable"]);
+
+  assert.equal(result.status, 2);
+  for (const fieldName of ["parenthesizedValue", "assertedValue", "nonNullValue", "satisfiesValue"]) {
+    assert.match(
+      result.stdout,
+      new RegExp(`Avoid using static mutable state: ${fieldName}\\. \\(context: static field ${fieldName}\\)`),
+    );
+  }
+  assert.equal(result.stderr, "");
+});
+
 test("design coupling rule measures imports, types, heritage, decorators, and require", () => {
   const result = runCli([
     join(scanRoot, "src", "coupling.ts") + "," + join(scanRoot, "src", "coupling-negative.ts"),

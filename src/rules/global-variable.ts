@@ -148,7 +148,13 @@ function collectBindings(sourceFile: ts.SourceFile): Binding[] {
 
 function unwrapExpression(node: ts.Expression): ts.Expression {
   let current = node;
-  while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current)) {
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isNonNullExpression(current) ||
+    ts.isSatisfiesExpression(current)
+  ) {
     current = current.expression;
   }
   return current;
@@ -252,7 +258,7 @@ function staticThisReceiver(
   node: ts.PropertyAccessExpression | ts.ElementAccessExpression,
   sourceFile: ts.SourceFile,
 ): { className: string; fieldName: string } | undefined {
-  if (node.expression.kind !== ts.SyntaxKind.ThisKeyword) {
+  if (unwrapExpression(node.expression).kind !== ts.SyntaxKind.ThisKeyword) {
     return undefined;
   }
   const staticContext = enclosingStaticContext(node);
