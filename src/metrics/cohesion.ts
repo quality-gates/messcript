@@ -88,7 +88,11 @@ function unwrapExpression(node: ts.Expression): ts.Expression {
 
 function literalMemberName(node: ts.Expression, sourceFile: ts.SourceFile): string | undefined {
   const expression = unwrapExpression(node);
-  if (ts.isStringLiteral(expression) || ts.isNumericLiteral(expression)) {
+  if (
+    ts.isStringLiteral(expression) ||
+    ts.isNumericLiteral(expression) ||
+    ts.isNoSubstitutionTemplateLiteral(expression)
+  ) {
     return expression.text;
   }
   return undefined;
