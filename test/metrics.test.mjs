@@ -82,6 +82,47 @@ test("LCOM4 ignores helpers and accessors while joining receiver calls", () => {
   assert.equal(findLackOfCohesionOfMethods(sourceFile, 2).length, 0);
 });
 
+test("LCOM4 recognizes no-substitution template literals in receiver element access", () => {
+  const sourceFile = ts.createSourceFile(
+    "template-cohesion.ts",
+    `class ConnectedByTemplateCall {
+  fieldA = 0;
+  fieldB = 0;
+  methodA() { this.fieldA; this[\`methodB\`](); }
+  methodB() { this.fieldB; }
+}
+class ConnectedByTemplateField {
+  shared = 0;
+  fieldA = 0;
+  fieldB = 0;
+  methodA() { this.fieldA; this[\`shared\`]; }
+  methodB() { this.fieldB; this.shared; }
+}
+class DisjointByTemplateFields {
+  fieldA = 0;
+  fieldB = 0;
+  readA() { return this[\`fieldA\`] + 1; }
+  readB() { return this[\`fieldB\`] + 1; }
+}
+class ConnectedByStringCall {
+  fieldA = 0;
+  fieldB = 0;
+  methodA() { this.fieldA; this["methodB"](); }
+  methodB() { this.fieldB; }
+}`,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const classes = sourceFile.statements.filter(ts.isClassDeclaration);
+
+  assert.deepEqual(classes.map(calculateLcom4), [1, 1, 2, 1]);
+  assert.deepEqual(
+    findLackOfCohesionOfMethods(sourceFile).map((finding) => finding.message.match(/The class ([A-Za-z0-9_]+)/)?.[1]),
+    ["DisjointByTemplateFields"],
+  );
+});
+
 test("LCOM4 unwraps non-null, satisfies, and chained asserted this receivers", () => {
   const sourceFile = ts.createSourceFile(
     "asserted-cohesion.ts",
