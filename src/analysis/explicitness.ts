@@ -384,15 +384,28 @@ function bindingFlow(binding: Binding, node: ts.Identifier, functionNode: Functi
     : undefined;
 }
 
+function thisMemberAccess(node: ts.Node): ts.PropertyAccessExpression | undefined {
+  const expression = outerExpression(node as ts.Expression);
+  const parent = expression.parent;
+  return ts.isPropertyAccessExpression(parent) && parent.expression === expression ? parent : undefined;
+}
+
+function isThisMethodCall(member: ts.PropertyAccessExpression | undefined): boolean {
+  if (!member) {
+    return false;
+  }
+  const methodExpression = outerExpression(member);
+  const parent = methodExpression.parent;
+  return ts.isCallExpression(parent) && parent.expression === methodExpression;
+}
+
 function thisFlow(node: ts.Node, write: Write | undefined): [ImplicitFlowKind, string] | undefined {
-  const parent = node.parent;
-  const member = ts.isPropertyAccessExpression(parent) && parent.expression === node ? parent : undefined;
+  const member = thisMemberAccess(node);
   const subject = member ? `this.${member.name.text}` : "this";
   if (write && !write.viaCall) {
     return ["output", `writes ${subject}`];
   }
-  const methodCall = member && ts.isCallExpression(member.parent) && member.parent.expression === member;
-  return methodCall ? undefined : ["input", `reads ${subject}`];
+  return isThisMethodCall(member) ? undefined : ["input", `reads ${subject}`];
 }
 
 function flowFor(analysis: Analysis, node: ts.Node, functionNode: FunctionLike, includeThis: boolean): [ImplicitFlowKind, string] | undefined {

@@ -300,6 +300,29 @@ test("include-this reports class state reads and writes, but not method calls or
   assert.deepEqual(messages("class-after-strict.js", classSource), []);
 });
 
+test("include-this unwraps wrapped this receivers before classifying member reads and writes", () => {
+  const findings = messages("class-wrapped-this.ts", `class Worker {
+  state = 0;
+  helper() {}
+  parenthesizedCall() { (this).helper(); }
+  nonNullCall() { this!.helper(); }
+  asCall() { (this as Worker).helper(); }
+  satisfiesCall() { (this satisfies Worker).helper(); }
+  parenthesizedWrite() { (this).state = 1; }
+  nonNullWrite() { this!.state = 1; }
+  asWrite() { (this as Worker).state = 1; }
+  satisfiesWrite() { (this satisfies Worker).state = 1; }
+}
+`, strictRuleset).map((finding) => finding.replace(/^\d+:/, ""));
+
+  assert.deepEqual(findings, [
+    "ImplicitOutput: The method parenthesizedWrite() writes this.state, an implicit output.",
+    "ImplicitOutput: The method nonNullWrite() writes this.state, an implicit output.",
+    "ImplicitOutput: The method asWrite() writes this.state, an implicit output.",
+    "ImplicitOutput: The method satisfiesWrite() writes this.state, an implicit output.",
+  ]);
+});
+
 test("the recommended typescript policy does not include the explicitness rules", () => {
   const found = messages("policy.js", `let total = 0;
 function add(amount) { total += amount; }
@@ -491,5 +514,4 @@ function f() {
   assert.equal(cachedFlows.length, 2);
   assert.deepEqual(cachedFlows.map((f) => f.description).sort(), ["reads total", "writes total"]);
 });
-
 
