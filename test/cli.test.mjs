@@ -1570,6 +1570,49 @@ export const computedNull = {
   );
 });
 
+test("DuplicatedArrayKey recognizes satisfies computed keys via CLI", () => {
+  const fixturePath = join(scanRoot, "src", "duplicated-array-key-satisfies-repro.ts");
+  writeFileSync(
+    fixturePath,
+    `export const stringKey = {
+  [("endpoint" satisfies string)]: "first",
+  endpoint: "second",
+};
+
+export const numericKey = {
+  [(42 satisfies number)]: "first",
+  42: "second",
+};
+
+export const booleanKey = {
+  [(true satisfies boolean)]: "first",
+  true: "second",
+};
+`,
+  );
+
+  const result = runCli([
+    fixturePath,
+    "json",
+    "cleancode",
+    "--only",
+    "DuplicatedArrayKey",
+  ]);
+
+  assert.equal(result.status, 2);
+  assert.equal(result.stderr, "");
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(
+    report.findings.map((f) => ({ line: f.line, message: f.message })),
+    [
+      { line: 3, message: "Duplicated array key endpoint, first declared at line 2." },
+      { line: 8, message: "Duplicated array key 42, first declared at line 7." },
+      { line: 13, message: "Duplicated array key true, first declared at line 12." },
+    ],
+  );
+});
+
 test("DuplicatedArrayKey reports computed undefined and NaN keys via CLI", () => {
   const fixturePath = join(scanRoot, "src", "duplicated-array-key-undefined-nan-repro.ts");
   writeFileSync(

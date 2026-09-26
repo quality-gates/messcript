@@ -17,7 +17,8 @@ function staticExpressionKey(node: ts.Expression): string | undefined {
     ts.isParenthesizedExpression(node) ||
     ts.isAsExpression(node) ||
     ts.isTypeAssertionExpression(node) ||
-    ts.isNonNullExpression(node)
+    ts.isNonNullExpression(node) ||
+    ts.isSatisfiesExpression(node)
   ) {
     return staticExpressionKey(node.expression);
   }
