@@ -385,13 +385,16 @@ function bindingFlow(binding: Binding, node: ts.Identifier, functionNode: Functi
 }
 
 function thisFlow(node: ts.Node, write: Write | undefined): [ImplicitFlowKind, string] | undefined {
-  const parent = node.parent;
-  const member = ts.isPropertyAccessExpression(parent) && parent.expression === node ? parent : undefined;
+  const expression = outerExpression(node as ts.Expression);
+  const parent = expression.parent;
+  const member = ts.isPropertyAccessExpression(parent) && parent.expression === expression ? parent : undefined;
   const subject = member ? `this.${member.name.text}` : "this";
   if (write && !write.viaCall) {
     return ["output", `writes ${subject}`];
   }
-  const methodCall = member && ts.isCallExpression(member.parent) && member.parent.expression === member;
+  const methodExpression = member && outerExpression(member);
+  const methodCall = methodExpression && ts.isCallExpression(methodExpression.parent) &&
+    methodExpression.parent.expression === methodExpression;
   return methodCall ? undefined : ["input", `reads ${subject}`];
 }
 
