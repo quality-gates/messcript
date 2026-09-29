@@ -16,7 +16,7 @@ function exceptionNames(): Set<string> {
 
 function unwrapExpression(node: ts.Expression): ts.Expression {
   let current = node;
-  while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current)) {
+  while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current) || ts.isSatisfiesExpression(current)) {
     current = current.expression;
   }
   return current;

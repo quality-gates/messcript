@@ -1748,6 +1748,31 @@ export class Consumer {
   assert.ok(report.findings.every((finding) => /class 'Helper' in method 'test'/.test(finding.message)));
 });
 
+test("StaticAccess reports class calls wrapped in satisfies via CLI", () => {
+  const fixturePath = join(scanRoot, "src", "static-access-satisfies.ts");
+  writeFileSync(
+    fixturePath,
+    `export class Helper {
+  static run() {}
+}
+
+export function use() {
+  (Helper satisfies typeof Helper).run();
+  (Helper.run satisfies () => void)();
+  Helper[("run" satisfies string)]();
+}
+`,
+  );
+
+  const result = runCli([fixturePath, "json", "cleancode", "--only", "StaticAccess"]);
+
+  assert.equal(result.status, 2);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(report.findings.map((finding) => finding.line), [6, 7, 8]);
+  assert.ok(report.findings.every((finding) => /class 'Helper' in method 'use'/.test(finding.message)));
+});
+
 test("DevelopmentCodeFragment reports parenthesized and asserted debug calls via CLI", () => {
   const fixturePath = join(scanRoot, "src", "development-code-fragment-repro.ts");
   writeFileSync(
