@@ -1773,6 +1773,34 @@ export function use() {
   assert.ok(report.findings.every((finding) => /class 'Helper' in method 'use'/.test(finding.message)));
 });
 
+test("BooleanArgumentFlag reports boolean initializers wrapped in satisfies via CLI", () => {
+  const fixturePath = join(scanRoot, "src", "boolean-argument-flag-satisfies.ts");
+  writeFileSync(
+    fixturePath,
+    `export function toggle(flag = false satisfies boolean) {
+  return flag;
+}
+
+export function wrapped(ready = ((true satisfies boolean)!)) {
+  return ready;
+}
+
+export function count(total = 0 satisfies number) {
+  return total;
+}
+`,
+  );
+
+  const result = runCli([fixturePath, "json", "cleancode", "--only", "BooleanArgumentFlag"]);
+
+  assert.equal(result.status, 2);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(report.findings.map((finding) => finding.line), [1, 5]);
+  assert.match(report.findings[0].message, /boolean flag argument flag/);
+  assert.match(report.findings[1].message, /boolean flag argument ready/);
+});
+
 test("DevelopmentCodeFragment reports parenthesized and asserted debug calls via CLI", () => {
   const fixturePath = join(scanRoot, "src", "development-code-fragment-repro.ts");
   writeFileSync(

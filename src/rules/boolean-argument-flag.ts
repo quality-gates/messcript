@@ -25,7 +25,8 @@ function unwrapExpression(node: ts.Expression): ts.Expression {
     ts.isParenthesizedExpression(current) ||
     ts.isAsExpression(current) ||
     ts.isTypeAssertionExpression(current) ||
-    ts.isNonNullExpression(current)
+    ts.isNonNullExpression(current) ||
+    ts.isSatisfiesExpression(current)
   ) {
     current = current.expression;
   }
