@@ -11,7 +11,7 @@ const defaultFunctions = new Set(["console.log", "console.debug", "debug.log", "
 
 function unwrapExpression(node: ts.Expression): ts.Expression {
   let current = node;
-  while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current)) {
+  while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current) || ts.isSatisfiesExpression(current)) {
     current = current.expression;
   }
   return current;
