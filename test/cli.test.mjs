@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { Writable } from "node:stream";
@@ -2568,4 +2568,22 @@ test("exit-ignore flags change only status, not report content", () => {
   assert.equal(allIgnored.status, 0);
   assert.equal(allIgnored.stdout, withErrors.stdout);
   assert.equal(allIgnored.stderr, withErrors.stderr);
+});
+
+test("a directory symlink cycle does not fail a clean scan", () => {
+  const dir = mkdtempSync(join(tmpdir(), "messcript-cycle-"));
+  try {
+    const cycle = join(dir, "cycle");
+    mkdirSync(cycle);
+    writeFileSync(join(cycle, "ok.ts"), "export const VALUE = 1;\n");
+    symlinkSync(".", join(cycle, "loop"));
+
+    const result = runCli([cycle, "text", "design"]);
+
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

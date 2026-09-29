@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -150,4 +150,52 @@ test("scriptKindForPath maps every recognized suffix", () => {
   assert.equal(scriptKindForPath("foo.cts"), ts.ScriptKind.TS);
   assert.equal(scriptKindForPath("foo.d.ts"), ts.ScriptKind.TS);
   assert.equal(scriptKindForPath("foo.txt"), ts.ScriptKind.JS);
+});
+
+test("discoverSourceFiles skips a directory symlink back to its own directory", () => {
+  const dir = mkdtempSync(join(tmpdir(), "messcript-discovery-self-cycle-"));
+  try {
+    writeFileSync(join(dir, "ok.ts"), "export const VALUE = 1;\n");
+    symlinkSync(".", join(dir, "loop"));
+
+    const result = discoverSourceFiles([dir]);
+
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(result.files, [join(dir, "ok.ts")]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("discoverSourceFiles terminates on a two-directory symlink cycle", () => {
+  const dir = mkdtempSync(join(tmpdir(), "messcript-discovery-pair-cycle-"));
+  try {
+    mkdirSync(join(dir, "a"));
+    writeFileSync(join(dir, "a", "value.ts"), "export const VALUE = 1;\n");
+    symlinkSync(join("..", "a"), join(dir, "a", "b"));
+
+    const result = discoverSourceFiles([dir]);
+
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(result.files, [join(dir, "a", "value.ts")]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("discoverSourceFiles follows a directory symlink to an unvisited directory", () => {
+  const dir = mkdtempSync(join(tmpdir(), "messcript-discovery-linked-"));
+  try {
+    mkdirSync(join(dir, "outside"));
+    mkdirSync(join(dir, "root"));
+    writeFileSync(join(dir, "outside", "shared.ts"), "export const SHARED = 1;\n");
+    symlinkSync(join("..", "outside"), join(dir, "root", "linked"));
+
+    const result = discoverSourceFiles([join(dir, "root")]);
+
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(result.files, [join(dir, "root", "linked", "shared.ts")]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
