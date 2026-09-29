@@ -626,6 +626,21 @@ export class C {
   assert.deepEqual(findingNames(findUnusedPrivateMethod(file, declarations)), ["hidden"]);
 });
 
+test("template literal this[`other`] counts as a use and does not suppress other unused privates", () => {
+  const file = sourceFile(`
+class Example {
+  private unused = 1;
+  private other = 2;
+  read() {
+    return this[\`other\`];
+  }
+}
+`);
+  const declarations = analyzeUnused(file);
+  assert.equal(declarations.find((declaration) => declaration.name === "other")?.used, true);
+  assert.deepEqual(findingNames(findUnusedPrivateField(file, declarations)), ["unused"]);
+});
+
 test("literal this[\"secret\"] counts as a use and does not suppress other unused privates", () => {
   const file = sourceFile(`
 export class C {
