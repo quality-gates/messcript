@@ -41,6 +41,9 @@ function staticExpressionKey(node: ts.Expression): string | undefined {
   if (node.kind === ts.SyntaxKind.NullKeyword) {
     return "null";
   }
+  if (ts.isVoidExpression(node)) {
+    return "undefined";
+  }
   if (ts.isIdentifier(node)) {
     if (node.text === "undefined") {
       return "undefined";

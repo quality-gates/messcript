@@ -466,6 +466,24 @@ const obj = {
   );
 });
 
+test("DuplicatedArrayKey treats void expression keys as undefined", () => {
+  const file = sourceFile(`
+export const value = {
+  [void 0]: 1,
+  undefined: 2,
+  [void "x"]: 3,
+};
+`);
+  const findings = findDuplicatedArrayKey(file);
+  assert.deepEqual(
+    findings.map((f) => ({ line: f.line, message: f.message })),
+    [
+      { line: 4, message: "Duplicated array key undefined, first declared at line 3." },
+      { line: 5, message: 'Duplicated array key [void "x"], first declared at line 3.' },
+    ],
+  );
+});
+
 test("DuplicatedArrayKey unwraps asserted and non-null computed keys", () => {
   const file = sourceFile(`
 export const config = {
