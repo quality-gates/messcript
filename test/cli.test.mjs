@@ -1784,6 +1784,27 @@ test("DevelopmentCodeFragment reports parenthesized and asserted debug calls via
   assert.ok(report.findings.every((finding) => /calls the typical debug function console\.log\(\)/.test(finding.message)));
 });
 
+test("DevelopmentCodeFragment reports debug calls wrapped in satisfies via CLI", () => {
+  const fixturePath = join(scanRoot, "src", "development-code-fragment-satisfies.ts");
+  writeFileSync(
+    fixturePath,
+    `export function debug() {
+  (console satisfies Console).log("x");
+  (console.log satisfies (...data: unknown[]) => void)("x");
+  console[("log" satisfies string)]("x");
+}
+`,
+  );
+
+  const result = runCli([fixturePath, "json", "design", "--only", "DevelopmentCodeFragment"]);
+
+  assert.equal(result.status, 2);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(report.findings.map((finding) => finding.line), [2, 3, 4]);
+  assert.ok(report.findings.every((finding) => /calls the typical debug function console\.log\(\)/.test(finding.message)));
+});
+
 test("CyclomaticComplexity reports callables whose complexity reaches the configured threshold via CLI", () => {
   const fixturePath = join(scanRoot, "src", "cyclomatic-threshold-repro.ts");
   writeFileSync(
