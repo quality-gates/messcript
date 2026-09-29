@@ -2012,6 +2012,32 @@ test("CountInLoopExpression reports parenthesized and asserted count properties"
   assert.ok(report.findings.every((finding) => finding.ruleName === "CountInLoopExpression"));
 });
 
+test("CountInLoopExpression reports count names wrapped in satisfies", () => {
+  const fixturePath = join(scanRoot, "src", "count-satisfies.ts");
+  writeFileSync(
+    fixturePath,
+    `export function scan(items: string[], i: number) {
+  for (let index = 0; index < items["length" satisfies "length"]; index++) {}
+  while (i < items[("size" satisfies string)]) { i++; }
+  do { i++; } while (i < items[(("count" satisfies string)!)]);
+  while (i < items[("ready" satisfies string)]) { i++; }
+}
+`,
+  );
+
+  const result = runCli([fixturePath, "json", "design", "--only", "CountInLoopExpression"]);
+
+  assert.equal(result.status, 2);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(report.findings.map((finding) => finding.line), [2, 3, 4]);
+  assert.deepEqual(report.findings.map((finding) => finding.message), [
+    "Avoid using length in for loops.",
+    "Avoid using size in while loops.",
+    "Avoid using count in do loops.",
+  ]);
+});
+
 test("design rules cover executable control flow and keep goto inert", () => {
   const result = runCli([
     join(scanRoot, "src", "design.js") + "," + join(scanRoot, "src", "design.ts"),
