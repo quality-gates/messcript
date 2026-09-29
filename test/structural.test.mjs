@@ -114,6 +114,29 @@ function catches() {
   developmentProperties.markers = "TODO,FIXME,HACK";
 });
 
+test("StaticAccess sees through satisfies wrappers like the unwrapped call", () => {
+  const plain = findStaticAccess(sourceFile(`class Other { static run() {} }
+function use() {
+  Other.run();
+}
+`));
+  const wrapped = findStaticAccess(sourceFile(`class Other { static run() {} }
+function use() {
+  (Other satisfies typeof Other).run();
+}
+`));
+  const nested = findStaticAccess(sourceFile(`class Other { static run() {} }
+function use() {
+  ((Other satisfies typeof Other)!).run();
+}
+`));
+  const location = (finding) => ({ line: finding.line, column: finding.column, message: finding.message });
+
+  assert.equal(plain.length, 1);
+  assert.deepEqual(wrapped.map(location), plain.map(location));
+  assert.deepEqual(nested.map(location), plain.map(location));
+});
+
 test("ElseExpression uses unquoted string-literal method names", () => {
   const file = sourceFile(`
 class Service {
