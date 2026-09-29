@@ -7,10 +7,16 @@ export const ruleName = "EmptyCatchBlock";
 export const priority = 2;
 export const properties = {} as const;
 
+function isEmptyBlock(block: ts.Block): boolean {
+  return block.statements.every(
+    (statement) => ts.isEmptyStatement(statement) || (ts.isBlock(statement) && isEmptyBlock(statement)),
+  );
+}
+
 export function findEmptyCatchBlock(sourceFile: ts.SourceFile): Finding[] {
   const findings: Finding[] = [];
   function visit(node: ts.Node): void {
-    if (ts.isCatchClause(node) && node.block.statements.length === 0) {
+    if (ts.isCatchClause(node) && isEmptyBlock(node.block)) {
       const context = functionContextFor(node, sourceFile);
       findings.push(
         createDesignFinding(

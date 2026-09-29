@@ -466,6 +466,33 @@ const obj = {
   );
 });
 
+test("EmptyCatchBlock treats empty statements and empty blocks as empty", () => {
+  const file = sourceFile(`
+function run() {
+  try {
+  } catch {
+    ;
+  }
+  try {
+  } catch {
+    {}
+  }
+  try {
+  } catch {
+    { ; {} }
+  }
+  try {
+  } catch {
+    { log(); }
+  }
+}
+`);
+  assert.deepEqual(
+    findEmptyCatchBlock(file).map((f) => f.line),
+    [4, 8, 12],
+  );
+});
+
 test("DuplicatedArrayKey treats void expression keys as undefined", () => {
   const file = sourceFile(`
 export const value = {
