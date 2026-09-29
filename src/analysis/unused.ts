@@ -478,7 +478,7 @@ class UnusedAnalyzer {
       const receiver = this.unwrapExpression(node.expression);
       if (receiver.kind === ts.SyntaxKind.ThisKeyword && node.argumentExpression) {
         const key = this.unwrapExpression(node.argumentExpression);
-        if (ts.isStringLiteral(key)) {
+        if (ts.isStringLiteralLike(key)) {
           this.markPrivate(scope, key.text, node);
         } else {
           this.markClassUncertain(this.currentClass(scope));
