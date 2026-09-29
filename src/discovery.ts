@@ -82,6 +82,7 @@ function addSourceFiles(
   files: Set<string>,
   errors: DiscoveryError[],
   options: Required<DiscoveryOptions>,
+  visitedDirectories: Set<string>,
 ): void {
   if (isExcluded(path, options.exclusions) || (options.ignoreTests && isTestPath(path, rootPath))) {
     return;
@@ -108,6 +109,14 @@ function addSourceFiles(
     return;
   }
 
+  // A directory symlink back to a walked directory would otherwise be followed
+  // until ELOOP. statSync follows links, so device and inode name the target.
+  const directoryIdentity = `${fileInfo.dev}:${fileInfo.ino}`;
+  if (visitedDirectories.has(directoryIdentity)) {
+    return;
+  }
+  visitedDirectories.add(directoryIdentity);
+
   let entries: string[];
   try {
     entries = readdirSync(path);
@@ -124,13 +133,14 @@ function addSourceFiles(
     if (ignoredDirectoryNames.has(entry.toLowerCase())) {
       continue;
     }
-    addSourceFiles(entryPath, rootPath, files, errors, options);
+    addSourceFiles(entryPath, rootPath, files, errors, options, visitedDirectories);
   }
 }
 
 export function discoverSourceFiles(inputPaths: readonly string[], discoveryOptions: DiscoveryOptions = {}): DiscoveryResult {
   const files = new Set<string>();
   const errors: DiscoveryError[] = [];
+  const visitedDirectories = new Set<string>();
   const options: Required<DiscoveryOptions> = {
     suffixes: normalizedSuffixes(discoveryOptions.suffixes ?? sourceSuffixes),
     exclusions: (discoveryOptions.exclusions ?? []).map((path) => resolve(path)),
@@ -142,7 +152,7 @@ export function discoverSourceFiles(inputPaths: readonly string[], discoveryOpti
     if (!existsSync(path)) {
       throw new Error(`Input path does not exist: ${inputPath}`);
     }
-    addSourceFiles(path, path, files, errors, options);
+    addSourceFiles(path, path, files, errors, options, visitedDirectories);
   }
 
   return {
