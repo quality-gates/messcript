@@ -1911,6 +1911,30 @@ export function asAnyAbort() {
   assert.ok(report.findings.every((finding) => finding.ruleName === "ExitExpression"));
 });
 
+test("ExitExpression reports exit calls wrapped in satisfies", () => {
+  const satisfiesExitSource = `export function satisfiesReceiver() {
+  (process satisfies NodeJS.Process).exit(1);
+}
+export function satisfiesCallee() {
+  (process.exit satisfies (code?: number) => never)(1);
+}
+export function satisfiesElementName() {
+  process[("exit" satisfies string)](1);
+}
+export function satisfiesDeno() {
+  (Deno satisfies unknown).exit(1);
+}
+`;
+  writeFileSync(join(scanRoot, "src", "exit-satisfies.ts"), satisfiesExitSource);
+  const result = runCli([join(scanRoot, "src", "exit-satisfies.ts"), "json", "design", "--only", "ExitExpression"]);
+
+  assert.equal(result.status, 2);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(report.findings.map((finding) => finding.line), [2, 5, 8, 11]);
+  assert.ok(report.findings.every((finding) => finding.ruleName === "ExitExpression"));
+});
+
 test("CountInLoopExpression reports parenthesized and asserted count properties", () => {
   const assertedCountSource = `export function iterate(arr: any[], i: number) {
   for (let index = 0; index < arr[("length")]; index++) {}
