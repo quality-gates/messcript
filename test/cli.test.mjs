@@ -2461,6 +2461,48 @@ test("suppression scanning ignores directive-looking strings and scans template 
   assert.equal(strict.stderr, "");
 });
 
+test("source comments distinguish JSX text from real comments for rules and suppressions", () => {
+  const backtick = join(scanRoot, "src", "comment-backtick.tsx");
+  const renderedMarker = join(scanRoot, "src", "rendered-marker.tsx");
+  const renderedDirective = join(scanRoot, "src", "rendered-directive.tsx");
+  const jsxMarker = join(scanRoot, "src", "jsx-marker.tsx");
+  const jsxDirective = join(scanRoot, "src", "jsx-directive.tsx");
+  writeFileSync(backtick, [
+    "export const Tip = () => <p>Press ` to open the console</p>;",
+    "",
+    "// messcript-disable-next-line ShortVariable",
+    "export const q = 1;",
+    "// TODO: real marker",
+  ].join("\n"));
+  writeFileSync(renderedMarker, "export const Tip = () => <p>Run `npm ci` first. // TODO is shown to users</p>;\n");
+  writeFileSync(renderedDirective, [
+    "export const Tip = () => <p>// messcript-disable-next-line ShortVariable</p>;",
+    "export const q = 1;",
+  ].join("\n"));
+  writeFileSync(jsxMarker, "export const Tip = () => <div>{/* TODO */}</div>;\n");
+  writeFileSync(jsxDirective, [
+    "export const Tip = () => <div>{/* messcript-disable-next-line ShortVariable */}</div>;",
+    "export const q = 1;",
+  ].join("\n"));
+
+  const backtickResult = runCli([backtick, "text", "naming,design"]);
+  assert.equal(backtickResult.status, 2);
+  assert.doesNotMatch(backtickResult.stdout, /comment-backtick\.tsx:4:14: ShortVariable/);
+  assert.match(backtickResult.stdout, /comment-backtick\.tsx:5:1: DevelopmentCodeFragment \[priority 2\] Development-only marker found in production source\. \(context: module\)/);
+
+  const renderedMarkerResult = runCli([renderedMarker, "text", "naming,design"]);
+  assert.doesNotMatch(renderedMarkerResult.stdout, /DevelopmentCodeFragment/);
+
+  const renderedDirectiveResult = runCli([renderedDirective, "text", "naming,design"]);
+  assert.match(renderedDirectiveResult.stdout, /rendered-directive\.tsx:2:14: ShortVariable/);
+
+  const jsxMarkerResult = runCli([jsxMarker, "text", "naming,design"]);
+  assert.match(jsxMarkerResult.stdout, /jsx-marker\.tsx:1:\d+: DevelopmentCodeFragment/);
+
+  const jsxDirectiveResult = runCli([jsxDirective, "text", "naming,design"]);
+  assert.doesNotMatch(jsxDirectiveResult.stdout, /jsx-directive\.tsx:2:14: ShortVariable/);
+});
+
 test("a missing input is an operational error", () => {
   const result = runCli([join(fixturesRoot, "missing.ts"), "text", "codesize"]);
 
