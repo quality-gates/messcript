@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { sourceComments } from "./ast/source-comments";
 import type { Finding } from "./finding";
 import { locate } from "./location";
 
@@ -35,45 +36,13 @@ function parseDirective(token: string, line: number): Directive | undefined {
 
 // messcript-disable-next-line CyclomaticComplexity
 function directivesIn(sourceFile: ts.SourceFile): readonly Directive[] {
-  const scanner = ts.createScanner(
-    ts.ScriptTarget.Latest,
-    false,
-    ts.LanguageVariant.JSX,
-    sourceFile.getFullText(),
-  );
   const directives: Directive[] = [];
-  const templateExpressionDepths: number[] = [];
-  let token = scanner.scan();
-  while (token !== ts.SyntaxKind.EndOfFileToken) {
-    if (token === ts.SyntaxKind.SingleLineCommentTrivia || token === ts.SyntaxKind.MultiLineCommentTrivia) {
-      const position = locate(sourceFile, scanner.getTokenPos());
-      const directive = parseDirective(scanner.getTokenText(), position.line + 1);
-      if (directive) {
-        directives.push(directive);
-      }
+  for (const comment of sourceComments(sourceFile)) {
+    const position = locate(sourceFile, comment.pos);
+    const directive = parseDirective(comment.text, position.line + 1);
+    if (directive) {
+      directives.push(directive);
     }
-
-    if (token === ts.SyntaxKind.TemplateHead) {
-      templateExpressionDepths.push(1);
-    } else if (templateExpressionDepths.length > 0) {
-      if (token === ts.SyntaxKind.SlashToken || token === ts.SyntaxKind.SlashEqualsToken) {
-        token = scanner.reScanSlashToken();
-      }
-      const depth = templateExpressionDepths.length - 1;
-      if (token === ts.SyntaxKind.OpenBraceToken) {
-        templateExpressionDepths[depth] += 1;
-      } else if (token === ts.SyntaxKind.CloseBraceToken) {
-        templateExpressionDepths[depth] -= 1;
-        if (templateExpressionDepths[depth] === 0) {
-          templateExpressionDepths.pop();
-          token = scanner.reScanTemplateToken(false);
-          if (token === ts.SyntaxKind.TemplateMiddle) {
-            templateExpressionDepths.push(1);
-          }
-        }
-      }
-    }
-    token = scanner.scan();
   }
   return directives;
 }
