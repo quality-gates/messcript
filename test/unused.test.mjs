@@ -796,3 +796,22 @@ class Counter {
 
 
 
+
+test("Unused rules do not treat JSX attribute names as references", () => {
+  const file = ts.createSourceFile(
+    "render.tsx",
+    `
+function render(disabled: boolean, label: string) {
+  const title = "Welcome";
+  const id = "used";
+  return <button disabled={false} title="Static" data-id={id} aria-label>{label}</button>;
+}
+`,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+
+  assert.deepEqual(findingNames(findUnusedFormalParameter(file)), ["disabled"]);
+  assert.deepEqual(findingNames(findUnusedLocalVariable(file)), ["title"]);
+});

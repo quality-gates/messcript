@@ -570,6 +570,12 @@ class UnusedAnalyzer {
       this.visitReferences(node.initializer);
       return;
     }
+    if (ts.isJsxAttribute(node)) {
+      if (node.initializer) {
+        this.visitReferences(node.initializer);
+      }
+      return;
+    }
     if (ts.isTypeParameterDeclaration(node)) {
       if (node.constraint) {
         this.visitReferences(node.constraint);
