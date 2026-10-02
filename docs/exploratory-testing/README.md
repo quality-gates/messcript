@@ -6,6 +6,7 @@ exercised, and links the issues it filed. Evidence for a report lives under
 
 | Date | Version | Report | Issues filed |
 |---|---|---|---|
+| 2026-10-03 | 0.1.15 (`c920402`) | [2026-10-03-messcript.md](2026-10-03-messcript.md) | [#281](https://github.com/quality-gates/messcript/issues/281), [#282](https://github.com/quality-gates/messcript/issues/282), [#283](https://github.com/quality-gates/messcript/issues/283), [#284](https://github.com/quality-gates/messcript/issues/284), [#285](https://github.com/quality-gates/messcript/issues/285) |
 | 2026-09-26 | 0.1.13 | [2026-09-26-messcript.md](2026-09-26-messcript.md) | [#240](https://github.com/quality-gates/messcript/issues/240), [#241](https://github.com/quality-gates/messcript/issues/241), [#242](https://github.com/quality-gates/messcript/issues/242) |
 | 2026-09-23 | 0.1.11 | [2026-09-23-messcript.md](2026-09-23-messcript.md) | [#215](https://github.com/quality-gates/messcript/issues/215), [#216](https://github.com/quality-gates/messcript/issues/216), [#217](https://github.com/quality-gates/messcript/issues/217) |
 | 2026-09-23 | 0.1.10 + `feat/explicitness-ruleset` | [2026-09-23-explicitness.md](2026-09-23-explicitness.md) | None (fixed in branch) |
