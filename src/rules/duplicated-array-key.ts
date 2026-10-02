@@ -51,10 +51,13 @@ function staticExpressionKey(node: ts.Expression): string | undefined {
     if (node.text === "NaN") {
       return "NaN";
     }
+    if (node.text === "Infinity") {
+      return "Infinity";
+    }
   }
   if (ts.isPrefixUnaryExpression(node) && (node.operator === ts.SyntaxKind.PlusToken || node.operator === ts.SyntaxKind.MinusToken)) {
     const value = staticExpressionKey(node.operand);
-    if (value === undefined || !/^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value)) {
+    if (Number.isNaN(Number(value))) {
       return undefined;
     }
     return String(node.operator === ts.SyntaxKind.MinusToken ? -Number(value) : Number(value));
