@@ -100,6 +100,27 @@ function resolveThisProperty(expression: ts.Expression, visited: Set<ts.Node>): 
         return true;
       }
     }
+    if (ts.isConstructorDeclaration(member)) {
+      for (const parameter of member.parameters) {
+        if (
+          !ts.isParameterPropertyDeclaration(parameter, member) ||
+          !ts.isIdentifier(parameter.name) ||
+          parameter.name.text !== propName
+        ) {
+          continue;
+        }
+        if (visited.has(parameter)) {
+          return false;
+        }
+        visited.add(parameter);
+        if (isBooleanType(parameter.type)) {
+          return true;
+        }
+        if (parameter.initializer && isBooleanExpression(parameter.initializer, visited)) {
+          return true;
+        }
+      }
+    }
   }
   return false;
 }
