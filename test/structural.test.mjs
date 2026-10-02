@@ -1366,6 +1366,14 @@ test("global-variable reports mutations through parenthesized and asserted expre
     ["parenthesized method key", "const items: number[] = []; items[(\"push\")](1);", "global variable items"],
     ["parenthesized static update", "class Storage { static count = 0; } (Storage.count)++;", "static field count"],
     ["parenthesized static receiver", "class Storage { static entries: string[] = []; } (Storage.entries).push(\"val\");", "static field entries"],
+    ["parenthesized static class receiver", "class Counter { static count = 0; } (Counter).count = 1;", "static field count"],
+    ["non-null static class receiver", "class Counter { static count = 0; } Counter!.count = 1;", "static field count"],
+    ["asserted static class receiver", "class Counter { static count = 0; } (Counter as any).count = 1;", "static field count"],
+    ["satisfies static class receiver", "class Counter { static count = 0; } (Counter satisfies typeof Counter).count = 1;", "static field count"],
+    ["parenthesized static element receiver", "class Counter { static count = 0; } (Counter)[\"count\"] += 1;", "static field count"],
+    ["parenthesized module property receiver", "const user = { name: \"Alice\" }; (user).name = \"Bob\";", "global variable user"],
+    ["asserted module property receiver", "const user = { name: \"Alice\" }; (user as any).name = \"Bob\";", "global variable user"],
+    ["parenthesized module nested receiver", "const user = { items: [] as number[] }; (user).items.push(1);", "global variable user"],
   ];
 
   for (const [name, source, context] of cases) {

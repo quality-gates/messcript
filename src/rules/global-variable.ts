@@ -242,8 +242,9 @@ function propertyName(node: ts.PropertyAccessExpression | ts.ElementAccessExpres
 }
 
 function receiverName(node: ts.Expression): string | undefined {
-  if (ts.isIdentifier(node)) {
-    return node.text;
+  const receiver = unwrapExpression(node);
+  if (ts.isIdentifier(receiver)) {
+    return receiver.text;
   }
   return undefined;
 }
