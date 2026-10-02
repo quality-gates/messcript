@@ -405,6 +405,40 @@ const reversed = {
   );
 });
 
+test("DuplicatedArrayKey detects computed Infinity keys", () => {
+  const file = sourceFile(`
+const object = {
+  Infinity: 1,
+  [Infinity]: 2,
+  [+Infinity]: 3,
+  "-Infinity": 4,
+  [-Infinity]: 5,
+  [-(-Infinity)]: 6,
+  [1e999]: 7,
+};
+const coerced = {
+  [-"1"]: 1,
+  [-1]: 2,
+  NaN: 3,
+  [-true]: 4,
+  [-null]: 5,
+  [-"NaN"]: 6,
+};
+`);
+  const findings = findDuplicatedArrayKey(file);
+  assert.deepEqual(
+    findings.map((f) => ({ line: f.line, message: f.message })),
+    [
+      { line: 4, message: "Duplicated array key [Infinity], first declared at line 3." },
+      { line: 5, message: "Duplicated array key [+Infinity], first declared at line 3." },
+      { line: 7, message: "Duplicated array key [-Infinity], first declared at line 6." },
+      { line: 8, message: "Duplicated array key [-(-Infinity)], first declared at line 3." },
+      { line: 9, message: "Duplicated array key [1e999], first declared at line 3." },
+      { line: 13, message: "Duplicated array key [-1], first declared at line 12." },
+    ],
+  );
+});
+
 test("DuplicatedArrayKey preserves original declaration line for third and subsequent duplicate keys", () => {
   const file = sourceFile(`
 const config = {
