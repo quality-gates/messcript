@@ -300,6 +300,26 @@ test("include-this reports class state reads and writes, but not method calls or
   assert.deepEqual(messages("class-after-strict.js", classSource), []);
 });
 
+test("include-this recognizes element-access members on this", () => {
+  assert.deepEqual(messages("class-element-this.ts", `class Worker {
+  count = 0;
+  format() {}
+  callString() { this["format"](); }
+  callTemplate() { this[\`format\`](); }
+  callDynamic(key: string) { this[key](); }
+  readString() { return this["count"]; }
+  readTemplate() { return this[\`count\`]; }
+  writeString() { this["count"] = 1; }
+  writeTemplate() { this[\`count\`] = 2; }
+}
+`, strictRuleset), [
+    "7:ImplicitInput: The method readString() reads this.count, an implicit input.",
+    "8:ImplicitInput: The method readTemplate() reads this.count, an implicit input.",
+    "9:ImplicitOutput: The method writeString() writes this.count, an implicit output.",
+    "10:ImplicitOutput: The method writeTemplate() writes this.count, an implicit output.",
+  ]);
+});
+
 test("include-this unwraps wrapped this receivers before classifying member reads and writes", () => {
   const findings = messages("class-wrapped-this.ts", `class Worker {
   state = 0;
