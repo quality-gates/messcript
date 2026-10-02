@@ -384,13 +384,25 @@ function bindingFlow(binding: Binding, node: ts.Identifier, functionNode: Functi
     : undefined;
 }
 
-function thisMemberAccess(node: ts.Node): ts.PropertyAccessExpression | undefined {
+type ThisMemberAccess = ts.PropertyAccessExpression | ts.ElementAccessExpression;
+
+function thisMemberAccess(node: ts.Node): ThisMemberAccess | undefined {
   const expression = outerExpression(node as ts.Expression);
   const parent = expression.parent;
-  return ts.isPropertyAccessExpression(parent) && parent.expression === expression ? parent : undefined;
+  return (ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) && parent.expression === expression
+    ? parent
+    : undefined;
 }
 
-function isThisMethodCall(member: ts.PropertyAccessExpression | undefined): boolean {
+function thisMemberName(member: ThisMemberAccess): string | undefined {
+  if (ts.isPropertyAccessExpression(member)) {
+    return member.name.text;
+  }
+  const argument = unwrap(member.argumentExpression);
+  return ts.isStringLiteralLike(argument) ? argument.text : undefined;
+}
+
+function isThisMethodCall(member: ThisMemberAccess | undefined): boolean {
   if (!member) {
     return false;
   }
@@ -401,7 +413,8 @@ function isThisMethodCall(member: ts.PropertyAccessExpression | undefined): bool
 
 function thisFlow(node: ts.Node, write: Write | undefined): [ImplicitFlowKind, string] | undefined {
   const member = thisMemberAccess(node);
-  const subject = member ? `this.${member.name.text}` : "this";
+  const memberName = member && thisMemberName(member);
+  const subject = memberName !== undefined ? `this.${memberName}` : "this";
   if (write && !write.viaCall) {
     return ["output", `writes ${subject}`];
   }
