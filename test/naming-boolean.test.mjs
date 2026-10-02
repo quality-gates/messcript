@@ -353,6 +353,40 @@ class Validator {
   );
 });
 
+test("BooleanGetMethodName recognizes boolean constructor parameter properties", () => {
+  const file = sourceFile(`
+class BaseService {
+  overrideMe: boolean;
+}
+
+class WorkerService {
+  constructor(
+    public active: boolean,
+    private ready: boolean,
+    protected enabled: boolean,
+    readonly available = false,
+    public count = 1,
+  ) {}
+
+  getActive() { return this.active; }
+  getReady() { return this.ready; }
+  getEnabled() { return this.enabled; }
+  getAvailable() { return this.available; }
+  getCount() { return this.count; }
+}
+
+class OverridingWorkerService extends BaseService {
+  constructor(public override overrideMe: boolean) { super(); }
+  getOverrideMe() { return this.overrideMe; }
+}
+`);
+
+  assert.deepEqual(
+    names(findBooleanGetMethodName(file)).sort(),
+    ["getActive", "getAvailable", "getEnabled", "getOverrideMe", "getReady"],
+  );
+});
+
 test("BooleanGetMethodName recognizes satisfies returns and static this element-access keys", () => {
   const file = sourceFile(`
 declare const booleanValue: boolean;
