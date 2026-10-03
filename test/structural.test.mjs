@@ -184,6 +184,25 @@ export class Example {
   assert.ok(findings.every((finding) => /The method module uses an else expression/.test(finding.message)));
 });
 
+test("DevelopmentCodeFragment matches comment markers as whole words only", () => {
+  const file = sourceFile(`// Post the update to Mastodon.
+export const A = 1;
+// Remove the shackles from the queue.
+export const B = 2;
+/* Whack the hackathon on Hacker News. */
+export const C = 3;
+// TODO: real marker
+export const D = 4;
+// todo lowercase
+/* FIXME(x) */
+// see HACK.
+`);
+  assert.deepEqual(findDevelopmentCodeFragment(file).map((finding) => finding.line), [7, 9, 10, 11]);
+  assert.equal(findDevelopmentCodeFragment(sourceFile("// mark-TODO-here\n"), "", "TODO").length, 1);
+  assert.equal(findDevelopmentCodeFragment(sourceFile("// a.b\n// axb\n"), "", "a.b").length, 1);
+  assert.deepEqual(findDevelopmentCodeFragment(sourceFile("// TODO\n"), "", " , "), []);
+});
+
 test("DevelopmentCodeFragment finds marker comments after template expressions with interpolation", () => {
   const file = sourceFile(`
 const name = "world";

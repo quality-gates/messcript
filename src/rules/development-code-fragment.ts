@@ -42,15 +42,19 @@ function configuredFunctions(value: string): Set<string> {
   return new Set(value.split(",").map((part) => part.trim().toLowerCase()).filter(Boolean));
 }
 
+function markerPattern(markers: readonly string[]): RegExp {
+  const alternatives = markers.map((marker) => marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return new RegExp(`(?<![\\p{L}\\p{N}_])(?:${alternatives.join("|")})(?![\\p{L}\\p{N}_])`, "iu");
+}
+
 function commentFindings(sourceFile: ts.SourceFile, markers: readonly string[]): Finding[] {
   if (markers.length === 0) {
     return [];
   }
+  const pattern = markerPattern(markers);
   const findings: Finding[] = [];
   for (const comment of sourceComments(sourceFile)) {
-    const text = comment.text.toLowerCase();
-    const marker = markers.find((candidate) => text.includes(candidate.toLowerCase()));
-    if (marker) {
+    if (pattern.test(comment.text)) {
       findings.push(
         createDesignFindingAt(
           sourceFile,
