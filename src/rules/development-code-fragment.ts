@@ -1,5 +1,6 @@
 // messcript-disable ConstantNamingConventions
 import ts from "typescript";
+import { isGlobalObject } from "../ast/global-object";
 import { sourceComments } from "../ast/source-comments";
 import type { Finding } from "../finding";
 import { createDesignFinding, createDesignFindingAt, functionContextFor } from "./design-finding";
@@ -18,22 +19,28 @@ function unwrapExpression(node: ts.Expression): ts.Expression {
   return current;
 }
 
+function memberName(receiver: ts.Expression, name: string): string | undefined {
+  if (isGlobalObject(unwrapExpression(receiver))) {
+    return name;
+  }
+  const parent = callName(receiver);
+  return parent ? `${parent}.${name}` : undefined;
+}
+
 function callName(node: ts.Expression): string | undefined {
   const unwrapped = unwrapExpression(node);
   if (ts.isIdentifier(unwrapped)) {
     return unwrapped.text;
   }
   if (ts.isPropertyAccessExpression(unwrapped)) {
-    const parent = callName(unwrapped.expression);
-    return parent ? `${parent}.${unwrapped.name.text}` : undefined;
+    return memberName(unwrapped.expression, unwrapped.name.text);
   }
   if (ts.isElementAccessExpression(unwrapped)) {
     const argument = unwrapExpression(unwrapped.argumentExpression);
     if (!ts.isStringLiteral(argument) && !ts.isNoSubstitutionTemplateLiteral(argument)) {
       return undefined;
     }
-    const parent = callName(unwrapped.expression);
-    return parent ? `${parent}.${argument.text}` : undefined;
+    return memberName(unwrapped.expression, argument.text);
   }
   return undefined;
 }
