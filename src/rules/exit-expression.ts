@@ -1,6 +1,7 @@
 // messcript-disable ConstantNamingConventions
 import ts from "typescript";
 import type { Finding } from "../finding";
+import { isGlobalObject } from "../ast/global-object";
 import { isLocallyBound } from "../ast/local-bindings";
 import { createDesignFinding, enclosingFunction, functionContextFor } from "./design-finding";
 
@@ -32,6 +33,17 @@ function propertyName(node: ts.Expression): string | undefined {
   return undefined;
 }
 
+function receiverName(node: ts.Expression): string | undefined {
+  const receiver = unwrapParenthesized(node);
+  if (ts.isIdentifier(receiver)) {
+    return receiver.text;
+  }
+  if ((ts.isPropertyAccessExpression(receiver) || ts.isElementAccessExpression(receiver)) && isGlobalObject(unwrapParenthesized(receiver.expression))) {
+    return propertyName(receiver);
+  }
+  return undefined;
+}
+
 function isExitCall(node: ts.CallExpression): boolean {
   const callee = unwrapParenthesized(node.expression);
   if (ts.isIdentifier(callee)) {
@@ -40,12 +52,8 @@ function isExitCall(node: ts.CallExpression): boolean {
   if (!ts.isPropertyAccessExpression(callee) && !ts.isElementAccessExpression(callee)) {
     return false;
   }
-  const receiver = unwrapParenthesized(callee.expression);
-  if (!ts.isIdentifier(receiver)) {
-    return false;
-  }
-  const property = propertyName(callee);
-  return property !== undefined && exitTargets.has(`${receiver.text}.${property}`);
+  // A missing receiver or property renders as "undefined", which no exit target contains.
+  return exitTargets.has(`${receiverName(callee.expression)}.${propertyName(callee)}`);
 }
 
 export function findExitExpression(sourceFile: ts.SourceFile): Finding[] {

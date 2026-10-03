@@ -1161,6 +1161,35 @@ export function run() {
   assert.deepEqual(findExitExpression(imported).map((finding) => finding.context), ["function run()"]);
 });
 
+test("exit-expression and development-code-fragment see calls through the global object", () => {
+  const file = sourceFile(`
+export function shutdown(code: number) {
+  globalThis.process.exit(code);
+}
+export function abort() {
+  (self)["process"].abort();
+}
+export function trace(value: unknown) {
+  window.console.log(value);
+  globalThis["console"].debug(value);
+}
+export function shadowed(window: { process: { exit(): void }; console: { log(value: unknown): void } }) {
+  window.process.exit();
+  window.console.log(1);
+}
+export function computed(method: "exit") {
+  process[method]();
+  globalThis[method].exit();
+}
+`);
+
+  assert.deepEqual(findExitExpression(file).map((finding) => finding.context), ["function shutdown()", "function abort()"]);
+  assert.deepEqual(messages(findDevelopmentCodeFragment(file)), [
+    "The function trace() calls the typical debug function console.log() which is mostly only used during development.",
+    "The function trace() calls the typical debug function console.debug() which is mostly only used during development.",
+  ]);
+});
+
 test("static-access reports class calls through literal element access", () => {
   const file = sourceFile(`
 export function run() {
