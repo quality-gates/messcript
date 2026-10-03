@@ -1022,6 +1022,145 @@ export function assertedElementKey() {
   ]);
 });
 
+test("exit-expression ignores calls to a locally bound exit", () => {
+  const file = sourceFile(`
+export function quitOnQ() {
+  const { exit } = useApp();
+  useInput((input) => {
+    if (input === "q") {
+      exit();
+    }
+  });
+}
+export function leaveState(exit: () => void) {
+  exit();
+}
+export function constExit() {
+  const exit = () => undefined;
+  exit();
+}
+export function hoistedVar() {
+  if (ready) {
+    var exit = stop;
+  }
+  exit();
+}
+export function nestedFunction() {
+  function exit() {}
+  exit();
+}
+export function namedExpression() {
+  return function exit() {
+    exit();
+  };
+}
+export function caught() {
+  try {
+    run();
+  } catch (exit) {
+    exit();
+  }
+}
+export function loopBinding(handlers: Array<() => void>) {
+  for (const exit of handlers) {
+    exit();
+  }
+}
+export function siblingBlock() {
+  {
+    const exit = stop;
+  }
+  exit();
+}
+export function innerShadowOnly() {
+  exit();
+  return () => {
+    const exit = stop;
+    exit();
+  };
+}
+`);
+
+  assert.deepEqual(findExitExpression(file).map((finding) => finding.context), [
+    "function siblingBlock()",
+    "function innerShadowOnly()",
+  ]);
+});
+
+test("exit-expression resolves exit bindings across destructuring, switch, and loop scopes", () => {
+  const file = sourceFile(`
+export function otherBindings(other: number, { stop }: Options) {
+  const [, second] = pair;
+  const { first, quit } = pair;
+  var counter = 0, total = 1;
+  return function named() {
+    exit();
+  };
+}
+export function laterElement() {
+  const [, exit] = pair;
+  const { first, exit: _, ...rest } = options;
+  exit();
+}
+export function laterProperty() {
+  const { first, exit } = options;
+  exit();
+}
+export function laterDeclarator() {
+  const first = 1, exit = stop;
+  exit();
+}
+export function switchScope(value: number) {
+  switch (value) {
+    case 1:
+      const exit = stop;
+      exit();
+      break;
+    default:
+      break;
+  }
+}
+export function classicFor() {
+  for (let exit = stop; ; ) {
+    exit();
+  }
+}
+export function forIn(handlers: Record<string, () => void>) {
+  for (const exit in handlers) {
+    exit();
+  }
+}
+export function otherLoops(items: number[]) {
+  for (let index = 0; ; ) {
+    exit();
+  }
+}
+`);
+
+  assert.deepEqual(findExitExpression(file).map((finding) => finding.context), [
+    "function named()",
+    "function otherLoops()",
+  ]);
+});
+
+test("exit-expression ignores a module-level exit declaration but not an imported one", () => {
+  const declared = sourceFile(`
+function exit() {}
+export function run() {
+  exit();
+}
+`);
+  const imported = sourceFile(`
+import { exit } from "node:process";
+export function run() {
+  exit(1);
+}
+`);
+
+  assert.deepEqual(findExitExpression(declared), []);
+  assert.deepEqual(findExitExpression(imported).map((finding) => finding.context), ["function run()"]);
+});
+
 test("static-access reports class calls through literal element access", () => {
   const file = sourceFile(`
 export function run() {

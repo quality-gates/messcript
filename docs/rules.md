@@ -52,7 +52,7 @@ executable metric findings. Prefer `typescript` for mixed JS/TS repositories.
 | `cleancode` | `StaticAccess` | 1 | `exceptions=`, `ignorepattern=` | Flags static class access that is clearer as an ordinary function or instance method; allowlist with `exceptions` or `ignorepattern`. |
 | `cleancode` | `IfStatementAssignment` | 1 | — | Flags assignments used directly in `if` (and similar) conditions. |
 | `cleancode` | `DuplicatedArrayKey` | 2 | — | Flags repeated statically known keys in an object literal (the shared rule name still says Array). Dynamic keys are not guessed. |
-| `design` | `ExitExpression` | 1 | — | Flags process-exit style calls such as `process.exit`. |
+| `design` | `ExitExpression` | 1 | — | Flags process-exit style calls such as `process.exit`. A bare `exit()` is ignored when `exit` is a local declaration (parameter, variable, function), such as Ink's `const { exit } = useApp()`. |
 | `design` | `GotoStatement` | 1 | — | Does nothing on JavaScript/TypeScript—there is no goto statement. The id remains loadable so shared policies do not break; it never fires. |
 | `design` | `CountInLoopExpression` | 2 | — | Flags length/count work repeated inside loop conditions. |
 | `design` | `DevelopmentCodeFragment` | 2 | `unwanted-functions=`, `markers=TODO,FIXME,HACK` | Flags leftover debug calls (`debugger`, and names you add via `unwanted-functions`) and comment markers. Default markers: `TODO,FIXME,HACK` (case-insensitive). |

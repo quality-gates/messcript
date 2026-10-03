@@ -1,6 +1,7 @@
 // messcript-disable ConstantNamingConventions
 import ts from "typescript";
 import type { Finding } from "../finding";
+import { isLocallyBound } from "../ast/local-bindings";
 import { createDesignFinding, enclosingFunction, functionContextFor } from "./design-finding";
 
 export const ruleName = "ExitExpression";
@@ -17,9 +18,12 @@ function unwrapParenthesized(node: ts.Expression): ts.Expression {
   return current;
 }
 
-function propertyName(node: ts.PropertyAccessExpression | ts.ElementAccessExpression): string | undefined {
+function propertyName(node: ts.Expression): string | undefined {
   if (ts.isPropertyAccessExpression(node)) {
     return node.name.text;
+  }
+  if (!ts.isElementAccessExpression(node)) {
+    return undefined;
   }
   const argument = unwrapParenthesized(node.argumentExpression);
   if (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)) {
@@ -31,7 +35,7 @@ function propertyName(node: ts.PropertyAccessExpression | ts.ElementAccessExpres
 function isExitCall(node: ts.CallExpression): boolean {
   const callee = unwrapParenthesized(node.expression);
   if (ts.isIdentifier(callee)) {
-    return callee.text === "exit";
+    return callee.text === "exit" && !isLocallyBound(callee);
   }
   if (!ts.isPropertyAccessExpression(callee) && !ts.isElementAccessExpression(callee)) {
     return false;
