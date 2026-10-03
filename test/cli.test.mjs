@@ -1457,6 +1457,21 @@ test("naming rules cover language roles and idiomatic names", () => {
   assert.equal(result.stderr, "");
 });
 
+test("ConstantNamingConventions exempts React arrow components and hooks", () => {
+  const file = join(scanRoot, "src", "react-constant-hooks.tsx");
+  writeFileSync(file, `import { useState } from "react";\nexport const Header = () => <h1>Hi</h1>;\nconst Inner = function () { return <p>Inner</p>; };\nexport const useToggle = () => useState(false);\nexport const useStore = function () { return 0; };\nexport const handler = () => 1;\nexport const config = { port: 1 };\nexport const useValue = 1;\nexport const abuseToggle = () => 0;\n`);
+
+  const result = runCli([file, "text", "typescript", "--only", "ConstantNamingConventions"]);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /ConstantNamingConventions .*handler/);
+  assert.match(result.stdout, /ConstantNamingConventions .*config/);
+  assert.match(result.stdout, /ConstantNamingConventions .*useValue/);
+  assert.match(result.stdout, /ConstantNamingConventions .*abuseToggle/);
+  assert.doesNotMatch(result.stdout, /Constant (?:Header|Inner|useToggle|useStore) should/);
+  assert.equal((result.stdout.match(/ConstantNamingConventions/g) ?? []).length, 4);
+  assert.equal(result.stderr, "");
+});
+
 test("controversial rules distinguish camel-case roles and skip computed names", () => {
   const result = runCli([
     join(scanRoot, "src", "controversial.ts") + "," + join(scanRoot, "src", "controversial.js"),

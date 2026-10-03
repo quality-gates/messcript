@@ -16,6 +16,14 @@ export function isReactComponentBinding(binding: NamedBinding): boolean {
   return isReactComponentName(binding.name, binding.node);
 }
 
+export function isReactHookBinding(binding: NamedBinding): boolean {
+  if (!/^use[A-Z]/.test(binding.name) || !ts.isIdentifier(binding.node) || !ts.isVariableDeclaration(binding.node.parent)) {
+    return false;
+  }
+  const initializer = binding.node.parent.initializer;
+  return initializer !== undefined && (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer));
+}
+
 export function parseCommaSeparatedNames(value: string): string[] {
   return value.split(",").map((part) => part.trim()).filter(Boolean);
 }
