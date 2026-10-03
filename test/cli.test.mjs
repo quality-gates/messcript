@@ -1482,6 +1482,23 @@ test("controversial rules distinguish camel-case roles and skip computed names",
   assert.equal(result.stderr, "");
 });
 
+test("CamelCaseMethodName exempts PascalCase function components in recommended rulesets", () => {
+  const component = join(scanRoot, "src", "react-component.tsx");
+  writeFileSync(component, "export function Header() { return <h1>Hi</h1>; }\n");
+
+  const result = runCli([component, "text", "typescript"]);
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "");
+
+  const method = join(scanRoot, "src", "pascal-case-method.ts");
+  writeFileSync(method, "class Service { BadMethod() {} }\n");
+  const invalidMethod = runCli([method, "text", "typescript", "--only", "CamelCaseMethodName"]);
+  assert.equal(invalidMethod.status, 2);
+  assert.match(invalidMethod.stdout, /CamelCaseMethodName .*BadMethod/);
+  assert.equal(invalidMethod.stderr, "");
+});
+
 test("unusedcode rules resolve lexical references without declaration certainty", () => {
   const result = runCli([
     join(scanRoot, "src", "unused.ts") + "," + join(scanRoot, "src", "unused.js"),
