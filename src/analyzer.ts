@@ -49,6 +49,7 @@ export function analyze(
   const findings: Finding[] = [];
   const parsedSourceFiles: ts.SourceFile[] = [];
   const discovered = discoverSourceFiles(inputPaths, discoveryOptions);
+  const testFiles = new Set(discovered.testFiles);
   const errors: ProcessingError[] = discovered.errors.map((error) => ({
     path: error.path,
     line: 1,
@@ -90,7 +91,7 @@ export function analyze(
           continue;
         }
         try {
-          findings.push(...runRule(definition, selection, sourceFile));
+          findings.push(...runRule(definition, selection, sourceFile, { isTestFile: testFiles.has(path) }));
         } catch (error) {
           errors.push({
             path,
