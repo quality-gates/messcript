@@ -1,6 +1,6 @@
 // messcript-disable ConstantNamingConventions
 import ts from "typescript";
-import { isGlobalObject } from "../ast/global-object";
+import { globalReference, memberChainName } from "../ast/global-reference";
 import { sourceComments } from "../ast/source-comments";
 import type { Finding } from "../finding";
 import { createDesignFinding, createDesignFindingAt, functionContextFor } from "./design-finding";
@@ -9,41 +9,10 @@ export const ruleName = "DevelopmentCodeFragment";
 export const priority = 2;
 export const properties = { "unwanted-functions": "", markers: "TODO,FIXME,HACK" } as const;
 
-const defaultFunctions = new Set(["console.log", "console.debug", "debug.log", "debug.debug"]);
-
-function unwrapExpression(node: ts.Expression): ts.Expression {
-  let current = node;
-  while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current) || ts.isSatisfiesExpression(current)) {
-    current = current.expression;
-  }
-  return current;
-}
-
-function memberName(receiver: ts.Expression, name: string): string | undefined {
-  if (isGlobalObject(unwrapExpression(receiver))) {
-    return name;
-  }
-  const parent = callName(receiver);
-  return parent ? `${parent}.${name}` : undefined;
-}
-
-function callName(node: ts.Expression): string | undefined {
-  const unwrapped = unwrapExpression(node);
-  if (ts.isIdentifier(unwrapped)) {
-    return unwrapped.text;
-  }
-  if (ts.isPropertyAccessExpression(unwrapped)) {
-    return memberName(unwrapped.expression, unwrapped.name.text);
-  }
-  if (ts.isElementAccessExpression(unwrapped)) {
-    const argument = unwrapExpression(unwrapped.argumentExpression);
-    if (!ts.isStringLiteral(argument) && !ts.isNoSubstitutionTemplateLiteral(argument)) {
-      return undefined;
-    }
-    return memberName(unwrapped.expression, argument.text);
-  }
-  return undefined;
-}
+// Host globals. A local binding of the root name hides them.
+const hostFunctions = new Set(["console.log", "console.debug"]);
+// Names that are not host globals. They match whatever the root name is bound to.
+const defaultNamedFunctions = ["debug.log", "debug.debug"];
 
 function configuredFunctions(value: string): Set<string> {
   return new Set(value.split(",").map((part) => part.trim().toLowerCase()).filter(Boolean));
@@ -77,6 +46,15 @@ function commentFindings(sourceFile: ts.SourceFile, markers: readonly string[]):
   return findings;
 }
 
+function unwantedName(callee: ts.Expression, unwanted: ReadonlySet<string>): string | undefined {
+  const reference = globalReference(callee);
+  if (reference && hostFunctions.has(reference.toLowerCase())) {
+    return reference;
+  }
+  const name = memberChainName(callee);
+  return name && unwanted.has(name.toLowerCase()) ? name : undefined;
+}
+
 export function findDevelopmentCodeFragment(
   sourceFile: ts.SourceFile,
   unwantedFunctions = properties["unwanted-functions"],
@@ -86,11 +64,11 @@ export function findDevelopmentCodeFragment(
     sourceFile,
     markers.split(",").map((marker) => marker.trim()).filter(Boolean),
   );
-  const unwanted = new Set([...defaultFunctions, ...configuredFunctions(unwantedFunctions)]);
+  const unwanted = new Set([...defaultNamedFunctions, ...configuredFunctions(unwantedFunctions)]);
   function visit(node: ts.Node): void {
     if (ts.isCallExpression(node)) {
-      const name = callName(node.expression);
-      if (name && unwanted.has(name.toLowerCase())) {
+      const name = unwantedName(node.expression, unwanted);
+      if (name) {
         const context = functionContextFor(node, sourceFile);
         const message = context === "module"
           ? `The module calls the typical debug function ${name}() which is mostly only used during development.`

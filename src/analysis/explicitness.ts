@@ -2,6 +2,7 @@
 import ts from "typescript";
 import { isFunctionLike } from "../ast/functions";
 import type { FunctionLike } from "../ast/functions";
+import { globalObjectMember } from "../ast/global-reference";
 
 export type ImplicitFlowKind = "input" | "output";
 
@@ -33,9 +34,6 @@ type Analysis = {
 const hostObjects = new Set([
   "document", "globalThis", "localStorage", "location", "navigator", "process", "self", "sessionStorage", "window",
 ]);
-
-// Names of the global object. A sink is also reached through them, as in window.alert().
-const globalObjects = new Set(["globalThis", "self", "window"]);
 
 // Ambient functions and objects that only send data out of the function.
 const outputSinks = new Set([
@@ -337,25 +335,10 @@ function ambientCallDescription(node: ts.Identifier): string | undefined {
   return name && nondeterministicCalls.has(name) ? `calls ${name}()` : undefined;
 }
 
+// A sink is also reached through the global object, as in window.alert().
 function sinkName(node: ts.Identifier): string {
-  if (!globalObjects.has(node.text)) {
-    return node.text;
-  }
-  let current: ts.Node = node;
-  while (isWrapper(current.parent)) {
-    current = current.parent;
-  }
-  const parent = current.parent;
-  if (ts.isPropertyAccessExpression(parent) && parent.expression === current) {
-    return parent.name.text;
-  }
-  if (ts.isElementAccessExpression(parent) && parent.expression === current) {
-    const argument = unwrap(parent.argumentExpression);
-    if (ts.isStringLiteralLike(argument)) {
-      return argument.text;
-    }
-  }
-  return node.text;
+  const access = memberAccessOn(node);
+  return (access && globalObjectMember(access)) ?? node.text;
 }
 
 function ambientFlow(node: ts.Identifier, write: Write | undefined): [ImplicitFlowKind, string] | undefined {
@@ -384,9 +367,8 @@ function bindingFlow(binding: Binding, node: ts.Identifier, functionNode: Functi
     : undefined;
 }
 
-type ThisMemberAccess = ts.PropertyAccessExpression | ts.ElementAccessExpression;
-
-function thisMemberAccess(node: ts.Node): ThisMemberAccess | undefined {
+// The member access that has the node as its receiver.
+function memberAccessOn(node: ts.Node): ts.Expression | undefined {
   const expression = outerExpression(node as ts.Expression);
   const parent = expression.parent;
   return (ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) && parent.expression === expression
@@ -394,15 +376,7 @@ function thisMemberAccess(node: ts.Node): ThisMemberAccess | undefined {
     : undefined;
 }
 
-function thisMemberName(member: ThisMemberAccess): string | undefined {
-  if (ts.isPropertyAccessExpression(member)) {
-    return member.name.text;
-  }
-  const argument = unwrap(member.argumentExpression);
-  return ts.isStringLiteralLike(argument) ? argument.text : undefined;
-}
-
-function isThisMethodCall(member: ThisMemberAccess | undefined): boolean {
+function isThisMethodCall(member: ts.Expression | undefined): boolean {
   if (!member) {
     return false;
   }
@@ -412,8 +386,8 @@ function isThisMethodCall(member: ThisMemberAccess | undefined): boolean {
 }
 
 function thisFlow(node: ts.Node, write: Write | undefined): [ImplicitFlowKind, string] | undefined {
-  const member = thisMemberAccess(node);
-  const memberName = member && thisMemberName(member);
+  const member = memberAccessOn(node);
+  const memberName = member && methodName(member);
   const subject = memberName !== undefined ? `this.${memberName}` : "this";
   if (write && !write.viaCall) {
     return ["output", `writes ${subject}`];

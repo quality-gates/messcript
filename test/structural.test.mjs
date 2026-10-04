@@ -1190,6 +1190,58 @@ export function computed(method: "exit") {
   ]);
 });
 
+test("exit-expression and development-code-fragment ignore locally bound member-chain roots", () => {
+  const file = sourceFile(`
+type Proc = { exit(code: number): void; abort(): void };
+type Logger = { log(message: string): void; debug(message: string): void };
+export function stopFake(process: Proc) {
+  process.exit(1);
+  (process as Proc)["abort"]();
+}
+export function stopDeno() {
+  const Deno = { exit() {} };
+  Deno.exit();
+}
+export function report(console: Logger) {
+  console.log("a");
+  globalThis.console.debug("b");
+}
+export function nestedObject() {
+  const globalThis = { process: { exit() {} } };
+  globalThis.process.exit();
+}
+export function realExit() {
+  window["process"].exit(1);
+}
+export function realLog() {
+  self.console.log("c");
+}
+`);
+
+  assert.deepEqual(findExitExpression(file).map((finding) => finding.context), ["function realExit()"]);
+  assert.deepEqual(findDevelopmentCodeFragment(file).map((finding) => finding.context), ["function report()", "function realLog()"]);
+});
+
+test("development-code-fragment matches library and configured names whatever their root is bound to", () => {
+  const file = sourceFile(`
+import createDebug from "debug";
+export function trace(console: { log(value: unknown): void }) {
+  const logger = createLogger();
+  const debug = createDebug("app");
+  logger.trace("a");
+  debug.log("b");
+  console.log("c");
+  window.console.log("d");
+}
+`);
+
+  assert.deepEqual(messages(findDevelopmentCodeFragment(file, "Logger.Trace")), [
+    "The function trace() calls the typical debug function logger.trace() which is mostly only used during development.",
+    "The function trace() calls the typical debug function debug.log() which is mostly only used during development.",
+    "The function trace() calls the typical debug function console.log() which is mostly only used during development.",
+  ]);
+});
+
 test("static-access reports class calls through literal element access", () => {
   const file = sourceFile(`
 export function run() {
