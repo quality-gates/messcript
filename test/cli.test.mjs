@@ -1514,6 +1514,44 @@ test("CamelCaseMethodName exempts PascalCase function components in recommended 
   assert.equal(invalidMethod.stderr, "");
 });
 
+test("every naming rule exempts React components and hooks the same way", () => {
+  const file = join(scanRoot, "src", "react-conventions.tsx");
+  writeFileSync(file, `import { useState } from "react";
+export function Page() {
+  const Header = () => <h1>Title</h1>;
+  const Ui = () => <i />;
+  const Settings = { compact: true };
+  return <Header><Ui /></Header>;
+}
+export const useExtraordinarilyLongToggleHook = () => useState(false);
+export function useExtraordinarilyLongCounterHook() { return 0; }
+export const ExtraordinarilyLongComponentName = () => <div />;
+export class Registry {
+  static readonly Fallback = () => <span />;
+  static readonly Limit = 5;
+  Renderer = function () { return <p />; };
+  Theme = "dark";
+  constructor(readonly Slot = () => <b />) {}
+}
+export const useValue = 1;
+export const longOrdinaryVariableNameBeyondLimit = () => 0;
+`);
+
+  const result = runCli([file, "text", "naming,controversial"]);
+  assert.equal(result.status, 2);
+  assert.doesNotMatch(
+    result.stdout,
+    /\b(?:Page|Header|Ui|useExtraordinarilyLongToggleHook|useExtraordinarilyLongCounterHook|ExtraordinarilyLongComponentName|Fallback|Renderer|Slot)\b/,
+  );
+  assert.match(result.stdout, /CamelCaseVariableName .*variable Settings/);
+  assert.match(result.stdout, /CamelCasePropertyName .*property Limit/);
+  assert.match(result.stdout, /ConstantNamingConventions .*Constant Limit/);
+  assert.match(result.stdout, /CamelCasePropertyName .*property Theme/);
+  assert.match(result.stdout, /ConstantNamingConventions .*Constant useValue/);
+  assert.match(result.stdout, /LongVariable .*longOrdinaryVariableNameBeyondLimit/);
+  assert.equal(result.stderr, "");
+});
+
 test("unusedcode rules resolve lexical references without declaration certainty", () => {
   const result = runCli([
     join(scanRoot, "src", "unused.ts") + "," + join(scanRoot, "src", "unused.js"),

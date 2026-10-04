@@ -14,7 +14,7 @@ export function findCamelCaseVariableName(sourceFile: ts.SourceFile): Finding[] 
   const constantStarts = new Set(collectSemanticConstants(sourceFile).map((constant) => constant.node.getStart(sourceFile)));
   const findings: Finding[] = [];
   for (const variable of collectVariables(sourceFile)) {
-    if (constantStarts.has(variable.node.getStart(sourceFile)) || isCamelCaseName(variable.name, allowUnderscore)) {
+    if (constantStarts.has(variable.node.getStart(sourceFile)) || variable.convention !== "ordinary" || isCamelCaseName(variable.name, allowUnderscore)) {
       continue;
     }
     findings.push(

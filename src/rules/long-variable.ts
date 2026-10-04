@@ -2,7 +2,7 @@
 import ts from "typescript";
 import { collectBindings } from "../ast/names";
 import type { Finding } from "../finding";
-import { adjustedLength, isReactComponentBinding, parseCommaSeparatedNames } from "./naming-utils";
+import { adjustedLength, parseCommaSeparatedNames } from "./naming-utils";
 import { createNamingFinding } from "./naming-finding";
 
 export const ruleName = "LongVariable";
@@ -18,7 +18,7 @@ function adjustedVariableNameLength(name: string): number {
 export function findLongVariable(sourceFile: ts.SourceFile): Finding[] {
   const findings: Finding[] = [];
   for (const binding of collectBindings(sourceFile)) {
-    if (isReactComponentBinding(binding) || adjustedVariableNameLength(binding.name) <= properties.maximum) {
+    if (binding.convention !== "ordinary" || adjustedVariableNameLength(binding.name) <= properties.maximum) {
       continue;
     }
     findings.push(

@@ -2,7 +2,7 @@
 import ts from "typescript";
 import { getFunctionContext } from "../ast/functions";
 import { forEachCallableDeclaration, forEachMethodSignatureDeclaration } from "../ast/overloads";
-import { getFunctionBindingName, isReactComponentName } from "../ast/names";
+import { classifyName, getFunctionBindingName } from "../ast/names";
 import type { Finding } from "../finding";
 import { createCamelCaseFinding } from "./camel-case-finding";
 import { isCamelCaseName } from "./camel-case-utils";
@@ -21,7 +21,7 @@ export function findCamelCaseMethodName(sourceFile: ts.SourceFile, context: Rule
       return;
     }
     const name = getFunctionBindingName(node, sourceFile);
-    if (!name || isCamelCaseName(name, allowUnderscore) || isReactComponentName(name, node)) {
+    if (!name || isCamelCaseName(name, allowUnderscore) || classifyName(name, node) !== "ordinary") {
       return;
     }
     findings.push(

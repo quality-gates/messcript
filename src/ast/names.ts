@@ -6,10 +6,13 @@ import { forEachClass, getClassContext } from "./classes";
 import type { ClassField, ClassLike } from "./classes";
 import { analyzeOverloads } from "./overloads";
 
+export type NameConvention = "ordinary" | "component" | "hook";
+
 export type NamedBinding = {
   name: string;
   node: ts.Node;
   context: string;
+  convention: NameConvention;
   declarationLines?: readonly number[];
 };
 
@@ -53,6 +56,7 @@ function addBinding(
       name,
       node,
       context,
+      convention: classifyName(name, node),
       ...(declarationLines !== undefined ? { declarationLines } : {}),
     });
   }
@@ -252,24 +256,39 @@ export function getNameWithoutSigil(name: string): string {
   return name.replace(/^[$#_]+/, "");
 }
 
-// messcript-disable-next-line CyclomaticComplexity NPathComplexity
-export function isReactComponentName(name: string, node: ts.Node): boolean {
-  if (!/^[A-Z]/.test(name)) {
-    return false;
+type ValueDeclaration = ts.VariableDeclaration | ts.PropertyDeclaration | ts.ParameterDeclaration;
+
+function isValueDeclaration(node: ts.Node): node is ValueDeclaration {
+  return ts.isVariableDeclaration(node) || ts.isPropertyDeclaration(node) || ts.isParameter(node);
+}
+
+function valueDeclaration(node: ts.Node): ValueDeclaration | undefined {
+  if (isValueDeclaration(node)) {
+    return node;
   }
-  if ((ts.isArrowFunction(node) || ts.isFunctionExpression(node)) && ts.isVariableDeclaration(node.parent)) {
-    return node.parent.initializer !== undefined &&
-      (ts.isArrowFunction(node.parent.initializer) || ts.isFunctionExpression(node.parent.initializer) || ts.isClassExpression(node.parent.initializer));
+  const parent = node.parent;
+  return parent !== undefined && isValueDeclaration(parent) && (parent.name === node || parent.initializer === node) ? parent : undefined;
+}
+
+function valueKind(node: ts.Node | undefined): "function" | "class" | undefined {
+  if (node !== undefined && (ts.isFunctionDeclaration(node) || ts.isArrowFunction(node) || ts.isFunctionExpression(node))) {
+    return "function";
   }
-  if (ts.isIdentifier(node) && ts.isVariableDeclaration(node.parent)) {
-    return node.parent.initializer !== undefined &&
-      (ts.isArrowFunction(node.parent.initializer) || ts.isFunctionExpression(node.parent.initializer) || ts.isClassExpression(node.parent.initializer));
+  return node !== undefined && (ts.isClassDeclaration(node) || ts.isClassExpression(node)) ? "class" : undefined;
+}
+
+function declaredValueKind(node: ts.Node): "function" | "class" | undefined {
+  return ts.isFunctionDeclaration(node) || ts.isClassLike(node) ? valueKind(node) : valueKind(valueDeclaration(node)?.initializer);
+}
+
+// Decides once whether a name follows a React naming convention, from its declaration and initializer.
+// `node` may be the declaration, its name, or its initializer.
+export function classifyName(name: string, node: ts.Node): NameConvention {
+  const kind = declaredValueKind(node);
+  if (kind === "function" && /^use[A-Z]/.test(name)) {
+    return "hook";
   }
-  if (ts.isVariableDeclaration(node)) {
-    return node.initializer !== undefined &&
-      (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer) || ts.isClassExpression(node.initializer));
-  }
-  return ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node) || ts.isClassExpression(node);
+  return kind !== undefined && /^[A-Z]/.test(name) ? "component" : "ordinary";
 }
 
 export function collectSemanticConstants(sourceFile: ts.SourceFile): NamedBinding[] {
