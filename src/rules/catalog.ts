@@ -96,12 +96,18 @@ export type RuleSelection = {
   properties: RuleProperties;
 };
 
+/** Per-file facts a run decides once, so every rule sees the same answer. */
+export type RuleContext = {
+  /** Whether discovery classified the file as a test file relative to its scan root. */
+  isTestFile: boolean;
+};
+
 export type RuleDefinition = {
   name: string;
   priority: number;
   properties: Record<string, unknown>;
   aliases?: Readonly<Record<string, string>>;
-  run: (sourceFile: ts.SourceFile) => Finding[];
+  run: (sourceFile: ts.SourceFile, context: RuleContext) => Finding[];
 };
 
 type RuleModule = {
@@ -111,9 +117,9 @@ type RuleModule = {
   aliases?: Readonly<Record<string, string>>;
 };
 
-function moduleDefinition(
+function contextualModuleDefinition(
   module: RuleModule,
-  find: (sourceFile: ts.SourceFile) => Finding[],
+  find: (sourceFile: ts.SourceFile, context: RuleContext) => Finding[],
   aliases?: Readonly<Record<string, string>>,
 ): RuleDefinition {
   return {
@@ -123,6 +129,15 @@ function moduleDefinition(
     aliases,
     run: find,
   };
+}
+
+// Some finders take an optional second argument of their own, so pass only the source file.
+function moduleDefinition(
+  module: RuleModule,
+  find: (sourceFile: ts.SourceFile) => Finding[],
+  aliases?: Readonly<Record<string, string>>,
+): RuleDefinition {
+  return contextualModuleDefinition(module, (sourceFile) => find(sourceFile), aliases);
 }
 
 const definitions: RuleDefinition[] = [
@@ -162,8 +177,8 @@ const definitions: RuleDefinition[] = [
   moduleDefinition(lackOfCohesionOfMethods, lackOfCohesionOfMethods.findLackOfCohesionOfMethods, { minimum: "maximum" }),
   moduleDefinition(globalVariable, (sourceFile) => []),
   moduleDefinition(camelCaseClassName, findCamelCaseClassName),
-  moduleDefinition(camelCaseMethodName, findCamelCaseMethodName),
-  moduleDefinition(camelCasePropertyName, findCamelCasePropertyName),
+  contextualModuleDefinition(camelCaseMethodName, findCamelCaseMethodName),
+  contextualModuleDefinition(camelCasePropertyName, findCamelCasePropertyName),
   moduleDefinition(camelCaseParameterName, findCamelCaseParameterName),
   moduleDefinition(camelCaseVariableName, findCamelCaseVariableName),
   moduleDefinition(implicitInput, findImplicitInput),
@@ -280,9 +295,14 @@ function applyPriority(findings: Finding[], priority: number | undefined): Findi
   return findings.map((finding) => ({ ...finding, priority }));
 }
 
-export function runRule(definition: RuleDefinition, selection: RuleSelection, sourceFile: ts.SourceFile): Finding[] {
+export function runRule(
+  definition: RuleDefinition,
+  selection: RuleSelection,
+  sourceFile: ts.SourceFile,
+  context: RuleContext,
+): Finding[] {
   return withConfiguredProperties(definition, selection.properties, () =>
-    applyPriority(definition.run(sourceFile), selection.priority ?? definition.priority),
+    applyPriority(definition.run(sourceFile, context), selection.priority ?? definition.priority),
   );
 }
 

@@ -53,6 +53,8 @@ export type DiscoveryError = {
 
 export type DiscoveryResult = {
   files: string[];
+  /** The discovered files that are test files relative to the scan root that reached them. */
+  testFiles: string[];
   errors: DiscoveryError[];
 };
 
@@ -79,12 +81,13 @@ function isTestPath(path: string, rootPath: string): boolean {
 function addSourceFiles(
   path: string,
   rootPath: string,
-  files: Set<string>,
+  files: Map<string, boolean>,
   errors: DiscoveryError[],
   options: Required<DiscoveryOptions>,
   visitedDirectories: Set<string>,
 ): void {
-  if (isExcluded(path, options.exclusions) || (options.ignoreTests && isTestPath(path, rootPath))) {
+  const isTest = isTestPath(path, rootPath);
+  if (isExcluded(path, options.exclusions) || (options.ignoreTests && isTest)) {
     return;
   }
 
@@ -100,7 +103,9 @@ function addSourceFiles(
   }
   if (fileInfo.isFile()) {
     if (isSourceFile(path, options.suffixes)) {
-      files.add(path);
+      // A file another scan root reached as a non-test file stays a non-test file,
+      // just as --ignore-tests keeps it.
+      files.set(path, (files.get(path) ?? true) && isTest);
     }
     return;
   }
@@ -138,7 +143,7 @@ function addSourceFiles(
 }
 
 export function discoverSourceFiles(inputPaths: readonly string[], discoveryOptions: DiscoveryOptions = {}): DiscoveryResult {
-  const files = new Set<string>();
+  const files = new Map<string, boolean>();
   const errors: DiscoveryError[] = [];
   const visitedDirectories = new Set<string>();
   const options: Required<DiscoveryOptions> = {
@@ -155,8 +160,11 @@ export function discoverSourceFiles(inputPaths: readonly string[], discoveryOpti
     addSourceFiles(path, path, files, errors, options, visitedDirectories);
   }
 
+  // The default sort compares UTF-16 code units, so the order does not depend on locale.
+  const sortedFiles = [...files.keys()].sort();
   return {
-    files: [...files].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0)),
+    files: sortedFiles,
+    testFiles: sortedFiles.filter((path) => files.get(path)),
     errors,
   };
 }

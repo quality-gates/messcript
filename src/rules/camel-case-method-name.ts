@@ -6,15 +6,15 @@ import { getFunctionBindingName, isReactComponentName } from "../ast/names";
 import type { Finding } from "../finding";
 import { createCamelCaseFinding } from "./camel-case-finding";
 import { isCamelCaseName } from "./camel-case-utils";
-import { isTestContextFileName } from "./test-context";
+import type { RuleContext } from "./catalog";
 
 export const ruleName = "CamelCaseMethodName";
 export const priority = 1;
 export const properties = { "allow-underscore": false, "allow-underscore-test": false } as const;
 
-export function findCamelCaseMethodName(sourceFile: ts.SourceFile): Finding[] {
+export function findCamelCaseMethodName(sourceFile: ts.SourceFile, context: RuleContext = { isTestFile: false }): Finding[] {
   const allowUnderscore =
-    properties["allow-underscore"] || (properties["allow-underscore-test"] && isTestContextFileName(sourceFile.fileName));
+    properties["allow-underscore"] || (properties["allow-underscore-test"] && context.isTestFile);
   const findings: Finding[] = [];
   forEachCallableDeclaration(sourceFile, (node, declarationLines) => {
     if (!ts.isFunctionDeclaration(node) && !ts.isMethodDeclaration(node) && !ts.isGetAccessorDeclaration(node) && !ts.isSetAccessorDeclaration(node)) {

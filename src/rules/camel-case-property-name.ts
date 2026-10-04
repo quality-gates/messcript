@@ -4,15 +4,15 @@ import { collectProperties } from "../ast/names";
 import type { Finding } from "../finding";
 import { createCamelCaseFinding } from "./camel-case-finding";
 import { isCamelCaseName } from "./camel-case-utils";
-import { isTestContextFileName } from "./test-context";
+import type { RuleContext } from "./catalog";
 
 export const ruleName = "CamelCasePropertyName";
 export const priority = 1;
 export const properties = { "allow-underscore": false, "allow-underscore-test": false } as const;
 
-export function findCamelCasePropertyName(sourceFile: ts.SourceFile): Finding[] {
+export function findCamelCasePropertyName(sourceFile: ts.SourceFile, context: RuleContext = { isTestFile: false }): Finding[] {
   const allowUnderscore =
-    properties["allow-underscore"] || (properties["allow-underscore-test"] && isTestContextFileName(sourceFile.fileName));
+    properties["allow-underscore"] || (properties["allow-underscore-test"] && context.isTestFile);
   const findings: Finding[] = [];
   for (const property of collectProperties(sourceFile)) {
     if (isCamelCaseName(property.name, allowUnderscore)) {

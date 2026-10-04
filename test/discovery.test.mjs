@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { test } from "node:test";
 import ts from "typescript";
+import { analyze } from "../dist/analyzer.js";
 import { discoverSourceFiles, scriptKindForPath } from "../dist/discovery.js";
 
 test("discoverSourceFiles matches uppercase and mixed-case extensions the same as lowercase", () => {
@@ -195,6 +196,66 @@ test("discoverSourceFiles follows a directory symlink to an unvisited directory"
 
     assert.deepEqual(result.errors, []);
     assert.deepEqual(result.files, [join(dir, "root", "linked", "shared.ts")]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("discoverSourceFiles classifies test files relative to the scan root, not ancestors", () => {
+  const dir = mkdtempSync(join(tmpdir(), "messcript-discovery-classify-"));
+  try {
+    const app = join(dir, "tests", "app");
+    mkdirSync(join(app, "src", "__tests__"), { recursive: true });
+    writeFileSync(join(app, "src", "widget.ts"), "export const x = 1;\n");
+    writeFileSync(join(app, "src", "widget.spec.ts"), "export const y = 1;\n");
+    writeFileSync(join(app, "src", "__tests__", "helper.ts"), "export const z = 1;\n");
+
+    const result = discoverSourceFiles([join(app, "src")]);
+    assert.deepEqual(result.testFiles, [join(app, "src", "__tests__", "helper.ts"), join(app, "src", "widget.spec.ts")]);
+    assert.deepEqual(discoverSourceFiles([join(app, "src")], { ignoreTests: true }).files, [join(app, "src", "widget.ts")]);
+    assert.deepEqual(discoverSourceFiles([join(app, "src", "__tests__")]).testFiles, [join(app, "src", "__tests__", "helper.ts")]);
+    assert.deepEqual(discoverSourceFiles([join(app, "src", "widget.spec.ts")]).testFiles, [join(app, "src", "widget.spec.ts")]);
+    assert.deepEqual(discoverSourceFiles([join(app, "src", "widget.ts")]).testFiles, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("allow-underscore-test agrees with --ignore-tests regardless of ancestor directory names", () => {
+  const dir = mkdtempSync(join(tmpdir(), "messcript-discovery-underscore-"));
+  const selections = ["CamelCaseMethodName", "CamelCasePropertyName"].map((name) => ({
+    name,
+    rulesetName: "controversial",
+    properties: { "allow-underscore-test": "true" },
+  }));
+  const source = "export class Widget {\n  _field = 1;\n  _renderNow(): void {}\n}\n";
+  try {
+    for (const ancestor of ["plain", "test", "tests", "spec", "__tests__"]) {
+      const src = join(dir, ancestor, "app", "src");
+      mkdirSync(join(src, "__tests__"), { recursive: true });
+      writeFileSync(join(src, "widget.ts"), source);
+      writeFileSync(join(src, "widget.test.ts"), source);
+      writeFileSync(join(src, "__tests__", "helper.ts"), source);
+
+      const findings = analyze([src], selections).findings.map((finding) => `${relative(src, finding.path)}:${finding.ruleName}`).sort();
+      assert.deepEqual(findings, ["widget.ts:CamelCaseMethodName", "widget.ts:CamelCasePropertyName"], ancestor);
+      assert.deepEqual(analyze([src], selections, { ignoreTests: true }).findings.length, 2, ancestor);
+      assert.deepEqual(analyze([join(src, "__tests__")], selections).findings, [], `${ancestor} test root`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("discoverSourceFiles returns files and test files in code-unit order regardless of input order", () => {
+  const dir = mkdtempSync(join(tmpdir(), "messcript-discovery-order-"));
+  try {
+    for (const name of ["b.ts", "B.test.ts", "a.ts", "a.spec.ts"]) {
+      writeFileSync(join(dir, name), "export const x = 1;\n");
+    }
+    const result = discoverSourceFiles(["b.ts", "B.test.ts", "a.spec.ts", "a.ts"].map((name) => join(dir, name)));
+    assert.deepEqual(result.files, ["B.test.ts", "a.spec.ts", "a.ts", "b.ts"].map((name) => join(dir, name)));
+    assert.deepEqual(result.testFiles, ["B.test.ts", "a.spec.ts"].map((name) => join(dir, name)));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

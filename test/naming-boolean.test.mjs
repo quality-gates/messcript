@@ -522,7 +522,7 @@ class Implementation {
   assert.deepEqual(names(findings).sort(), ["another_bad", "bad_name"]);
 });
 
-test("camelCase rules honor allow-underscore for a leading underscore, and allow-underscore-test scoped to test files", () => {
+test("camelCase rules honor allow-underscore for a leading underscore, and allow-underscore-test scoped to classified test files", () => {
   const file = sourceFile(`
 class Example {
   _privateField = 1;
@@ -537,7 +537,7 @@ class Example {
   _helperMethod(_parameter) { return _parameter; }
 }
 `,
-    "example.test.ts",
+    "test/example.test.ts",
   );
 
   // Baseline: unconfigured, underscore-prefixed names are still flagged.
@@ -568,10 +568,13 @@ class Example {
   camelCaseMethodProperties["allow-underscore-test"] = true;
   camelCasePropertyProperties["allow-underscore-test"] = true;
   try {
-    assert.deepEqual(names(findCamelCaseMethodName(file)), ["_helperMethod"]);
-    assert.deepEqual(names(findCamelCasePropertyName(file)).sort(), ["_badField_", "_privateField"]);
-    assert.deepEqual(names(findCamelCaseMethodName(testFile)), []);
-    assert.deepEqual(names(findCamelCasePropertyName(testFile)), []);
+    assert.deepEqual(names(findCamelCaseMethodName(file, { isTestFile: false })), ["_helperMethod"]);
+    assert.deepEqual(names(findCamelCasePropertyName(file, { isTestFile: false })).sort(), ["_badField_", "_privateField"]);
+    // The run's classification decides, not the file name.
+    assert.deepEqual(names(findCamelCaseMethodName(testFile)), ["_helperMethod"]);
+    assert.deepEqual(names(findCamelCasePropertyName(testFile)), ["_privateField"]);
+    assert.deepEqual(names(findCamelCaseMethodName(file, { isTestFile: true })), []);
+    assert.deepEqual(names(findCamelCasePropertyName(file, { isTestFile: true })), ["_badField_"]);
   } finally {
     camelCaseMethodProperties["allow-underscore-test"] = false;
     camelCasePropertyProperties["allow-underscore-test"] = false;
