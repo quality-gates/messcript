@@ -15,7 +15,7 @@ export function findCamelCasePropertyName(sourceFile: ts.SourceFile, context: Ru
     properties["allow-underscore"] || (properties["allow-underscore-test"] && context.isTestFile);
   const findings: Finding[] = [];
   for (const property of collectProperties(sourceFile)) {
-    if (isCamelCaseName(property.name, allowUnderscore)) {
+    if (property.convention !== "ordinary" || isCamelCaseName(property.name, allowUnderscore)) {
       continue;
     }
     findings.push(

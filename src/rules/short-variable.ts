@@ -3,7 +3,7 @@ import ts from "typescript";
 import { collectBindings } from "../ast/names";
 import type { Finding } from "../finding";
 import { createNamingFinding } from "./naming-finding";
-import { isIdiomaticShortName, isReactComponentBinding, parseCommaSeparatedNames } from "./naming-utils";
+import { isIdiomaticShortName, parseCommaSeparatedNames } from "./naming-utils";
 
 export const ruleName = "ShortVariable";
 export const priority = 3;
@@ -16,7 +16,7 @@ export function findShortVariable(sourceFile: ts.SourceFile): Finding[] {
     if (
       binding.name.length >= properties.minimum ||
       isIdiomaticShortName(binding.name) ||
-      isReactComponentBinding(binding) ||
+      binding.convention !== "ordinary" ||
       exceptions.includes(binding.name)
     ) {
       continue;

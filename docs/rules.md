@@ -17,6 +17,14 @@ statically, and ordinary module/import/type-only structure are handled with
 ordinary JavaScript and TypeScript expectations. Names that cannot be known
 statically are not guessed.
 
+React components and hooks are recognised once, from the declaration, and every
+rule that checks variable, property, parameter, constant, or function names
+skips them. A component is a PascalCase function or class declaration, or a
+PascalCase variable, class property, or parameter initialised with a function or
+class expression. A hook is a `useX` function declaration, or a `useX` variable,
+class property, or parameter initialised with a function expression. Class-name
+rules still check class components as classes.
+
 `typescript` additionally treats declarations, overloads, accessibility
 modifiers, parameter properties, enums, namespaces, and type-only syntax as
 TypeScript rather than executable JavaScript. Interfaces, ambient and abstract

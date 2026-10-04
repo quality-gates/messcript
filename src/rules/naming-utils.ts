@@ -1,7 +1,6 @@
 // messcript-disable ConstantNamingConventions
 import ts from "typescript";
-import type { NamedBinding } from "../ast/names";
-import { getNameWithoutSigil, isReactComponentName } from "../ast/names";
+import { getNameWithoutSigil } from "../ast/names";
 
 export const shortNameExceptions = new Set([
   "T", "K", "V", "U", "S", "i", "j", "k", "x", "y", "z", "dx", "dy", "dz", "id", "ok", "io", "cb", "fn", "e", "$",
@@ -10,18 +9,6 @@ export const shortNameExceptions = new Set([
 export function isIdiomaticShortName(name: string): boolean {
   const normalized = getNameWithoutSigil(name);
   return name.startsWith("_") || name.startsWith("$") || shortNameExceptions.has(name) || shortNameExceptions.has(normalized);
-}
-
-export function isReactComponentBinding(binding: NamedBinding): boolean {
-  return isReactComponentName(binding.name, binding.node);
-}
-
-export function isReactHookBinding(binding: NamedBinding): boolean {
-  if (!/^use[A-Z]/.test(binding.name) || !ts.isIdentifier(binding.node) || !ts.isVariableDeclaration(binding.node.parent)) {
-    return false;
-  }
-  const initializer = binding.node.parent.initializer;
-  return initializer !== undefined && (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer));
 }
 
 export function parseCommaSeparatedNames(value: string): string[] {

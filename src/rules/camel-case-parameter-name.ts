@@ -13,7 +13,7 @@ export function findCamelCaseParameterName(sourceFile: ts.SourceFile): Finding[]
   const allowUnderscore = properties["allow-underscore"];
   const findings: Finding[] = [];
   for (const parameter of collectParameters(sourceFile)) {
-    if (isCamelCaseName(parameter.name, allowUnderscore)) {
+    if (parameter.convention !== "ordinary" || isCamelCaseName(parameter.name, allowUnderscore)) {
       continue;
     }
     findings.push(

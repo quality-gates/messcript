@@ -8,7 +8,7 @@ import {
   collectProperties,
   getFunctionBindingName,
   getNameWithoutSigil,
-  isReactComponentName,
+  classifyName,
 } from "../dist/ast/names.js";
 import { isBooleanExpression, isBooleanType } from "../dist/metrics/boolean.js";
 import { findBooleanArgumentFlag, properties as booleanArgumentProperties } from "../dist/rules/boolean-argument-flag.js";
@@ -769,14 +769,38 @@ const NamedClass = class {};
   const arrowIdentifier = file.statements.find((statement) => ts.isVariableStatement(statement) && statement.declarationList.declarations[0].name.getText() === "NamedArrow").declarationList.declarations[0].name;
   const nonComponentIdentifier = sourceFile("const NotComponent = 1;").statements[0].declarationList.declarations[0].name;
   const namedFunctionDeclaration = file.statements.find((statement) => ts.isFunctionDeclaration(statement));
-  assert.equal(isReactComponentName("NamedArrow", arrowNode), true);
-  assert.equal(isReactComponentName("NamedFunction", functionNode), true);
-  assert.equal(isReactComponentName("NamedClass", classNode), true);
-  assert.equal(isReactComponentName("plainFoo", arrowNode), false);
-  assert.equal(isReactComponentName("NamedArrow", arrowIdentifier), true);
-  assert.equal(isReactComponentName("NotComponent", nonComponentIdentifier), false);
-  assert.equal(isReactComponentName("Named", file), false);
-  assert.equal(isReactComponentName("NamedFunctionDeclaration", namedFunctionDeclaration), true);
+  assert.equal(classifyName("NamedArrow", arrowNode), "component");
+  assert.equal(classifyName("NamedFunction", functionNode), "component");
+  assert.equal(classifyName("NamedClass", classNode), "component");
+  assert.equal(classifyName("plainFoo", arrowNode), "ordinary");
+  assert.equal(classifyName("NamedArrow", arrowIdentifier), "component");
+  assert.equal(classifyName("NotComponent", nonComponentIdentifier), "ordinary");
+  assert.equal(classifyName("Named", file), "ordinary");
+  assert.equal(classifyName("NamedFunctionDeclaration", namedFunctionDeclaration), "component");
+
+  const conventions = sourceFile(`
+const useArrow = () => 0;
+const useValue = 1;
+function useDeclared() {}
+class Registry {
+  static readonly Fallback = () => null;
+  Limit = 5;
+  useField = function () {};
+  constructor(readonly Slot = class {}) {}
+}
+`);
+  const byName = new Map(collectBindings(conventions).map((binding) => [binding.name, binding.convention]));
+  assert.equal(byName.get("useArrow"), "hook");
+  assert.equal(byName.get("useValue"), "ordinary");
+  assert.equal(byName.get("Fallback"), "component");
+  assert.equal(byName.get("Limit"), "ordinary");
+  assert.equal(byName.get("useField"), "hook");
+  assert.equal(byName.get("Slot"), "component");
+  assert.equal(classifyName("useDeclared", conventions.statements.find((statement) => ts.isFunctionDeclaration(statement))), "hook");
+  const annotated = sourceFile("const Typed: Props = () => null;").statements[0].declarationList.declarations[0];
+  assert.equal(classifyName("Typed", annotated.name), "component");
+  assert.equal(classifyName("Typed", annotated.type), "ordinary");
+  assert.equal(classifyName("usefulThing", conventions.statements.find((statement) => ts.isFunctionDeclaration(statement))), "ordinary");
 });
 
 test("string-literal property and field names are checked like identifiers of the same text", () => {

@@ -2,7 +2,7 @@
 import ts from "typescript";
 import { getFunctionContext } from "../ast/functions";
 import { forEachCallableDeclaration } from "../ast/overloads";
-import { getFunctionBindingName, getNameWithoutSigil, isReactComponentName } from "../ast/names";
+import { classifyName, getFunctionBindingName, getNameWithoutSigil } from "../ast/names";
 import type { Finding } from "../finding";
 import { createNamingFinding } from "./naming-finding";
 import { isIdiomaticShortName, parseCommaSeparatedNames } from "./naming-utils";
@@ -21,7 +21,7 @@ export function findShortMethodName(sourceFile: ts.SourceFile): Finding[] {
       exceptions.includes(name) ||
       getNameWithoutSigil(name).length >= properties.minimum ||
       isIdiomaticShortName(name) ||
-      isReactComponentName(name, node)
+      classifyName(name, node) !== "ordinary"
     ) {
       return;
     }

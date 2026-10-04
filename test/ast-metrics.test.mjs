@@ -29,7 +29,7 @@ import {
   getFunctionBindingName,
   getNameWithoutSigil,
   getNamedTypeContext,
-  isReactComponentName,
+  classifyName,
 } from "../dist/ast/names.js";
 import { isBooleanExpression, isBooleanType } from "../dist/metrics/boolean.js";
 import { calculateClassComplexity, calculateClassLineCount } from "../dist/metrics/classes.js";
@@ -202,14 +202,14 @@ const ClassExpression = class {};
   forEachFunctionLike(file, (node) => functionNodes.push(node));
   const componentNode = functionNodes.find((node) => ts.isArrowFunction(node) && node.parent.name?.text === "Component");
   const plainNode = functionNodes.find((node) => ts.isArrowFunction(node) && node.parent.name?.text === "plain");
-  assert.equal(isReactComponentName("Component", componentNode), true);
-  assert.equal(isReactComponentName("plain", plainNode), false);
-  assert.equal(isReactComponentName("Widget", file.statements.find((node) => ts.isFunctionDeclaration(node))), true);
-  assert.equal(isReactComponentName("Service", file.statements.find((node) => ts.isClassDeclaration(node))), true);
+  assert.equal(classifyName("Component", componentNode), "component");
+  assert.equal(classifyName("plain", plainNode), "ordinary");
+  assert.equal(classifyName("Widget", file.statements.find((node) => ts.isFunctionDeclaration(node))), "component");
+  assert.equal(classifyName("Service", file.statements.find((node) => ts.isClassDeclaration(node))), "component");
   const classExpressionDeclaration = file.statements
     .find((node) => ts.isVariableStatement(node) && node.getText().includes("ClassExpression"))
     .declarationList.declarations[0];
-  assert.equal(isReactComponentName("ClassExpression", classExpressionDeclaration), true);
+  assert.equal(classifyName("ClassExpression", classExpressionDeclaration), "component");
   assert.equal(getFunctionBindingName(componentNode, file), "Component");
   assert.equal(getFunctionBindingName(functionNodes.find((node) => ts.isFunctionDeclaration(node)), file), "named");
   assert.equal(getFunctionBindingName(functionNodes.find((node) => ts.isConstructorDeclaration(node)), file), undefined);
