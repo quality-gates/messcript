@@ -1907,6 +1907,44 @@ test("DevelopmentCodeFragment reports parenthesized and asserted debug calls via
   assert.ok(report.findings.every((finding) => /calls the typical debug function console\.log\(\)/.test(finding.message)));
 });
 
+test("design and explicitness rules agree that a locally bound host global name is not a host global via CLI", () => {
+  const fixturePath = join(scanRoot, "src", "shadowed-host-globals.ts");
+  writeFileSync(
+    fixturePath,
+    `type Proc = { exit(code: number): void };
+type Logger = { log(message: string): void };
+export function stopFake(process: Proc): void {
+  process.exit(1);
+}
+export function stopLocal(exit: (code: number) => void): void {
+  exit(1);
+}
+export function stopViaWindow(window: { process: Proc }): void {
+  window.process.exit(1);
+}
+export function report(console: Logger, message: string): void {
+  console.log(message);
+}
+export function stopReal(): void {
+  globalThis["process"].exit(1);
+}
+`,
+  );
+
+  const result = runCli([fixturePath, "json", "design,explicitness"]);
+
+  assert.equal(result.status, 2);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(
+    report.findings.map((finding) => ({ line: finding.line, context: finding.context, ruleName: finding.ruleName })),
+    [
+      { line: 16, context: "function stopReal()", ruleName: "ExitExpression" },
+      { line: 16, context: "function stopReal()", ruleName: "ImplicitInput" },
+    ],
+  );
+});
+
 test("DevelopmentCodeFragment reports debug calls wrapped in satisfies via CLI", () => {
   const fixturePath = join(scanRoot, "src", "development-code-fragment-satisfies.ts");
   writeFileSync(

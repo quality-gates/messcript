@@ -320,6 +320,15 @@ test("include-this recognizes element-access members on this", () => {
   ]);
 });
 
+test("include-this treats this used as a key as a read of this, not a member call", () => {
+  assert.deepEqual(messages("class-this-key.ts", `class Worker {
+  run(handlers: Record<string, () => void>) { handlers[this](); }
+}
+`, strictRuleset), [
+    "2:ImplicitInput: The method run() reads this, an implicit input.",
+  ]);
+});
+
 test("include-this unwraps wrapped this receivers before classifying member reads and writes", () => {
   const findings = messages("class-wrapped-this.ts", `class Worker {
   state = 0;
