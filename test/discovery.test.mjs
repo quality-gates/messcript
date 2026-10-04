@@ -246,3 +246,17 @@ test("allow-underscore-test agrees with --ignore-tests regardless of ancestor di
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("discoverSourceFiles returns files and test files in code-unit order regardless of input order", () => {
+  const dir = mkdtempSync(join(tmpdir(), "messcript-discovery-order-"));
+  try {
+    for (const name of ["b.ts", "B.test.ts", "a.ts", "a.spec.ts"]) {
+      writeFileSync(join(dir, name), "export const x = 1;\n");
+    }
+    const result = discoverSourceFiles(["b.ts", "B.test.ts", "a.spec.ts", "a.ts"].map((name) => join(dir, name)));
+    assert.deepEqual(result.files, ["B.test.ts", "a.spec.ts", "a.ts", "b.ts"].map((name) => join(dir, name)));
+    assert.deepEqual(result.testFiles, ["B.test.ts", "a.spec.ts"].map((name) => join(dir, name)));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

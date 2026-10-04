@@ -160,7 +160,8 @@ export function discoverSourceFiles(inputPaths: readonly string[], discoveryOpti
     addSourceFiles(path, path, files, errors, options, visitedDirectories);
   }
 
-  const sortedFiles = [...files.keys()].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+  // The default sort compares UTF-16 code units, so the order does not depend on locale.
+  const sortedFiles = [...files.keys()].sort();
   return {
     files: sortedFiles,
     testFiles: sortedFiles.filter((path) => files.get(path)),
