@@ -24,7 +24,8 @@
       "test/discovery.test.mjs",
       "test/rulesets.test.mjs",
       "test/overload-naming.test.mjs",
-      "test/explicitness.test.mjs"
+      "test/explicitness.test.mjs",
+      "test/rule-registry.test.mjs"
     ]
   },
   "coverageAnalysis": "perTest",

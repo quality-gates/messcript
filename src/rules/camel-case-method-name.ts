@@ -1,4 +1,5 @@
 // messcript-disable ConstantNamingConventions
+// messcript-disable CouplingBetweenObjects
 import ts from "typescript";
 import { getFunctionContext } from "../ast/functions";
 import { forEachCallableDeclaration, forEachMethodSignatureDeclaration } from "../ast/overloads";
@@ -6,7 +7,7 @@ import { classifyName, getFunctionBindingName } from "../ast/names";
 import type { Finding } from "../finding";
 import { createCamelCaseFinding } from "./camel-case-finding";
 import { isCamelCaseName } from "./camel-case-utils";
-import type { RuleContext } from "./catalog";
+import type { RuleContext, RuleDefinition } from "./catalog";
 
 export const ruleName = "CamelCaseMethodName";
 export const priority = 1;
@@ -44,3 +45,10 @@ export function findCamelCaseMethodName(sourceFile: ts.SourceFile, context: Rule
   });
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: findCamelCaseMethodName,
+};

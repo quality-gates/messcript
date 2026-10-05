@@ -4,6 +4,7 @@ import { forEachClass } from "../ast/classes";
 import type { Finding } from "../finding";
 import { calculateClassComplexity } from "../metrics/classes";
 import { createClassFinding } from "./class-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "ExcessiveClassComplexity";
 export const priority = 3;
@@ -25,3 +26,10 @@ export function findExcessiveClassComplexity(sourceFile: ts.SourceFile): Finding
   });
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findExcessiveClassComplexity(sourceFile),
+};

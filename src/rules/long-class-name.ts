@@ -4,6 +4,7 @@ import { forEachNamedType, getNamedTypeContext } from "../ast/names";
 import type { Finding } from "../finding";
 import { adjustedLength, parseCommaSeparatedNames } from "./naming-utils";
 import { createNamingFinding } from "./naming-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "LongClassName";
 export const priority = 3;
@@ -34,3 +35,10 @@ export function findLongClassName(sourceFile: ts.SourceFile): Finding[] {
   });
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findLongClassName(sourceFile),
+};

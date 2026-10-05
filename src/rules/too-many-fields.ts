@@ -3,6 +3,7 @@ import ts from "typescript";
 import { forEachClass, getClassFields } from "../ast/classes";
 import type { Finding } from "../finding";
 import { createClassFinding } from "./class-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "TooManyFields";
 export const priority = 3;
@@ -24,3 +25,10 @@ export function findTooManyFields(sourceFile: ts.SourceFile): Finding[] {
   });
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findTooManyFields(sourceFile),
+};

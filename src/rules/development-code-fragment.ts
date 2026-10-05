@@ -1,9 +1,11 @@
 // messcript-disable ConstantNamingConventions
+// messcript-disable CouplingBetweenObjects
 import ts from "typescript";
 import { globalReference, memberChainName } from "../ast/global-reference";
 import { sourceComments } from "../ast/source-comments";
 import type { Finding } from "../finding";
 import { createDesignFinding, createDesignFindingAt, functionContextFor } from "./design-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "DevelopmentCodeFragment";
 export const priority = 2;
@@ -96,3 +98,10 @@ export function findDevelopmentCodeFragment(
   visit(sourceFile);
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findDevelopmentCodeFragment(sourceFile),
+};

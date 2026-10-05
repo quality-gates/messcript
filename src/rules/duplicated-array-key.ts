@@ -3,6 +3,7 @@ import ts from "typescript";
 import type { Finding } from "../finding";
 import { locate } from "../location";
 import { createCleanCodeFinding } from "./clean-code-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "DuplicatedArrayKey";
 export const priority = 2;
@@ -154,3 +155,10 @@ export function findDuplicatedArrayKey(sourceFile: ts.SourceFile): Finding[] {
   visit(sourceFile);
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findDuplicatedArrayKey(sourceFile),
+};

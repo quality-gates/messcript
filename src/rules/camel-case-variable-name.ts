@@ -4,6 +4,7 @@ import { collectSemanticConstants, collectVariables } from "../ast/names";
 import type { Finding } from "../finding";
 import { createCamelCaseFinding } from "./camel-case-finding";
 import { isCamelCaseName } from "./camel-case-utils";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "CamelCaseVariableName";
 export const priority = 1;
@@ -23,3 +24,10 @@ export function findCamelCaseVariableName(sourceFile: ts.SourceFile): Finding[] 
   }
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findCamelCaseVariableName(sourceFile),
+};

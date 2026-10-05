@@ -4,6 +4,7 @@ import { defaultIgnoredMethodPattern, forEachClass, getClassMethods, isIgnoredCl
 import type { Finding } from "../finding";
 import { createClassFinding } from "./class-finding";
 import { compileIgnorePattern } from "./ignore-pattern";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "TooManyMethods";
 export const priority = 3;
@@ -26,3 +27,10 @@ export function findTooManyMethods(sourceFile: ts.SourceFile): Finding[] {
   });
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findTooManyMethods(sourceFile),
+};

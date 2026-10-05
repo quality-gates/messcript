@@ -3,6 +3,7 @@ import ts from "typescript";
 import type { Finding } from "../finding";
 import { globalReference } from "../ast/global-reference";
 import { createDesignFinding, enclosingFunction, functionContextFor } from "./design-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "ExitExpression";
 export const priority = 1;
@@ -41,3 +42,10 @@ export function findExitExpression(sourceFile: ts.SourceFile): Finding[] {
   visit(sourceFile);
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findExitExpression(sourceFile),
+};

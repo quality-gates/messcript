@@ -3,6 +3,7 @@ import ts from "typescript";
 import { forEachClass, getClassFields, getClassMethods, isPublicClassMember } from "../ast/classes";
 import type { Finding } from "../finding";
 import { createClassFinding } from "./class-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "ExcessivePublicCount";
 export const priority = 3;
@@ -27,3 +28,11 @@ export function findExcessivePublicCount(sourceFile: ts.SourceFile): Finding[] {
   });
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  aliases: { maximum: "minimum" },
+  run: (sourceFile) => findExcessivePublicCount(sourceFile),
+};

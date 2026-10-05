@@ -6,6 +6,7 @@ import type { ClassLike } from "../ast/classes";
 import type { Finding } from "../finding";
 import { createClassFinding } from "./class-finding";
 import { createDesignFinding } from "./design-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "CouplingBetweenObjects";
 export const priority = 2;
@@ -256,3 +257,11 @@ export function findCouplingBetweenObjects(sourceFile: ts.SourceFile, maximum = 
   }
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  aliases: { reportlevel: "maximum" },
+  run: (sourceFile) => findCouplingBetweenObjects(sourceFile),
+};

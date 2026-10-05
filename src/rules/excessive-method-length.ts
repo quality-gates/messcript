@@ -4,6 +4,7 @@ import { forEachFunction } from "../ast/functions";
 import type { Finding } from "../finding";
 import { locate } from "../location";
 import { createFunctionFinding } from "./function-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "ExcessiveMethodLength";
 export const priority = 3;
@@ -29,3 +30,11 @@ export function findExcessiveMethodLength(sourceFile: ts.SourceFile): Finding[] 
   });
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  aliases: { maximum: "minimum" },
+  run: (sourceFile) => findExcessiveMethodLength(sourceFile),
+};

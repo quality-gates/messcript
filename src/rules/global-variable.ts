@@ -5,6 +5,7 @@ import { isFunctionLike } from "../ast/functions";
 import type { FunctionLike } from "../ast/functions";
 import type { Finding } from "../finding";
 import { createDesignFinding } from "./design-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "GlobalVariable";
 export const priority = 1;
@@ -524,3 +525,10 @@ export function findGlobalVariable(
   }
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: () => [],
+};

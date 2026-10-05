@@ -5,6 +5,7 @@ import type { FunctionLike } from "../ast/functions";
 import type { Finding } from "../finding";
 import { calculateCyclomaticComplexity } from "../metrics/cyclomatic";
 import { createFunctionFinding } from "./function-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "CyclomaticComplexity";
 export const priority = 3;
@@ -37,3 +38,11 @@ export function findCyclomaticComplexity(sourceFile: ts.SourceFile): Finding[] {
   });
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  aliases: { maximum: "reportlevel" },
+  run: (sourceFile) => findCyclomaticComplexity(sourceFile),
+};

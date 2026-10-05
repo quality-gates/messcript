@@ -4,6 +4,7 @@ import { forEachNamedType, getNamedTypeContext } from "../ast/names";
 import type { Finding } from "../finding";
 import { createCamelCaseFinding } from "./camel-case-finding";
 import { isPascalCaseName } from "./camel-case-utils";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "CamelCaseClassName";
 export const priority = 1;
@@ -21,3 +22,10 @@ export function findCamelCaseClassName(sourceFile: ts.SourceFile): Finding[] {
   });
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findCamelCaseClassName(sourceFile),
+};

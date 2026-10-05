@@ -4,6 +4,7 @@ import { collectParameters } from "../ast/names";
 import type { Finding } from "../finding";
 import { createCamelCaseFinding } from "./camel-case-finding";
 import { isCamelCaseName } from "./camel-case-utils";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "CamelCaseParameterName";
 export const priority = 1;
@@ -29,3 +30,10 @@ export function findCamelCaseParameterName(sourceFile: ts.SourceFile): Finding[]
   }
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findCamelCaseParameterName(sourceFile),
+};

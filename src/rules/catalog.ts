@@ -2,90 +2,49 @@
 // messcript-disable CouplingBetweenObjects
 import ts from "typescript";
 import type { Finding } from "../finding";
-import { findBooleanArgumentFlag } from "./boolean-argument-flag";
 import { validateIgnorePatternProperty } from "./ignore-pattern";
-import { findBooleanGetMethodName } from "./boolean-get-method-name";
-import { findCamelCaseClassName } from "./camel-case-class-name";
-import { findCamelCaseMethodName } from "./camel-case-method-name";
-import { findCamelCaseParameterName } from "./camel-case-parameter-name";
-import { findCamelCasePropertyName } from "./camel-case-property-name";
-import { findCamelCaseVariableName } from "./camel-case-variable-name";
-import * as camelCaseClassName from "./camel-case-class-name";
-import * as camelCaseMethodName from "./camel-case-method-name";
-import * as camelCaseParameterName from "./camel-case-parameter-name";
-import * as camelCasePropertyName from "./camel-case-property-name";
-import * as camelCaseVariableName from "./camel-case-variable-name";
-import * as booleanArgumentFlag from "./boolean-argument-flag";
-import * as booleanGetMethodName from "./boolean-get-method-name";
-import * as constantNamingConventions from "./constant-naming-conventions";
-import * as constructorWithNameAsEnclosingClass from "./constructor-with-name-as-enclosing-class";
-import * as countInLoopExpression from "./count-in-loop-expression";
-import * as couplingBetweenObjects from "./coupling-between-objects";
-import * as cyclomaticComplexity from "./cyclomatic-complexity";
-import * as developmentCodeFragment from "./development-code-fragment";
-import * as duplicatedArrayKey from "./duplicated-array-key";
-import * as elseExpression from "./else-expression";
-import * as emptyCatchBlock from "./empty-catch-block";
-import * as excessiveClassComplexity from "./excessive-class-complexity";
-import * as excessiveClassLength from "./excessive-class-length";
-import * as excessiveMethodLength from "./excessive-method-length";
-import * as excessiveParameterList from "./excessive-parameter-list";
-import * as excessivePublicCount from "./excessive-public-count";
-import * as exitExpression from "./exit-expression";
-import * as globalVariable from "./global-variable";
-import * as gotoStatement from "./goto-statement";
-import * as ifStatementAssignment from "./if-statement-assignment";
-import * as implicitInput from "./implicit-input";
-import * as implicitOutput from "./implicit-output";
-import * as lackOfCohesionOfMethods from "./lack-of-cohesion-of-methods";
-import * as longClassName from "./long-class-name";
-import * as longVariable from "./long-variable";
-import * as npathComplexity from "./npath-complexity";
-import * as shortClassName from "./short-class-name";
-import * as shortMethodName from "./short-method-name";
-import * as shortVariable from "./short-variable";
-import * as staticAccess from "./static-access";
-import * as tooManyFields from "./too-many-fields";
-import * as tooManyMethods from "./too-many-methods";
-import * as tooManyPublicMethods from "./too-many-public-methods";
-import * as unusedFormalParameter from "./unused-formal-parameter";
-import * as unusedLocalVariable from "./unused-local-variable";
-import * as unusedPrivateField from "./unused-private-field";
-import * as unusedPrivateMethod from "./unused-private-method";
-import { findConstantNamingConventions } from "./constant-naming-conventions";
-import { findConstructorWithNameAsEnclosingClass } from "./constructor-with-name-as-enclosing-class";
-import { findCountInLoopExpression } from "./count-in-loop-expression";
-import { findCouplingBetweenObjects } from "./coupling-between-objects";
-import { findCyclomaticComplexity } from "./cyclomatic-complexity";
-import { findDevelopmentCodeFragment } from "./development-code-fragment";
-import { findDuplicatedArrayKey } from "./duplicated-array-key";
-import { findElseExpression } from "./else-expression";
-import { findEmptyCatchBlock } from "./empty-catch-block";
-import { findExcessiveClassComplexity } from "./excessive-class-complexity";
-import { findExcessiveClassLength } from "./excessive-class-length";
-import { findExcessiveMethodLength } from "./excessive-method-length";
-import { findExcessiveParameterList } from "./excessive-parameter-list";
-import { findExcessivePublicCount } from "./excessive-public-count";
-import { findExitExpression } from "./exit-expression";
-import { findGlobalVariable } from "./global-variable";
-import { findGotoStatement } from "./goto-statement";
-import { findIfStatementAssignment } from "./if-statement-assignment";
-import { findImplicitInput } from "./implicit-input";
-import { findImplicitOutput } from "./implicit-output";
-import { findLongClassName } from "./long-class-name";
-import { findLongVariable } from "./long-variable";
-import { findNPathComplexity } from "./npath-complexity";
-import { findShortClassName } from "./short-class-name";
-import { findShortMethodName } from "./short-method-name";
-import { findShortVariable } from "./short-variable";
-import { findStaticAccess } from "./static-access";
-import { findTooManyFields } from "./too-many-fields";
-import { findTooManyMethods } from "./too-many-methods";
-import { findTooManyPublicMethods } from "./too-many-public-methods";
-import { findUnusedFormalParameter } from "./unused-formal-parameter";
-import { findUnusedLocalVariable } from "./unused-local-variable";
-import { findUnusedPrivateField } from "./unused-private-field";
-import { findUnusedPrivateMethod } from "./unused-private-method";
+import { definition as booleanArgumentFlag } from "./boolean-argument-flag";
+import { definition as booleanGetMethodName } from "./boolean-get-method-name";
+import { definition as camelCaseClassName } from "./camel-case-class-name";
+import { definition as camelCaseMethodName } from "./camel-case-method-name";
+import { definition as camelCaseParameterName } from "./camel-case-parameter-name";
+import { definition as camelCasePropertyName } from "./camel-case-property-name";
+import { definition as camelCaseVariableName } from "./camel-case-variable-name";
+import { definition as constantNamingConventions } from "./constant-naming-conventions";
+import { definition as constructorWithNameAsEnclosingClass } from "./constructor-with-name-as-enclosing-class";
+import { definition as countInLoopExpression } from "./count-in-loop-expression";
+import { definition as couplingBetweenObjects } from "./coupling-between-objects";
+import { definition as cyclomaticComplexity } from "./cyclomatic-complexity";
+import { definition as developmentCodeFragment } from "./development-code-fragment";
+import { definition as duplicatedArrayKey } from "./duplicated-array-key";
+import { definition as elseExpression } from "./else-expression";
+import { definition as emptyCatchBlock } from "./empty-catch-block";
+import { definition as excessiveClassComplexity } from "./excessive-class-complexity";
+import { definition as excessiveClassLength } from "./excessive-class-length";
+import { definition as excessiveMethodLength } from "./excessive-method-length";
+import { definition as excessiveParameterList } from "./excessive-parameter-list";
+import { definition as excessivePublicCount } from "./excessive-public-count";
+import { definition as exitExpression } from "./exit-expression";
+import { definition as globalVariable, findGlobalVariable } from "./global-variable";
+import { definition as gotoStatement } from "./goto-statement";
+import { definition as ifStatementAssignment } from "./if-statement-assignment";
+import { definition as implicitInput } from "./implicit-input";
+import { definition as implicitOutput } from "./implicit-output";
+import { definition as lackOfCohesionOfMethods } from "./lack-of-cohesion-of-methods";
+import { definition as longClassName } from "./long-class-name";
+import { definition as longVariable } from "./long-variable";
+import { definition as npathComplexity } from "./npath-complexity";
+import { definition as shortClassName } from "./short-class-name";
+import { definition as shortMethodName } from "./short-method-name";
+import { definition as shortVariable } from "./short-variable";
+import { definition as staticAccess } from "./static-access";
+import { definition as tooManyFields } from "./too-many-fields";
+import { definition as tooManyMethods } from "./too-many-methods";
+import { definition as tooManyPublicMethods } from "./too-many-public-methods";
+import { definition as unusedFormalParameter } from "./unused-formal-parameter";
+import { definition as unusedLocalVariable } from "./unused-local-variable";
+import { definition as unusedPrivateField } from "./unused-private-field";
+import { definition as unusedPrivateMethod } from "./unused-private-method";
 
 export type RuleProperties = Readonly<Record<string, string>>;
 
@@ -110,82 +69,63 @@ export type RuleDefinition = {
   run: (sourceFile: ts.SourceFile, context: RuleContext) => Finding[];
 };
 
-type RuleModule = {
-  ruleName: string;
-  priority: number;
-  properties?: Readonly<Record<string, unknown>>;
-  aliases?: Readonly<Record<string, string>>;
-};
-
-function contextualModuleDefinition(
-  module: RuleModule,
-  find: (sourceFile: ts.SourceFile, context: RuleContext) => Finding[],
-  aliases?: Readonly<Record<string, string>>,
-): RuleDefinition {
-  return {
-    name: module.ruleName,
-    priority: module.priority,
-    properties: (module.properties ?? {}) as Record<string, unknown>,
-    aliases,
-    run: find,
-  };
+/** Index definitions by case-folded name, refusing two rules that would answer to one name. */
+export function indexRuleDefinitions(definitions: readonly RuleDefinition[]): ReadonlyMap<string, RuleDefinition> {
+  const index = new Map<string, RuleDefinition>();
+  for (const definition of definitions) {
+    const key = definition.name.toLowerCase();
+    if (index.has(key)) {
+      throw new Error(`Duplicate rule definition: ${key}`);
+    }
+    index.set(key, definition);
+  }
+  return index;
 }
 
-// Some finders take an optional second argument of their own, so pass only the source file.
-function moduleDefinition(
-  module: RuleModule,
-  find: (sourceFile: ts.SourceFile) => Finding[],
-  aliases?: Readonly<Record<string, string>>,
-): RuleDefinition {
-  return contextualModuleDefinition(module, (sourceFile) => find(sourceFile), aliases);
-}
-
-const definitions: RuleDefinition[] = [
-  moduleDefinition(cyclomaticComplexity, findCyclomaticComplexity, { maximum: "reportlevel" }),
-  moduleDefinition(npathComplexity, findNPathComplexity, { maximum: "minimum", reportlevel: "minimum" }),
-  moduleDefinition(excessiveMethodLength, findExcessiveMethodLength, { maximum: "minimum" }),
-  moduleDefinition(excessiveClassLength, findExcessiveClassLength, { maximum: "minimum" }),
-  moduleDefinition(excessiveParameterList, findExcessiveParameterList, { maximum: "minimum" }),
-  moduleDefinition(excessivePublicCount, findExcessivePublicCount, { maximum: "minimum" }),
-  moduleDefinition(tooManyFields, findTooManyFields),
-  moduleDefinition(tooManyMethods, findTooManyMethods),
-  moduleDefinition(tooManyPublicMethods, findTooManyPublicMethods),
-  moduleDefinition(excessiveClassComplexity, findExcessiveClassComplexity),
-  moduleDefinition(shortClassName, findShortClassName),
-  moduleDefinition(longClassName, findLongClassName),
-  moduleDefinition(shortVariable, findShortVariable),
-  moduleDefinition(longVariable, findLongVariable),
-  moduleDefinition(shortMethodName, findShortMethodName),
-  moduleDefinition(constantNamingConventions, findConstantNamingConventions),
-  moduleDefinition(booleanGetMethodName, findBooleanGetMethodName),
-  moduleDefinition(constructorWithNameAsEnclosingClass, findConstructorWithNameAsEnclosingClass),
-  moduleDefinition(unusedPrivateField, findUnusedPrivateField),
-  moduleDefinition(unusedLocalVariable, findUnusedLocalVariable),
-  moduleDefinition(unusedPrivateMethod, findUnusedPrivateMethod),
-  moduleDefinition(unusedFormalParameter, findUnusedFormalParameter),
-  moduleDefinition(booleanArgumentFlag, findBooleanArgumentFlag),
-  moduleDefinition(elseExpression, findElseExpression),
-  moduleDefinition(staticAccess, findStaticAccess),
-  moduleDefinition(ifStatementAssignment, findIfStatementAssignment),
-  moduleDefinition(duplicatedArrayKey, findDuplicatedArrayKey),
-  moduleDefinition(exitExpression, findExitExpression),
-  moduleDefinition(gotoStatement, findGotoStatement),
-  moduleDefinition(countInLoopExpression, findCountInLoopExpression),
-  moduleDefinition(developmentCodeFragment, findDevelopmentCodeFragment),
-  moduleDefinition(emptyCatchBlock, findEmptyCatchBlock),
-  moduleDefinition(couplingBetweenObjects, findCouplingBetweenObjects, { reportlevel: "maximum" }),
-  moduleDefinition(lackOfCohesionOfMethods, lackOfCohesionOfMethods.findLackOfCohesionOfMethods, { minimum: "maximum" }),
-  moduleDefinition(globalVariable, (sourceFile) => []),
-  moduleDefinition(camelCaseClassName, findCamelCaseClassName),
-  contextualModuleDefinition(camelCaseMethodName, findCamelCaseMethodName),
-  contextualModuleDefinition(camelCasePropertyName, findCamelCasePropertyName),
-  moduleDefinition(camelCaseParameterName, findCamelCaseParameterName),
-  moduleDefinition(camelCaseVariableName, findCamelCaseVariableName),
-  moduleDefinition(implicitInput, findImplicitInput),
-  moduleDefinition(implicitOutput, findImplicitOutput),
-];
-
-const definitionsByName = new Map(definitions.map((definition) => [definition.name.toLowerCase(), definition]));
+const definitionsByName = indexRuleDefinitions([
+  cyclomaticComplexity,
+  npathComplexity,
+  excessiveMethodLength,
+  excessiveClassLength,
+  excessiveParameterList,
+  excessivePublicCount,
+  tooManyFields,
+  tooManyMethods,
+  tooManyPublicMethods,
+  excessiveClassComplexity,
+  shortClassName,
+  longClassName,
+  shortVariable,
+  longVariable,
+  shortMethodName,
+  constantNamingConventions,
+  booleanGetMethodName,
+  constructorWithNameAsEnclosingClass,
+  unusedPrivateField,
+  unusedLocalVariable,
+  unusedPrivateMethod,
+  unusedFormalParameter,
+  booleanArgumentFlag,
+  elseExpression,
+  staticAccess,
+  ifStatementAssignment,
+  duplicatedArrayKey,
+  exitExpression,
+  gotoStatement,
+  countInLoopExpression,
+  developmentCodeFragment,
+  emptyCatchBlock,
+  couplingBetweenObjects,
+  lackOfCohesionOfMethods,
+  globalVariable,
+  camelCaseClassName,
+  camelCaseMethodName,
+  camelCasePropertyName,
+  camelCaseParameterName,
+  camelCaseVariableName,
+  implicitInput,
+  implicitOutput,
+]);
 
 const componentRulesetBase: Readonly<Record<string, readonly string[]>> = {
   codesize: [

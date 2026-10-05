@@ -4,6 +4,7 @@ import { getClassMethodName, getClassMethods } from "../ast/classes";
 import { forEachNamedType } from "../ast/names";
 import type { Finding } from "../finding";
 import { createNamingFinding } from "./naming-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "ConstructorWithNameAsEnclosingClass";
 export const priority = 3;
@@ -33,3 +34,10 @@ export function findConstructorWithNameAsEnclosingClass(sourceFile: ts.SourceFil
   });
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findConstructorWithNameAsEnclosingClass(sourceFile),
+};

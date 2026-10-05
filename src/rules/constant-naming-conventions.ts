@@ -4,6 +4,7 @@ import { collectSemanticConstants } from "../ast/names";
 import type { Finding } from "../finding";
 import { createNamingFinding } from "./naming-finding";
 import { isConstantName } from "./naming-utils";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "ConstantNamingConventions";
 export const priority = 4;
@@ -28,3 +29,10 @@ export function findConstantNamingConventions(sourceFile: ts.SourceFile): Findin
   }
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findConstantNamingConventions(sourceFile),
+};

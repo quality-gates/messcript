@@ -4,6 +4,7 @@ import { analyzeUnused } from "../analysis/unused";
 import type { Finding } from "../finding";
 import { createUnusedFinding, unusedOfKind } from "./unused-finding";
 import { parseCommaSeparatedNames } from "./naming-utils";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "UnusedLocalVariable";
 export const priority = 3;
@@ -45,3 +46,10 @@ export function findUnusedLocalVariable(sourceFile: ts.SourceFile, declarations 
       createUnusedFinding(declaration, sourceFile, ruleName, `Avoid unused local variables such as '${declaration.name}'.`),
     );
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findUnusedLocalVariable(sourceFile),
+};
