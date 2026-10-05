@@ -2,6 +2,7 @@
 import ts from "typescript";
 import type { Finding } from "../finding";
 import { createDesignFinding, functionContextFor } from "./design-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "EmptyCatchBlock";
 export const priority = 2;
@@ -34,3 +35,10 @@ export function findEmptyCatchBlock(sourceFile: ts.SourceFile): Finding[] {
   visit(sourceFile);
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findEmptyCatchBlock(sourceFile),
+};

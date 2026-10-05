@@ -10,6 +10,7 @@ import {
 import type { Finding } from "../finding";
 import { createClassFinding } from "./class-finding";
 import { compileIgnorePattern } from "./ignore-pattern";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "TooManyPublicMethods";
 export const priority = 3;
@@ -34,3 +35,10 @@ export function findTooManyPublicMethods(sourceFile: ts.SourceFile): Finding[] {
   });
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findTooManyPublicMethods(sourceFile),
+};

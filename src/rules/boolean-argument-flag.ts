@@ -14,6 +14,7 @@ import {
 } from "./clean-code-finding";
 import { compileIgnorePattern, testIgnorePattern } from "./ignore-pattern";
 import { parseCommaSeparatedNames } from "./naming-utils";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "BooleanArgumentFlag";
 export const priority = 1;
@@ -106,3 +107,10 @@ export function findBooleanArgumentFlag(sourceFile: ts.SourceFile): Finding[] {
   });
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findBooleanArgumentFlag(sourceFile),
+};

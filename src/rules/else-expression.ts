@@ -3,6 +3,7 @@ import ts from "typescript";
 import { forEachFunction, isFunctionLike } from "../ast/functions";
 import type { Finding } from "../finding";
 import { createCleanCodeFinding, functionContext, functionName } from "./clean-code-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "ElseExpression";
 export const priority = 1;
@@ -46,3 +47,10 @@ export function findElseExpression(sourceFile: ts.SourceFile): Finding[] {
   });
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findElseExpression(sourceFile),
+};

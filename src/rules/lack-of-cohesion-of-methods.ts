@@ -4,6 +4,7 @@ import { forEachClass } from "../ast/classes";
 import type { Finding } from "../finding";
 import { calculateLcom4 } from "../metrics/cohesion";
 import { createClassFinding } from "./class-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "LackOfCohesionOfMethods";
 export const priority = 3;
@@ -24,3 +25,11 @@ export function findLackOfCohesionOfMethods(sourceFile: ts.SourceFile, maximum =
   });
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  aliases: { minimum: "maximum" },
+  run: (sourceFile) => findLackOfCohesionOfMethods(sourceFile),
+};

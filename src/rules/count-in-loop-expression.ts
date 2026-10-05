@@ -3,6 +3,7 @@ import ts from "typescript";
 import { isFunctionLike } from "../ast/functions";
 import type { Finding } from "../finding";
 import { createDesignFinding, functionContextFor } from "./design-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "CountInLoopExpression";
 export const priority = 2;
@@ -91,3 +92,10 @@ export function findCountInLoopExpression(sourceFile: ts.SourceFile): Finding[] 
   visit(sourceFile);
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findCountInLoopExpression(sourceFile),
+};

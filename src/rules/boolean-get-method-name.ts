@@ -8,6 +8,7 @@ import type { Finding } from "../finding";
 import { isBooleanExpression, isBooleanType } from "../metrics/boolean";
 import { createNamingFinding } from "./naming-finding";
 import { isBooleanFunction } from "./naming-utils";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "BooleanGetMethodName";
 export const priority = 4;
@@ -41,3 +42,10 @@ export function findBooleanGetMethodName(sourceFile: ts.SourceFile): Finding[] {
   });
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findBooleanGetMethodName(sourceFile),
+};

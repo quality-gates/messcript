@@ -4,6 +4,7 @@ import { forEachNamedType, getNamedTypeContext } from "../ast/names";
 import type { Finding } from "../finding";
 import { createNamingFinding } from "./naming-finding";
 import { parseCommaSeparatedNames } from "./naming-utils";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "ShortClassName";
 export const priority = 3;
@@ -28,3 +29,10 @@ export function findShortClassName(sourceFile: ts.SourceFile): Finding[] {
   });
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findShortClassName(sourceFile),
+};

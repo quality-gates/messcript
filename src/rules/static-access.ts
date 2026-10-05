@@ -5,6 +5,7 @@ import { forEachFunction } from "../ast/functions";
 import type { Finding } from "../finding";
 import { className, createCleanCodeFinding, enclosingClass, functionContext, functionName } from "./clean-code-finding";
 import { compileIgnorePattern, testIgnorePattern } from "./ignore-pattern";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "StaticAccess";
 export const priority = 1;
@@ -74,3 +75,10 @@ export function findStaticAccess(sourceFile: ts.SourceFile): Finding[] {
   });
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findStaticAccess(sourceFile),
+};

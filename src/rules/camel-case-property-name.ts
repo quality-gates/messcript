@@ -4,7 +4,7 @@ import { collectProperties } from "../ast/names";
 import type { Finding } from "../finding";
 import { createCamelCaseFinding } from "./camel-case-finding";
 import { isCamelCaseName } from "./camel-case-utils";
-import type { RuleContext } from "./catalog";
+import type { RuleContext, RuleDefinition } from "./catalog";
 
 export const ruleName = "CamelCasePropertyName";
 export const priority = 1;
@@ -24,3 +24,10 @@ export function findCamelCasePropertyName(sourceFile: ts.SourceFile, context: Ru
   }
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: findCamelCasePropertyName,
+};

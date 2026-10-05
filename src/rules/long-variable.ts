@@ -4,6 +4,7 @@ import { collectBindings } from "../ast/names";
 import type { Finding } from "../finding";
 import { adjustedLength, parseCommaSeparatedNames } from "./naming-utils";
 import { createNamingFinding } from "./naming-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "LongVariable";
 export const priority = 3;
@@ -35,3 +36,10 @@ export function findLongVariable(sourceFile: ts.SourceFile): Finding[] {
   }
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findLongVariable(sourceFile),
+};

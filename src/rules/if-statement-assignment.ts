@@ -1,9 +1,11 @@
 // messcript-disable ConstantNamingConventions
+// messcript-disable CouplingBetweenObjects
 import ts from "typescript";
 import { forEachFunction, isFunctionLike } from "../ast/functions";
 import type { Finding } from "../finding";
 import { locate } from "../location";
 import { createCleanCodeFinding, functionContext } from "./clean-code-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "IfStatementAssignment";
 export const priority = 1;
@@ -80,3 +82,10 @@ export function findIfStatementAssignment(sourceFile: ts.SourceFile): Finding[] 
   });
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findIfStatementAssignment(sourceFile),
+};

@@ -4,6 +4,7 @@ import { collectImplicitFlows } from "../analysis/explicitness";
 import { getFunctionContext } from "../ast/functions";
 import type { Finding } from "../finding";
 import { createDesignFinding } from "./design-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "ImplicitInput";
 export const priority = 3;
@@ -17,3 +18,10 @@ export function findImplicitInput(sourceFile: ts.SourceFile): Finding[] {
       return createDesignFinding(flow.node, sourceFile, ruleName, priority, context, `The ${context} ${flow.description}, an implicit input.`);
     });
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  run: (sourceFile) => findImplicitInput(sourceFile),
+};

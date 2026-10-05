@@ -5,6 +5,7 @@ import type { FunctionLike } from "../ast/functions";
 import type { Finding } from "../finding";
 import { calculateNPathComplexity } from "../metrics/complexity";
 import { createFunctionFinding } from "./function-finding";
+import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "NPathComplexity";
 export const priority = 3;
@@ -29,3 +30,11 @@ export function findNPathComplexity(sourceFile: ts.SourceFile): Finding[] {
   });
   return findings;
 }
+
+export const definition: RuleDefinition = {
+  name: ruleName,
+  priority,
+  properties,
+  aliases: { maximum: "minimum", reportlevel: "minimum" },
+  run: (sourceFile) => findNPathComplexity(sourceFile),
+};
