@@ -815,3 +815,33 @@ function render(disabled: boolean, label: string) {
   assert.deepEqual(findingNames(findUnusedFormalParameter(file)), ["disabled"]);
   assert.deepEqual(findingNames(findUnusedLocalVariable(file)), ["title"]);
 });
+
+test("a default value in a shorthand destructuring assignment uses the local", () => {
+  const file = sourceFile(`function pick(source) {
+  const fallback = 1;
+  let a;
+  ({ a = fallback } = source);
+  return a;
+}
+`);
+  assert.equal(analyzeUnused(file).find((d) => d.name === "fallback")?.used, true);
+});
+
+test("a var in a class static block is a local of the block", () => {
+  const file = sourceFile(`class Holder {
+  static {
+    var lonely = 1;
+  }
+}
+`);
+  assert.deepEqual(analyzeUnused(file).map((d) => [d.name, d.kind, d.used]), [["lonely", "local", false]]);
+});
+
+test("a class expression name shadows an outer local inside the class only", () => {
+  const file = sourceFile(`function make() {
+  const Shape = 1;
+  return class Shape { clone() { return Shape; } };
+}
+`);
+  assert.equal(analyzeUnused(file).find((d) => d.name === "Shape")?.used, false);
+});

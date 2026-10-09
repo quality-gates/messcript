@@ -544,3 +544,16 @@ function f() {
   assert.deepEqual(cachedFlows.map((f) => f.description).sort(), ["reads total", "writes total"]);
 });
 
+
+test("a default value in a shorthand destructuring assignment reads the outer binding", () => {
+  assert.deepEqual(messages("shorthand.js", `let fallback = 0;
+fallback++;
+function pick(source) {
+  let a;
+  ({ a = fallback } = source);
+  return a;
+}
+`), [
+    "5:ImplicitInput: The function pick() reads fallback, an implicit input.",
+  ]);
+});
