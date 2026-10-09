@@ -2,8 +2,10 @@
 import ts from "typescript";
 import { getClassFields, getClassMethods, isParameterProperty } from "../ast/classes";
 import type { ClassField, ClassLike, ClassMethod } from "../ast/classes";
-import { isFunctionLike } from "../ast/functions";
-import type { FunctionLike } from "../ast/functions";
+import { unwrapExpression } from "../ast/expressions";
+import { analyzeScopes } from "../ast/scopes";
+import type { Binding, Declaration } from "../ast/scopes";
+import { walkAst } from "../ast/walk";
 
 export type UnusedKind = "privateField" | "privateMethod" | "local" | "formal";
 
@@ -16,20 +18,6 @@ export type UnusedDeclaration = {
   uncertain?: boolean;
 };
 
-type Scope = {
-  parent?: Scope;
-  bindings: Map<string, Binding[]>;
-  classInfo?: ClassInfo;
-  functionScope?: boolean;
-  root: boolean;
-};
-
-type Binding = {
-  name: string;
-  node: ts.Node;
-  declarations: UnusedDeclaration[];
-};
-
 type ClassInfo = {
   name?: string;
   privateMembers: Map<string, UnusedDeclaration[]>;
@@ -38,12 +26,6 @@ type ClassInfo = {
 function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
   const modifiers = (node as ts.Node & { modifiers?: readonly ts.Modifier[] }).modifiers;
   return modifiers?.some((modifier) => modifier.kind === kind) ?? false;
-}
-
-function isVarDeclaration(node: ts.VariableDeclaration): boolean {
-  const declarationList = node.parent;
-  return ts.isVariableDeclarationList(declarationList) &&
-    (declarationList.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const | ts.NodeFlags.Using)) === 0;
 }
 
 function nameText(node: ClassField | ClassMethod, sourceFile: ts.SourceFile): string | undefined {
@@ -73,532 +55,199 @@ function isPrivateMember(node: ClassField | ClassMethod): boolean {
   return hasModifier(node, ts.SyntaxKind.PrivateKeyword);
 }
 
-function bindingIdentifiers(name: ts.BindingName): ts.Identifier[] {
-  if (ts.isIdentifier(name)) {
-    return [name];
-  }
-  const identifiers: ts.Identifier[] = [];
-  for (const element of name.elements) {
-    if (ts.isBindingElement(element)) {
-      identifiers.push(...bindingIdentifiers(element.name));
-    }
-  }
-  return identifiers;
+function isLocalScope(binding: Binding): boolean {
+  return binding.scope.kind !== "file" && binding.scope.kind !== "namespace";
 }
 
-function bindingName(node: ts.Node): string | undefined {
-  if (ts.isIdentifier(node)) {
-    return node.text;
+function isFormalParameter(declaration: Declaration): boolean {
+  const parameter = declaration.node;
+  if (!ts.isParameter(parameter) || !ts.isFunctionLike(parameter.parent) || !("body" in parameter.parent) || !parameter.parent.body) {
+    return false;
   }
-  if (ts.isPrivateIdentifier(node)) {
-    return node.text.replace(/^#/, "");
+  return !ts.isConstructorDeclaration(parameter.parent) || !isParameterProperty(parameter);
+}
+
+function bindingDeclaration(binding: Binding, declaration: Declaration): UnusedDeclaration | undefined {
+  const node = declaration.node;
+  const used = binding.references.length > 0;
+  const name = declaration.identifier.text;
+  if (ts.isVariableDeclaration(node) && isLocalScope(binding)) {
+    return { name, node: declaration.identifier, kind: "local", context: `local variable ${node.name.getText()}`, used };
+  }
+  if (ts.isParameter(node) && isFormalParameter(declaration)) {
+    return { name, node: declaration.identifier, kind: "formal", context: `formal parameter ${node.name.getText()}`, used };
   }
   return undefined;
 }
 
+// A class expression without a name takes the name of the variable that holds it.
+function className(node: ClassLike): string | undefined {
+  const parent = node.parent;
+  if (node.name) {
+    return node.name.text;
+  }
+  return ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name) ? parent.name.text : undefined;
+}
+
+function isWriteOnly(node: ts.Node): boolean {
+  const parent = node.parent;
+  return ts.isBinaryExpression(parent) && parent.left === node && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken;
+}
+
+function isThis(node: ts.Expression): boolean {
+  return unwrapExpression(node).kind === ts.SyntaxKind.ThisKeyword;
+}
+
 // messcript-disable-next-line ExcessiveClassComplexity
 class UnusedAnalyzer {
-  private readonly root: Scope = { bindings: new Map(), root: true };
-  private readonly scopeByNode = new Map<ts.Node, Scope>();
-  private readonly declarationNodes = new Set<ts.Node>();
   private readonly declarations: UnusedDeclaration[] = [];
+  private readonly classesByNode = new Map<ts.Node, ClassInfo>();
   private readonly classesByName = new Map<string, ClassInfo>();
 
   analyze(sourceFile: ts.SourceFile): UnusedDeclaration[] {
-    this.build(sourceFile, this.root);
-    this.visitReferences(sourceFile);
-    return this.declarations;
-  }
-
-  private addBinding(scope: Scope, name: string, node: ts.Node, declaration?: UnusedDeclaration): void {
-    const bindings = scope.bindings.get(name) ?? [];
-    bindings.push({ name, node, declarations: declaration ? [declaration] : [] });
-    scope.bindings.set(name, bindings);
-    this.declarationNodes.add(node);
-    if (declaration) {
-      this.declarations.push(declaration);
-    }
-  }
-
-  private addBindingName(
-    scope: Scope,
-    name: ts.BindingName,
-    kind: UnusedKind | undefined,
-    context: string,
-    coalesce = false,
-  ): void {
-    for (const identifier of bindingIdentifiers(name)) {
-      const declaration = kind
-        ? { name: identifier.text, node: identifier, kind, context, used: false }
-        : undefined;
-      const bindings = scope.bindings.get(identifier.text);
-      const existing = coalesce ? bindings?.[bindings.length - 1] : undefined;
-      if (existing) {
-        this.declarationNodes.add(identifier);
-        if (declaration) {
-          existing.declarations.push(declaration);
-          this.declarations.push(declaration);
+    for (const binding of analyzeScopes(sourceFile).bindings) {
+      for (const declaration of binding.declarations) {
+        const unused = bindingDeclaration(binding, declaration);
+        if (unused) {
+          this.declarations.push(unused);
         }
-        continue;
       }
-      this.addBinding(scope, identifier.text, identifier, declaration);
     }
-  }
-
-  private currentClass(scope: Scope | undefined): ClassInfo | undefined {
-    let current = scope;
-    while (current) {
-      if (current.classInfo) {
-        return current.classInfo;
+    walkAst(sourceFile, (node) => {
+      if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
+        this.collectClass(node);
       }
-      current = current.parent;
-    }
-    return undefined;
+    });
+    walkAst(sourceFile, (node) => {
+      this.markMemberUses(node);
+    });
+    return this.declarations.sort((first, second) => first.node.pos - second.node.pos);
   }
 
-  private isLocalScope(scope: Scope): boolean {
-    return !scope.root;
+  private collectClass(node: ClassLike): void {
+    const name = className(node);
+    const classInfo: ClassInfo = { name, privateMembers: new Map() };
+    this.classesByNode.set(node, classInfo);
+    if (name) {
+      this.classesByName.set(name, classInfo);
+    }
+    if (!hasModifier(node, ts.SyntaxKind.DeclareKeyword)) {
+      this.collectMembers(node, classInfo);
+    }
   }
 
-  private nearestFunctionScope(scope: Scope): Scope {
-    let current = scope;
-    while (current.parent && !current.functionScope) {
-      current = current.parent;
-    }
-    return current;
-  }
-
-  // messcript-disable-next-line CyclomaticComplexity NPathComplexity
-  private buildClass(node: ClassLike, parent: Scope): void {
-    const className = node.name?.text ??
-      (ts.isClassExpression(node) && ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name) ? node.parent.name.text : undefined);
-    const classInfo: ClassInfo = { name: className, privateMembers: new Map() };
-    if (className) {
-      this.classesByName.set(className, classInfo);
-    }
-    const classScope: Scope = { parent, bindings: new Map(), classInfo, root: false };
-    this.scopeByNode.set(node, parent);
-    if (ts.isClassDeclaration(node) && node.name) {
-      this.addBinding(parent, node.name.text, node.name);
-    }
-
-    const declarationOnly = hasModifier(node, ts.SyntaxKind.DeclareKeyword);
+  private collectMembers(node: ClassLike, classInfo: ClassInfo): void {
     for (const field of getClassFields(node)) {
-      if (declarationOnly || !isPrivateMember(field)) {
-        continue;
+      if (isPrivateMember(field)) {
+        this.addMember(classInfo, field, "privateField");
       }
-      const name = nameText(field, node.getSourceFile());
-      if (!name) {
-        continue;
-      }
-      const declaration: UnusedDeclaration = {
-        name,
-        node: field,
-        kind: "privateField",
-        context: `private field ${name}`,
-        used: false,
-      };
-      const members = classInfo.privateMembers.get(memberKey(name)) ?? [];
-      members.push(declaration);
-      classInfo.privateMembers.set(memberKey(name), members);
-      this.declarations.push(declaration);
-      this.markMemberDeclaration(field);
     }
     for (const method of getClassMethods(node)) {
-      if (declarationOnly || !isPrivateMember(method) || !method.body || ts.isConstructorDeclaration(method)) {
-        continue;
+      if (isPrivateMember(method) && method.body && !ts.isConstructorDeclaration(method)) {
+        this.addMember(classInfo, method, "privateMethod");
       }
-      const name = nameText(method, node.getSourceFile());
-      if (!name) {
-        continue;
-      }
-      const declaration: UnusedDeclaration = {
-        name,
-        node: method,
-        kind: "privateMethod",
-        context: `private method ${name}()`,
-        used: false,
-      };
-      const members = classInfo.privateMembers.get(memberKey(name)) ?? [];
-      members.push(declaration);
-      classInfo.privateMembers.set(memberKey(name), members);
-      this.declarations.push(declaration);
-      this.markMemberDeclaration(method);
-    }
-
-    for (const child of node.members) {
-      this.build(child, classScope);
     }
   }
 
-  private markMemberDeclaration(node: ClassField | ClassMethod): void {
-    if ("name" in node && node.name) {
-      this.declarationNodes.add(node.name);
+  private addMember(classInfo: ClassInfo, member: ClassField | ClassMethod, kind: "privateField" | "privateMethod"): void {
+    const name = nameText(member, member.getSourceFile());
+    if (!name) {
+      return;
     }
+    const context = kind === "privateField" ? `private field ${name}` : `private method ${name}()`;
+    const declaration: UnusedDeclaration = { name, node: member, kind, context, used: false };
+    const members = classInfo.privateMembers.get(memberKey(name)) ?? [];
+    members.push(declaration);
+    classInfo.privateMembers.set(memberKey(name), members);
+    this.declarations.push(declaration);
   }
 
-  private buildFunction(node: FunctionLike, parent: Scope): void {
-    if (ts.isFunctionDeclaration(node) && node.name) {
-      this.addBinding(parent, node.name.text, node.name);
-    }
-    const functionScope: Scope = { parent, bindings: new Map(), functionScope: true, root: false };
-    this.scopeByNode.set(node, functionScope);
-    if (node.name) {
-      this.declarationNodes.add(node.name);
-    }
-    for (const parameter of node.parameters) {
-      const parameterProperty = ts.isConstructorDeclaration(node) && isParameterProperty(parameter);
-      this.addBindingName(
-        functionScope,
-        parameter.name,
-        node.body && !parameterProperty ? "formal" : undefined,
-        `formal parameter ${parameter.name.getText()}`,
-      );
-      this.build(parameter, functionScope);
-    }
-    if (node.body) {
-      this.build(node.body, functionScope);
-    }
-  }
-
-  private buildFor(node: ts.ForStatement, parent: Scope): void {
-    const loopScope: Scope = { parent, bindings: new Map(), root: false };
-    this.scopeByNode.set(node, loopScope);
-    if (node.initializer) {
-      this.build(node.initializer, loopScope);
-    }
-    if (node.condition) {
-      this.build(node.condition, loopScope);
-    }
-    if (node.incrementor) {
-      this.build(node.incrementor, loopScope);
-    }
-    this.build(node.statement, loopScope);
-  }
-
-  private buildForInOrOf(node: ts.ForInStatement | ts.ForOfStatement, parent: Scope): void {
-    const loopScope: Scope = { parent, bindings: new Map(), root: false };
-    this.scopeByNode.set(node, loopScope);
-    this.build(node.expression, parent);
-    this.build(node.initializer, loopScope);
-    this.build(node.statement, loopScope);
-  }
-
-  // messcript-disable-next-line CyclomaticComplexity NPathComplexity
-  private build(node: ts.Node, scope: Scope): void {
-    this.scopeByNode.set(node, scope);
-    if (ts.isSourceFile(node)) {
-      for (const child of node.statements) {
-        this.build(child, scope);
+  private currentClass(node: ts.Node): ClassInfo | undefined {
+    for (let current = node.parent; current; current = current.parent) {
+      const classInfo = this.classesByNode.get(current);
+      if (classInfo) {
+        return classInfo;
       }
-      return;
-    }
-    if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
-      this.buildClass(node, scope);
-      return;
-    }
-    if (isFunctionLike(node)) {
-      this.buildFunction(node, scope);
-      return;
-    }
-    if (ts.isBlock(node)) {
-      const blockScope: Scope = { parent: scope, bindings: new Map(), root: false };
-      this.scopeByNode.set(node, blockScope);
-      for (const child of node.statements) {
-        this.build(child, blockScope);
-      }
-      return;
-    }
-    if (ts.isVariableDeclaration(node)) {
-      const varDeclaration = isVarDeclaration(node);
-      const bindingScope = varDeclaration ? this.nearestFunctionScope(scope) : scope;
-      this.addBindingName(
-        bindingScope,
-        node.name,
-        this.isLocalScope(bindingScope) ? "local" : undefined,
-        `local variable ${node.name.getText()}`,
-        varDeclaration,
-      );
-      if (node.type) {
-        this.build(node.type, scope);
-      }
-      if (node.initializer) {
-        this.build(node.initializer, scope);
-      }
-      return;
-    }
-    if (ts.isParameter(node)) {
-      if (node.type) {
-        this.build(node.type, scope);
-      }
-      if (node.initializer) {
-        this.build(node.initializer, scope);
-      }
-      return;
-    }
-    if (ts.isBindingElement(node)) {
-      if (node.propertyName) {
-        this.build(node.propertyName, scope);
-      }
-      if (node.initializer) {
-        this.build(node.initializer, scope);
-      }
-      return;
-    }
-    if (ts.isPropertyDeclaration(node)) {
-      if (node.type) {
-        this.build(node.type, scope);
-      }
-      if (node.initializer) {
-        this.build(node.initializer, scope);
-      }
-      return;
-    }
-    if (ts.isMethodDeclaration(node) || ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node)) {
-      this.buildFunction(node, scope);
-      return;
-    }
-    if (ts.isForStatement(node)) {
-      this.buildFor(node, scope);
-      return;
-    }
-    if (ts.isForInStatement(node) || ts.isForOfStatement(node)) {
-      this.buildForInOrOf(node, scope);
-      return;
-    }
-    if (ts.isCatchClause(node)) {
-      const catchScope: Scope = { parent: scope, bindings: new Map(), root: false };
-      this.scopeByNode.set(node, catchScope);
-      if (node.variableDeclaration) {
-        this.build(node.variableDeclaration, catchScope);
-      }
-      this.build(node.block, catchScope);
-      return;
-    }
-    ts.forEachChild(node, (child) => this.build(child, scope));
-  }
-
-  private resolve(scope: Scope | undefined, name: string): Binding | undefined {
-    let current = scope;
-    while (current) {
-      const bindings = current.bindings.get(name);
-      if (bindings && bindings.length > 0) {
-        return bindings[bindings.length - 1];
-      }
-      current = current.parent;
     }
     return undefined;
   }
 
-  private isWriteOnly(node: ts.Node): boolean {
-    const parent = node.parent;
-    return ts.isBinaryExpression(parent) && parent.left === node && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken;
-  }
-
-  private markPrivate(scope: Scope, name: string, node: ts.Node, classInfo = this.currentClass(scope)): void {
-    if (this.isWriteOnly(node)) {
+  private markPrivate(name: string, node: ts.Node, classInfo = this.currentClass(node)): void {
+    if (isWriteOnly(node)) {
       return;
     }
-    const members = classInfo?.privateMembers.get(memberKey(name));
-    for (const member of members ?? []) {
+    for (const member of classInfo?.privateMembers.get(memberKey(name)) ?? []) {
       member.used = true;
     }
   }
 
   private markClassUncertain(classInfo: ClassInfo | undefined): void {
-    if (!classInfo) {
-      return;
-    }
-    for (const members of classInfo.privateMembers.values()) {
+    for (const members of classInfo?.privateMembers.values() ?? []) {
       for (const member of members) {
         member.uncertain = true;
       }
     }
   }
 
-  private visitFunction(node: FunctionLike): void {
-    if (node.type) {
-      this.visitReferences(node.type);
-    }
-    for (const parameter of node.parameters) {
-      this.visitReferences(parameter);
-    }
-    if (node.body) {
-      this.visitReferences(node.body);
-    }
-  }
-
-  private unwrapExpression(expr: ts.Expression): ts.Expression {
-    let cur = expr;
-    while (
-      ts.isParenthesizedExpression(cur) ||
-      ts.isAsExpression(cur) ||
-      ts.isTypeAssertionExpression(cur) ||
-      ts.isNonNullExpression(cur) ||
-      ts.isSatisfiesExpression(cur)
-    ) {
-      cur = cur.expression;
-    }
-    return cur;
-  }
-
-  private checkThisDestructuring(scope: Scope, pattern: ts.BindingName, initializer: ts.Expression | undefined): void {
-    if (!initializer || !ts.isObjectBindingPattern(pattern)) {
-      return;
-    }
-    if (this.unwrapExpression(initializer).kind === ts.SyntaxKind.ThisKeyword) {
-      for (const element of pattern.elements) {
-        const memberName = element.propertyName && ts.isIdentifier(element.propertyName)
-          ? element.propertyName.text
-          : ts.isIdentifier(element.name)
-          ? element.name.text
-          : undefined;
-        if (memberName) {
-          this.markPrivate(scope, memberName, element);
-        }
-      }
-    }
-  }
-
-  // messcript-disable-next-line CyclomaticComplexity NPathComplexity ExcessiveMethodLength
-  private visitReferences(node: ts.Node): void {
-    const scope = this.scopeByNode.get(node) ?? this.root;
+  private markMemberUses(node: ts.Node): void {
     if (ts.isPropertyAccessExpression(node)) {
-      this.visitReferences(node.expression);
-      const receiver = this.unwrapExpression(node.expression);
-      if (receiver.kind === ts.SyntaxKind.ThisKeyword) {
-        this.markPrivate(scope, node.name.getText(), node);
-      } else if (ts.isIdentifier(receiver)) {
-        this.markPrivate(scope, node.name.getText(), node, this.classesByName.get(receiver.text));
-      }
+      this.markPropertyAccess(node);
+    } else if (ts.isElementAccessExpression(node)) {
+      this.markElementAccess(node);
+    } else if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      this.markThisAssignment(node);
+    } else if (ts.isVariableDeclaration(node) || ts.isParameter(node)) {
+      this.markThisDestructuring(node.name, node.initializer);
+    }
+  }
+
+  private markPropertyAccess(node: ts.PropertyAccessExpression): void {
+    const receiver = unwrapExpression(node.expression);
+    if (receiver.kind === ts.SyntaxKind.ThisKeyword) {
+      this.markPrivate(node.name.text, node);
+    } else if (ts.isIdentifier(receiver)) {
+      this.markPrivate(node.name.text, node, this.classesByName.get(receiver.text));
+    }
+  }
+
+  private markElementAccess(node: ts.ElementAccessExpression): void {
+    if (!isThis(node.expression)) {
       return;
     }
-    if (ts.isElementAccessExpression(node)) {
-      this.visitReferences(node.expression);
-      const receiver = this.unwrapExpression(node.expression);
-      if (receiver.kind === ts.SyntaxKind.ThisKeyword && node.argumentExpression) {
-        const key = this.unwrapExpression(node.argumentExpression);
-        if (ts.isStringLiteralLike(key)) {
-          this.markPrivate(scope, key.text, node);
-        } else {
-          this.markClassUncertain(this.currentClass(scope));
-        }
-      }
-      if (node.argumentExpression) {
-        this.visitReferences(node.argumentExpression);
-      }
+    const key = unwrapExpression(node.argumentExpression);
+    if (ts.isStringLiteralLike(key)) {
+      this.markPrivate(key.text, node);
+    } else {
+      this.markClassUncertain(this.currentClass(node));
+    }
+  }
+
+  private markThisAssignment(node: ts.BinaryExpression): void {
+    const left = unwrapExpression(node.left);
+    if (!isThis(node.right) || !ts.isObjectLiteralExpression(left)) {
       return;
     }
-    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
-      const right = this.unwrapExpression(node.right);
-      const left = this.unwrapExpression(node.left);
-      if (right.kind === ts.SyntaxKind.ThisKeyword && ts.isObjectLiteralExpression(left)) {
-        for (const prop of left.properties) {
-          if (ts.isShorthandPropertyAssignment(prop)) {
-            this.markPrivate(scope, prop.name.text, prop);
-          } else if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name)) {
-            this.markPrivate(scope, prop.name.text, prop);
-          }
-        }
+    for (const property of left.properties) {
+      if (ts.isShorthandPropertyAssignment(property) || (ts.isPropertyAssignment(property) && ts.isIdentifier(property.name))) {
+        this.markPrivate(property.name.getText(), property);
       }
     }
-    if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
-      for (const child of node.members) {
-        this.visitReferences(child);
-      }
+  }
+
+  private markThisDestructuring(pattern: ts.BindingName, initializer: ts.Expression | undefined): void {
+    if (!initializer || !ts.isObjectBindingPattern(pattern) || !isThis(initializer)) {
       return;
     }
-    if (isFunctionLike(node)) {
-      this.visitFunction(node);
-      return;
+    for (const element of pattern.elements) {
+      const memberName = element.propertyName && ts.isIdentifier(element.propertyName)
+        ? element.propertyName.text
+        : ts.isIdentifier(element.name)
+        ? element.name.text
+        : undefined;
+      if (memberName) {
+        this.markPrivate(memberName, element);
+      }
     }
-    if (ts.isVariableDeclaration(node)) {
-      this.checkThisDestructuring(scope, node.name, node.initializer);
-      if (node.type) {
-        this.visitReferences(node.type);
-      }
-      if (node.initializer) {
-        this.visitReferences(node.initializer);
-      }
-      return;
-    }
-    if (ts.isParameter(node)) {
-      this.checkThisDestructuring(scope, node.name, node.initializer);
-      if (node.type) {
-        this.visitReferences(node.type);
-      }
-      if (node.initializer) {
-        this.visitReferences(node.initializer);
-      }
-      return;
-    }
-    if (ts.isBindingElement(node)) {
-      if (node.propertyName && ts.isComputedPropertyName(node.propertyName)) {
-        this.visitReferences(node.propertyName.expression);
-      }
-      if (node.initializer) {
-        this.visitReferences(node.initializer);
-      }
-      return;
-    }
-    if (ts.isPropertyDeclaration(node) || ts.isPropertySignature(node)) {
-      if (node.type) {
-        this.visitReferences(node.type);
-      }
-      if (ts.isPropertyDeclaration(node) && node.initializer) {
-        this.visitReferences(node.initializer);
-      }
-      return;
-    }
-    if (ts.isMethodSignature(node)) {
-      for (const parameter of node.parameters) {
-        this.visitReferences(parameter);
-      }
-      if (node.type) {
-        this.visitReferences(node.type);
-      }
-      return;
-    }
-    if (ts.isQualifiedName(node)) {
-      this.visitReferences(node.left);
-      return;
-    }
-    if (ts.isPropertyAssignment(node) && !ts.isShorthandPropertyAssignment(node)) {
-      if (ts.isComputedPropertyName(node.name)) {
-        this.visitReferences(node.name.expression);
-      }
-      this.visitReferences(node.initializer);
-      return;
-    }
-    if (ts.isJsxAttribute(node)) {
-      if (node.initializer) {
-        this.visitReferences(node.initializer);
-      }
-      return;
-    }
-    if (ts.isTypeParameterDeclaration(node)) {
-      if (node.constraint) {
-        this.visitReferences(node.constraint);
-      }
-      if (node.default) {
-        this.visitReferences(node.default);
-      }
-      return;
-    }
-    if (ts.isImportDeclaration(node)) {
-      return;
-    }
-    if (ts.isIdentifier(node)) {
-      if (this.declarationNodes.has(node)) {
-        return;
-      }
-      const binding = this.resolve(scope, node.text);
-      for (const declaration of binding?.declarations ?? []) {
-        declaration.used = true;
-      }
-      return;
-    }
-    ts.forEachChild(node, (child) => this.visitReferences(child));
   }
 }
 
