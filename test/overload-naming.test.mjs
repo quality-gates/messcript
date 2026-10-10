@@ -3,6 +3,7 @@ import { test } from "node:test";
 import ts from "typescript";
 import { analyze } from "../dist/analyzer.js";
 import { analyzeOverloads } from "../dist/ast/overloads.js";
+import { runCli } from "../dist/cli.js";
 import { findShortMethodName } from "../dist/rules/short-method-name.js";
 import { findShortVariable } from "../dist/rules/short-variable.js";
 import { findCamelCaseMethodName } from "../dist/rules/camel-case-method-name.js";
@@ -11,10 +12,60 @@ import { findBooleanGetMethodName } from "../dist/rules/boolean-get-method-name.
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Writable } from "node:stream";
 
 function sourceFile(source, fileName = "repro.ts") {
   return ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 }
+
+function captureCli(args) {
+  let stdout = "";
+  let stderr = "";
+  const status = runCli(args, {
+    stdout: new Writable({
+      write(chunk, _encoding, callback) {
+        stdout += chunk.toString();
+        callback();
+      },
+    }),
+    stderr: new Writable({
+      write(chunk, _encoding, callback) {
+        stderr += chunk.toString();
+        callback();
+      },
+    }),
+  });
+  return { status, stdout, stderr };
+}
+
+function ruleLines(stdout, ruleName) {
+  return [...stdout.matchAll(new RegExp(`:(\\d+):\\d+: ${ruleName} \\[`, "g"))].map((match) => Number(match[1]));
+}
+
+const reporterHandlers = `export const handlers = {
+  Bad_Name() {
+    return 1;
+  },
+  ab() {
+    return 1;
+  },
+  getActive() {
+    return true;
+  },
+};
+
+export class Screen {
+  Bad_Name() {
+    return 1;
+  }
+  ab() {
+    return 1;
+  }
+  getActive() {
+    return true;
+  }
+}
+`;
 
 test("function declaration overloads emit exactly one ShortMethodName finding", () => {
   const file = sourceFile(`
@@ -308,6 +359,151 @@ interface Handler {
     const res7 = analyze([file7], ["naming"], {});
     const camelFindings7 = res7.findings.filter((f) => f.ruleName === "CamelCaseMethodName");
     assert.equal(camelFindings7.length, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("typescript ruleset reports object-literal methods and the matching class methods once each", () => {
+  const dir = mkdtempSync(join(tmpdir(), "messcript-object-methods-"));
+  try {
+    const file = join(dir, "handlers.ts");
+    writeFileSync(file, reporterHandlers);
+    const result = captureCli([file, "text", "typescript"]);
+    assert.equal(result.status, 2, result.stderr);
+    assert.deepEqual(ruleLines(result.stdout, "CamelCaseMethodName"), [2, 14]);
+    assert.deepEqual(ruleLines(result.stdout, "ShortMethodName"), [5, 17]);
+    assert.deepEqual(ruleLines(result.stdout, "BooleanGetMethodName"), [8, 20]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("object-literal accessors are named like class accessors", () => {
+  const dir = mkdtempSync(join(tmpdir(), "messcript-object-accessors-"));
+  try {
+    const file = join(dir, "accessors.ts");
+    writeFileSync(file, `export const handlers = {
+  get Bad_Get() { return 1; },
+  set Bad_Set(value: number) {},
+  get ab() { return 1; },
+  get getActive() { return true; },
+};
+export class Screen {
+  get Bad_Get() { return 1; }
+  set Bad_Set(value: number) {}
+}
+`);
+    const camel = captureCli([file, "text", "typescript", "--only", "CamelCaseMethodName"]);
+    assert.equal(camel.status, 2, camel.stderr);
+    assert.deepEqual(ruleLines(camel.stdout, "CamelCaseMethodName"), [2, 3, 8, 9]);
+
+    const short = captureCli([file, "text", "typescript", "--only", "ShortMethodName"]);
+    assert.deepEqual(ruleLines(short.stdout, "ShortMethodName"), [4]);
+    const booleanGet = captureCli([file, "text", "typescript", "--only", "BooleanGetMethodName"]);
+    assert.deepEqual(ruleLines(booleanGet.stdout, "BooleanGetMethodName"), [5]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("object-literal method parameters are named like class method parameters", () => {
+  const dir = mkdtempSync(join(tmpdir(), "messcript-object-params-"));
+  try {
+    const file = join(dir, "params.ts");
+    writeFileSync(file, `export const handlers = {
+  method(Bad_Param: number) { return Bad_Param; },
+};
+export class Screen {
+  method(Bad_Param: number) { return Bad_Param; }
+}
+`);
+    const result = captureCli([file, "text", "controversial", "--only", "CamelCaseParameterName"]);
+    assert.equal(result.status, 2, result.stderr);
+    assert.deepEqual(ruleLines(result.stdout, "CamelCaseParameterName"), [2, 5]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("duplicate object-literal methods are each reported once, and nested functions stay grouped", () => {
+  const file = sourceFile(`const handlers = {
+  Bad_Name() {
+    function ab() { return 1; }
+  },
+  Bad_Name() { return 2; },
+};
+`);
+  const camel = findCamelCaseMethodName(file);
+  assert.equal(camel.length, 2);
+  assert.deepEqual(camel.map((finding) => finding.line), [2, 5]);
+  assert.equal(findShortMethodName(file).length, 1);
+  assert.equal(findShortMethodName(file)[0].line, 3);
+});
+
+test("property-assigned functions stay out of method-name findings", () => {
+  const file = sourceFile(`export const handlers = {
+  Bad_Prop: function () { return 1; },
+  Bad_Arrow: () => 1,
+};
+`);
+  assert.equal(findCamelCaseMethodName(file).length, 0);
+  assert.equal(findShortMethodName(file).length, 0);
+  assert.equal(findBooleanGetMethodName(file).length, 0);
+});
+
+test("object-literal methods are single-declaration groups and honor line suppressions", () => {
+  const file = sourceFile(`const handlers = {
+  Bad_Name(Bad_Param: number) {
+    return Bad_Param;
+  },
+};
+`);
+  const analysis = analyzeOverloads(file);
+  const methodGroups = analysis.callableGroups.filter((group) => ts.isMethodDeclaration(group.primaryDeclaration));
+  assert.equal(methodGroups.length, 1);
+  assert.equal(methodGroups[0].declarations.length, 1);
+  assert.equal(methodGroups[0].declarations[0], methodGroups[0].primaryDeclaration);
+  assert.equal(methodGroups[0].implementation, methodGroups[0].primaryDeclaration);
+  assert.deepEqual(methodGroups[0].declarationLines, [2]);
+  const parameterGroups = analysis.parameterizedGroups.filter((group) => ts.isMethodDeclaration(group.signatures[0]));
+  assert.equal(parameterGroups.length, 1);
+  assert.equal(parameterGroups[0].signatures[0], methodGroups[0].primaryDeclaration);
+  assert.deepEqual(parameterGroups[0].declarationLines, [2]);
+
+  const dir = mkdtempSync(join(tmpdir(), "messcript-object-suppress-"));
+  try {
+    const suppressed = join(dir, "handlers.ts");
+    writeFileSync(suppressed, `export const handlers = {
+  // messcript-disable-next-line CamelCaseMethodName
+  Bad_Name() { return 1; },
+};
+`);
+    const result = analyze([suppressed], ["controversial"]);
+    assert.equal(result.findings.filter((finding) => finding.ruleName === "CamelCaseMethodName").length, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("allow-underscore still exempts an object-literal method", () => {
+  const dir = mkdtempSync(join(tmpdir(), "messcript-object-underscore-"));
+  try {
+    const file = join(dir, "handlers.ts");
+    writeFileSync(file, "export const handlers = {\n  _helper() { return 1; },\n  Bad_Name() { return 1; },\n};\n");
+    const baseline = analyze([file], [{
+      name: "CamelCaseMethodName",
+      rulesetName: "controversial",
+      properties: {},
+    }]);
+    assert.deepEqual(baseline.findings.map((finding) => finding.line), [2, 3]);
+    const exempt = analyze([file], [{
+      name: "CamelCaseMethodName",
+      rulesetName: "controversial",
+      properties: { "allow-underscore": "true" },
+    }]);
+    assert.deepEqual(exempt.findings.map((finding) => finding.line), [3]);
+    assert.match(exempt.findings[0].message, /Bad_Name/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

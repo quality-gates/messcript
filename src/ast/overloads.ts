@@ -64,6 +64,36 @@ function getSignatureLines(
   return [...new Set(lines)];
 }
 
+function isObjectLiteralCallable(
+  property: ts.ObjectLiteralElementLike,
+): property is ts.MethodDeclaration | ts.GetAccessorDeclaration | ts.SetAccessorDeclaration {
+  return ts.isMethodDeclaration(property) || ts.isGetAccessorDeclaration(property) || ts.isSetAccessorDeclaration(property);
+}
+
+function groupObjectLiteralMembers(
+  properties: readonly ts.ObjectLiteralElementLike[],
+  sourceFile: ts.SourceFile,
+  callableGroups: CallableGroup[],
+  parameterizedGroups: ParameterizedGroup[],
+): void {
+  for (const property of properties) {
+    if (!isObjectLiteralCallable(property)) {
+      continue;
+    }
+    const lines = getSignatureLines([property], sourceFile);
+    callableGroups.push({
+      primaryDeclaration: property,
+      declarations: [property],
+      implementation: property,
+      declarationLines: lines,
+    });
+    parameterizedGroups.push({
+      signatures: [property],
+      declarationLines: lines,
+    });
+  }
+}
+
 function groupFunctionDeclarations(
   statements: readonly ts.Statement[],
   sourceFile: ts.SourceFile,
@@ -272,6 +302,12 @@ function collectOverloads(sourceFile: ts.SourceFile): OverloadAnalysis {
 
     if (ts.isInterfaceDeclaration(node) || ts.isTypeLiteralNode(node)) {
       groupTypeMembers(node.members, sourceFile, methodSignatureGroups, parameterizedGroups);
+      ts.forEachChild(node, visit);
+      return;
+    }
+
+    if (ts.isObjectLiteralExpression(node)) {
+      groupObjectLiteralMembers(node.properties, sourceFile, callableGroups, parameterizedGroups);
       ts.forEachChild(node, visit);
       return;
     }
