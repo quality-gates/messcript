@@ -239,7 +239,31 @@ test("LCOM4 ignores object literal accessor names that shadow fields", () => {
   assert.equal(calculateLcom4(classNode), 2);
 });
 
-test("LCOM4 still joins methods through bare identifier field reads", () => {
+test("LCOM4 does not treat free identifiers as uses of same-named fields", () => {
+  const sourceFile = ts.createSourceFile(
+    "bag.ts",
+    `export class Bag {
+  left = 0;
+  right = 0;
+  bumpLeft() {
+    this.left += 1;
+  }
+  bumpRight() {
+    this.right += 1;
+    return left;
+  }
+}`,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const classNode = sourceFile.statements[0];
+  assert.ok(ts.isClassDeclaration(classNode));
+  assert.equal(calculateLcom4(classNode), 2);
+  assert.equal(findLackOfCohesionOfMethods(sourceFile).length, 1);
+});
+
+test("LCOM4 does not join methods through free identifier writes", () => {
   const sourceFile = ts.createSourceFile(
     "bare-cohesion.ts",
     `class Bare {
@@ -248,6 +272,63 @@ test("LCOM4 still joins methods through bare identifier field reads", () => {
   addShared() { this.shared += 1; }
   addBare() { shared += 1; this.other += 1; }
   addOther() { this.other += 1; }
+}`,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const classNode = sourceFile.statements[0];
+  assert.ok(ts.isClassDeclaration(classNode));
+  assert.equal(calculateLcom4(classNode), 2);
+});
+
+test("LCOM4 does not treat bare calls as calls to same-named methods", () => {
+  const sourceFile = ts.createSourceFile(
+    "bare-call-cohesion.ts",
+    `class Bag {
+  left = 0;
+  right = 0;
+  bumpLeft() { this.left += 1; }
+  bumpRight() { this.right += 1; bumpLeft(); }
+}`,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const classNode = sourceFile.statements[0];
+  assert.ok(ts.isClassDeclaration(classNode));
+  assert.equal(calculateLcom4(classNode), 2);
+});
+
+test("LCOM4 does not treat free identifiers in accessors as backing fields", () => {
+  const sourceFile = ts.createSourceFile(
+    "accessor-free-cohesion.ts",
+    `class Accessors {
+  left = 0;
+  right = 0;
+  get value() { return left; }
+  set value(next) { left = next; }
+  bumpLeft() { this.left += 1; }
+  bumpRight() { this.right += 1; this.value = this.value + 1; }
+}`,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const classNode = sourceFile.statements[0];
+  assert.ok(ts.isClassDeclaration(classNode));
+  assert.equal(calculateLcom4(classNode), 2);
+});
+
+test("LCOM4 joins methods through receiver reads of trivial accessors", () => {
+  const sourceFile = ts.createSourceFile(
+    "accessor-join-cohesion.ts",
+    `class Accessors {
+  left = 0;
+  right = 0;
+  get value() { return this.left; }
+  bumpLeft() { this.left += 1; }
+  bumpRight() { this.right += 1; return this.value; }
 }`,
     ts.ScriptTarget.Latest,
     true,

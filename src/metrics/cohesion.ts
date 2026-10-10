@@ -23,7 +23,7 @@ type Method = {
   propertyAccessor: boolean;
 };
 
-type Receiver = "this" | "class" | "bare";
+type Receiver = "this" | "class";
 
 function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
   const modifiers = (node as ts.Node & { modifiers?: readonly ts.Modifier[] }).modifiers;
@@ -142,7 +142,6 @@ function isForeignClassMember(
   return receiver === "class" && (methodScope !== "static" || receiverName !== className);
 }
 
-// messcript-disable-next-line CyclomaticComplexity
 function directFieldAccess(
   expression: ts.Expression,
   methodScope: Scope,
@@ -151,18 +150,10 @@ function directFieldAccess(
   sourceFile: ts.SourceFile,
 ): string | undefined {
   const member = directReceiverMember(expression, sourceFile);
-  if (member) {
-    if (isForeignClassMember(member.receiver, member.receiverName, methodScope, className)) {
-      return undefined;
-    }
-    const scope = member.receiver === "this" ? methodScope : "static";
-    return fields.get(scopedKey(scope, member.name))?.key;
+  if (!member || isForeignClassMember(member.receiver, member.receiverName, methodScope, className)) {
+    return undefined;
   }
-  const unwrapped = unwrapExpression(expression);
-  if (ts.isIdentifier(unwrapped)) {
-    return fields.get(scopedKey(methodScope, unwrapped.text))?.key;
-  }
-  return undefined;
+  return fields.get(scopedKey(methodScope, member.name))?.key;
 }
 
 function isSimpleAccessorValue(node: ts.Expression): boolean {
@@ -196,39 +187,6 @@ function trivialAccessorField(
     return undefined;
   }
   return directFieldAccess(statement.expression.left, methodScope, fields, className, sourceFile);
-}
-
-function collectBindingNames(name: ts.BindingName, names: Set<string>): void {
-  if (ts.isIdentifier(name)) {
-    names.add(name.text);
-    return;
-  }
-  for (const element of name.elements) {
-    if (ts.isOmittedExpression(element)) {
-      continue;
-    }
-    collectBindingNames(element.name, names);
-  }
-}
-
-function collectDeclaredNames(method: ClassMethod): Set<string> {
-  const names = new Set<string>();
-  for (const parameter of method.parameters) {
-    collectBindingNames(parameter.name, names);
-  }
-  function visit(node: ts.Node): void {
-    if (ts.isVariableDeclaration(node)) {
-      collectBindingNames(node.name, names);
-    }
-    if (ts.isFunctionDeclaration(node) && node.name) {
-      names.add(node.name.text);
-    }
-    ts.forEachChild(node, visit);
-  }
-  if (method.body) {
-    visit(method.body);
-  }
-  return names;
 }
 
 function classNameFor(node: ClassLike, sourceFile: ts.SourceFile): string | undefined {
@@ -295,7 +253,6 @@ function collectUses(
 ): { fields: Set<string>; calls: Set<Method> } {
   const usedFields = new Set<string>();
   const calledMethods = new Set<Method>();
-  const declaredNames = collectDeclaredNames(method.node);
 
   function addField(expression: ts.Expression): void {
     const field = directFieldAccess(expression, method.scope, fields, className, sourceFile);
@@ -308,10 +265,9 @@ function collectUses(
     if (isForeignClassMember(receiver, receiverName, method.scope, className)) {
       return;
     }
-    const scope = receiver === "this" || receiver === "bare" ? method.scope : "static";
-    const target = methods.get(scopedKey(scope, name));
+    const target = methods.get(scopedKey(method.scope, name));
     if (!target) {
-      const field = fields.get(scopedKey(scope, name));
+      const field = fields.get(scopedKey(method.scope, name));
       if (field) {
         usedFields.add(field.key);
       }
@@ -334,16 +290,9 @@ function collectUses(
     }
 
     if (ts.isCallExpression(node)) {
-      const expression = unwrapExpression(node.expression);
-      if (ts.isIdentifier(expression)) {
-        if (!declaredNames.has(expression.text)) {
-          addAccessorOrMethod("bare", expression.text);
-        }
-      } else {
-        const member = directReceiverMember(expression, sourceFile);
-        if (member) {
-          addAccessorOrMethod(member.receiver, member.name, member.receiverName);
-        }
+      const member = directReceiverMember(node.expression, sourceFile);
+      if (member) {
+        addAccessorOrMethod(member.receiver, member.name, member.receiverName);
       }
     }
 
@@ -354,27 +303,9 @@ function collectUses(
         if (isForeignClassMember(member.receiver, member.receiverName, method.scope, className)) {
           return;
         }
-        const scope = member.receiver === "this" || member.receiver === "bare" ? method.scope : "static";
-        const target = methods.get(scopedKey(scope, member.name));
+        const target = methods.get(scopedKey(method.scope, member.name));
         if (target?.propertyAccessor && target.backingField) {
           usedFields.add(target.backingField);
-        }
-      }
-    }
-
-    if (ts.isIdentifier(node) && !declaredNames.has(node.text)) {
-      const parent = node.parent;
-      const isMemberName =
-        (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
-        (ts.isPropertyDeclaration(parent) && parent.name === node) ||
-        (ts.isMethodDeclaration(parent) && parent.name === node) ||
-        (ts.isGetAccessorDeclaration(parent) && parent.name === node) ||
-        (ts.isSetAccessorDeclaration(parent) && parent.name === node) ||
-        ts.isBindingElement(parent);
-      if (!isMemberName) {
-        const field = fields.get(scopedKey(method.scope, node.text));
-        if (field) {
-          usedFields.add(field.key);
         }
       }
     }
