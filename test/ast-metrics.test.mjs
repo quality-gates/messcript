@@ -33,6 +33,7 @@ import {
 } from "../dist/ast/names.js";
 import { isBooleanExpression, isBooleanType } from "../dist/metrics/boolean.js";
 import { calculateClassComplexity, calculateClassLineCount } from "../dist/metrics/classes.js";
+import { calculateNodeLineCount } from "../dist/metrics/lines.js";
 import { calculateLcom4 } from "../dist/metrics/cohesion.js";
 import { calculateNPathComplexity } from "../dist/metrics/complexity.js";
 import { calculateCyclomaticComplexity } from "../dist/metrics/cyclomatic.js";
@@ -296,6 +297,22 @@ test("class metrics cover whitespace, complexity, empty classes, and cohesion bo
   assert.equal(calculateClassComplexity(node), 2);
   assert.equal(calculateLcom4(sourceFile("class Empty {}").statements[0]), 1);
   assert.equal(calculateLcom4(sourceFile("class Stateless { one() {} two() {} }").statements[0]), 1);
+});
+
+test("calculateNodeLineCount counts a function's lines and skips blank lines when asked", () => {
+  const file = sourceFile(
+    "function sample() {\r\n" +
+      "\r\n" +
+      "  const value = 1;\r\n" +
+      "   \r\n" +
+      "  return value;\r\n" +
+      "}\r\n" +
+      "const after = 1;\r\n",
+  );
+  const node = file.statements[0];
+
+  assert.equal(calculateNodeLineCount(node, file, false), 6);
+  assert.equal(calculateNodeLineCount(node, file, true), 4);
 });
 
 test("getClassFields counts override constructor parameter properties once", () => {
