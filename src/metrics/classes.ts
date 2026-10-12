@@ -1,24 +1,15 @@
 import ts from "typescript";
 import type { ClassLike } from "../ast/classes";
 import { getClassMethods } from "../ast/classes";
-import { locate } from "../location";
 import { calculateCyclomaticComplexity } from "./cyclomatic";
+import { calculateNodeLineCount } from "./lines";
 
 export function calculateClassLineCount(
   node: ClassLike,
   sourceFile: ts.SourceFile,
   ignoreWhitespace: boolean,
 ): number {
-  const start = node.getStart(sourceFile);
-  const end = locate(sourceFile, Math.max(start, node.getEnd() - 1));
-  if (!ignoreWhitespace) {
-    return end.line - locate(sourceFile, start).line + 1;
-  }
-
-  return sourceFile.text
-    .slice(start, node.getEnd())
-    .split(/\r?\n/)
-    .filter((line) => line.trim().length > 0).length;
+  return calculateNodeLineCount(node, sourceFile, ignoreWhitespace);
 }
 
 export function calculateClassComplexity(node: ClassLike): number {

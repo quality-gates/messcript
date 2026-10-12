@@ -2,7 +2,7 @@
 import ts from "typescript";
 import { forEachFunction } from "../ast/functions";
 import type { Finding } from "../finding";
-import { locate } from "../location";
+import { calculateNodeLineCount } from "../metrics/lines";
 import { createFunctionFinding } from "./function-finding";
 import type { RuleDefinition } from "./catalog";
 
@@ -13,11 +13,7 @@ export const properties = { minimum: 100, "ignore-whitespace": false } as const;
 export function findExcessiveMethodLength(sourceFile: ts.SourceFile): Finding[] {
   const findings: Finding[] = [];
   forEachFunction(sourceFile, (node) => {
-    const start = locate(sourceFile, node.getStart(sourceFile));
-    const end = locate(sourceFile, Math.max(node.getStart(sourceFile), node.getEnd() - 1));
-    const lineCount = properties["ignore-whitespace"]
-      ? sourceFile.text.slice(node.getStart(sourceFile), node.getEnd()).split(/\r?\n/).filter((line) => line.trim().length > 0).length
-      : end.line - start.line + 1;
+    const lineCount = calculateNodeLineCount(node, sourceFile, properties["ignore-whitespace"]);
     if (lineCount < properties.minimum) {
       return;
     }
