@@ -106,11 +106,29 @@ export function joinStorageOrigins(origins: readonly StorageOrigin[]): readonly 
 export function memberStorageFact(fact: StorageFact, slot?: string): StorageFact {
   const origins = fact.outer.flatMap((allocation) => {
     const cells = fact.cells?.filter((cell) => cell.allocation === allocation);
-    return cells?.length ? cells.filter((cell) => cell.slot !== "@allocation" && (slot === undefined || slot === "*" || cell.slot === slot || cell.slot === "*")).flatMap((cell) => cell.origins)
+    return cells?.length ? cells.filter((cell) => cell.slot !== "@allocation" && cellMatchesSlot(cell.slot, slot)).flatMap((cell) => cell.origins)
       : fact.reachable.map((origin) => projectedOrigin(origin, slot ?? "*"));
   });
   const outer = joinOrigins(origins);
   return { outer, reachable: reachableOrigins(outer, fact.cells ?? []), cells: fact.cells };
+}
+
+function cellMatchesSlot(cellSlot: string, selectedSlot: string | undefined): boolean {
+  if (selectedSlot === undefined || selectedSlot === "*" || cellSlot === "*" || cellSlot === selectedSlot) {
+    return true;
+  }
+  const start = cellSlot.startsWith("append:") ? Number(cellSlot.slice(7)) : undefined;
+  const index = arrayIndexForSlot(selectedSlot);
+  return start !== undefined && index !== undefined && index >= start;
+}
+
+export function arrayIndexForSlot(slot: string | undefined): number | undefined {
+  if (!slot?.startsWith("property:")) {
+    return undefined;
+  }
+  const text = slot.slice(9);
+  const index = Number(text);
+  return String(index) === text && Number.isInteger(index) && index >= 0 && index < 4294967295 ? index : undefined;
 }
 
 export function mapStorageFact(

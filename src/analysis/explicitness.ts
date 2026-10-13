@@ -22,6 +22,7 @@ import {
   type StorageResolver,
 } from "./ownership";
 import {
+  arrayIndexForSlot,
   elementFact,
   memberStorageFact,
   mapStorageFact,
@@ -290,15 +291,6 @@ function mutationSlotOverlaps(path: readonly string[], slot: string): boolean {
   return pathsOverlap(path, [slot]);
 }
 
-function arrayIndexForSlot(slot: string | undefined): number | undefined {
-  if (!slot?.startsWith("property:")) {
-    return undefined;
-  }
-  const text = slot.slice(9);
-  const index = Number(text);
-  return String(index) === text && Number.isInteger(index) && index >= 0 && index < 4294967295 ? index : undefined;
-}
-
 function selectedSlots(node: ts.Identifier): string[] {
   const slots: string[] = [];
   let current: ts.Expression = outerExpression(node);
@@ -555,15 +547,34 @@ function pushedArraySlots(state: AnalysisState, site: ts.Node, owner: EffectOwne
     return undefined;
   }
   const start = knownPushStart(state, callee.expression, owner, call);
-  if (start === undefined) {
+  if (!start) {
     return undefined;
   }
   if (call.arguments.length === 0) {
     return [];
   }
   const spread = call.arguments.some(ts.isSpreadElement);
-  return ["property:length", ...(spread ? [`append:${start}`]
-    : Array.from(call.arguments.keys(), (index) => `property:${start + index}`))];
+  return ["property:length", ...(spread || repeatedCall(call, owner) || !start.exact ? [`append:${start.lowerBound}`]
+    : Array.from(call.arguments.keys(), (index) => `property:${start.lowerBound + index}`))];
+}
+
+function repeatedCall(call: ts.CallExpression, owner: EffectOwner): boolean {
+  for (let current: ts.Node | undefined = call.parent; current && current !== owner; current = current.parent) {
+    if (ts.isIterationStatement(current, false) && repeatedPartOfIteration(call, current)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function repeatedPartOfIteration(call: ts.CallExpression, loop: ts.IterationStatement): boolean {
+  if (inside(call, loop.statement)) {
+    return true;
+  }
+  if (ts.isForStatement(loop)) {
+    return !!((loop.condition && inside(call, loop.condition)) || (loop.incrementor && inside(call, loop.incrementor)));
+  }
+  return (ts.isWhileStatement(loop) || ts.isDoStatement(loop)) && inside(call, loop.expression);
 }
 
 function pushCallForMutation(site: ts.Node): ts.CallExpression | undefined {
@@ -576,7 +587,9 @@ function pushCallForMutation(site: ts.Node): ts.CallExpression | undefined {
   return ts.isCallExpression(call) && call.expression === callee ? call : undefined;
 }
 
-function knownPushStart(state: AnalysisState, receiver: ts.Expression, owner: EffectOwner, call: ts.CallExpression): number | undefined {
+type PushStart = { readonly lowerBound: number; readonly exact: boolean };
+
+function knownPushStart(state: AnalysisState, receiver: ts.Expression, owner: EffectOwner, call: ts.CallExpression): PushStart | undefined {
   const fact = storageFactForExpression(state, state.summaries, receiver, owner, call);
   if (fact.outer.length !== 1) {
     return undefined;
@@ -587,17 +600,80 @@ function knownPushStart(state: AnalysisState, receiver: ts.Expression, owner: Ef
   if (!allocation || allocation.elements.some(ts.isSpreadElement)) {
     return undefined;
   }
+  return priorPushStart(state, owner, call, origin, allocation.elements.length);
+}
+
+type ArrayReference = { readonly reference: ts.Identifier; readonly fact: StorageFact };
+
+function priorArrayReferences(state: AnalysisState, owner: EffectOwner, call: ts.CallExpression, origin: StorageOrigin): ArrayReference[] {
+  const references: { reference: ts.Identifier; fact: StorageFact }[] = [];
   for (const binding of state.model.bindings) {
     const bindingFact = storageFactForBinding(state, state.summaries, binding, owner, call);
     if (![...bindingFact.outer, ...bindingFact.reachable].includes(origin)) {
       continue;
     }
-    if (binding.references.some((reference) => !inside(reference, call.expression) && reference.getStart() < call.end &&
-        priorArrayLengthWrite(state, bindingFact, origin, allocation.elements.length, reference))) {
+    for (const reference of binding.references) {
+      if (!inside(reference, call.expression) && reference.getStart() < call.end) {
+        references.push({ reference, fact: bindingFact });
+      }
+    }
+  }
+  return references.sort((left, right) => left.reference.getStart() - right.reference.getStart());
+}
+
+function priorPushStart(
+  state: AnalysisState, owner: EffectOwner, call: ts.CallExpression, origin: StorageOrigin, initialLength: number,
+): PushStart | undefined {
+  let start: PushStart = { lowerBound: initialLength, exact: true };
+  const counted = new Set<ts.CallExpression>();
+  for (const item of priorArrayReferences(state, owner, call, origin)) {
+    const next = advancePushStart(state, owner, call, origin, start, counted, item);
+    if (!next) {
+      return undefined;
+    }
+    start = next;
+  }
+  return start;
+}
+
+function advancePushStart(
+  state: AnalysisState, owner: EffectOwner, call: ts.CallExpression, origin: StorageOrigin,
+  start: PushStart, counted: Set<ts.CallExpression>, { reference, fact }: ArrayReference,
+): PushStart | undefined {
+  const prior = receiverPushCall(reference);
+  if (prior && priorPushOnArray(prior, reference, fact, origin, call, counted)) {
+    counted.add(prior);
+    if (prior.arguments.length === 0) {
+      return start;
+    }
+    return !unconditional(prior, owner) || repeatedCall(prior, owner) || prior.arguments.some(ts.isSpreadElement)
+      ? { ...start, exact: false } : { ...start, lowerBound: start.lowerBound + prior.arguments.length };
+  }
+  return prior !== call && priorArrayLengthWrite(state, fact, origin, start.lowerBound, reference) ? undefined : start;
+}
+
+function priorPushOnArray(
+  prior: ts.CallExpression, reference: ts.Identifier, fact: StorageFact, origin: StorageOrigin,
+  call: ts.CallExpression, counted: ReadonlySet<ts.CallExpression>,
+): boolean {
+  return prior.end <= call.getStart() && !counted.has(prior) &&
+    originsForPath(fact, selectedSlots(reference).slice(0, -1)).includes(origin);
+}
+
+function receiverPushCall(reference: ts.Identifier): ts.CallExpression | undefined {
+  for (let current: ts.Node | undefined = reference.parent; current; current = current.parent) {
+    if (ts.isCallExpression(current)) {
+      const callee = unwrapExpression(current.expression);
+      if ((ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) &&
+          methodName(callee) === "push" && inside(reference, callee.expression)) {
+        return current;
+      }
+    }
+    if (isFunctionLike(current) || ts.isSourceFile(current)) {
       return undefined;
     }
   }
-  return allocation.elements.length;
+  return undefined;
 }
 
 function priorArrayLengthWrite(
@@ -1687,13 +1763,33 @@ function libraryStorageInsertions(
   }
   const args = known.stores === "sources" ? call.arguments.slice(1)
     : known.stores === "splice" ? call.arguments.slice(2) : call.arguments;
-  const parts = storedArguments(call, args, known.stores);
+  const parts = libraryStoredArguments(state, call, owner, known.stores, args);
   return parts.map((part) => {
     const value = storageFactForExpression(state, summaries, part.expression, owner, call);
     return { kind: "cell", node: call, origin: part.expression, target: storageFactForExpression(state, summaries, target, owner, call),
       value: part.path === "reachable" ? elementFact(value) : value, slot: part.slot,
-      replace: part.slot !== undefined && unconditional(call, owner) };
+      replace: part.slot !== undefined && !part.slot.startsWith("append:") && unconditional(call, owner) };
   });
+}
+
+function libraryStoredArguments(
+  state: AnalysisState, call: ts.CallExpression, owner: EffectOwner,
+  stores: LibraryStorage, args: readonly ts.Expression[],
+): StoredArgument[] {
+  const parts = storedArguments(call, args, stores);
+  const callee = unwrapExpression(call.expression);
+  if (stores !== "arguments" || methodName(callee) !== "push" ||
+      (!ts.isPropertyAccessExpression(callee) && !ts.isElementAccessExpression(callee))) {
+    return parts;
+  }
+  const start = knownPushStart(state, callee.expression, owner, call);
+  if (!start) {
+    return parts;
+  }
+  const appendRange = !start.exact || repeatedCall(call, owner) || args.some(ts.isSpreadElement);
+  return parts.map((part, index) => ({ ...part,
+    slot: appendRange ? `append:${start.lowerBound}` : `property:${start.lowerBound + index}`,
+  }));
 }
 
 type StoredArgument = { readonly expression: ts.Expression; readonly path: StoragePath; readonly slot?: string };

@@ -224,6 +224,72 @@ test("array push changes length and appended elements, not existing indexes", ()
   return read();
 }
 `), []);
+  assert.deepEqual(messages("captured-push-loop-second.ts", `function outer() {
+  const values = [0];
+  function read() { return values[2]; }
+  for (const item of [1, 2]) {
+    values.push(item);
+  }
+  return read();
+}
+`), ["3:ImplicitInput: The function read() reads values, an implicit input."]);
+  assert.deepEqual(messages("captured-push-loop-alias.ts", `function outer() {
+  const values = [0];
+  const alias = values;
+  function read() { return values[2]; }
+  for (const item of [1, 2]) {
+    alias.push(item);
+  }
+  return read();
+}
+`), ["4:ImplicitInput: The function read() reads values, an implicit input."]);
+  assert.deepEqual(messages("captured-push-loop-existing.ts", `function outer() {
+  const values = [0];
+  function read() { return values[0]; }
+  for (const item of [1, 2]) {
+    values.push(item);
+  }
+  return read();
+}
+`), []);
+  assert.deepEqual(messages("captured-push-for-update.ts", `function outer() {
+  const values = [0];
+  function read() { return values[2]; }
+  for (let index = 0; index < 2; values.push(++index)) {}
+  return read();
+}
+`), ["3:ImplicitInput: The function read() reads values, an implicit input."]);
+  assert.deepEqual(messages("captured-push-while-condition.ts", `function outer() {
+  const values = [0];
+  function read() { return values[2]; }
+  let index = 0;
+  while (values.push(++index) && index < 2) {}
+  return read();
+}
+`), ["3:ImplicitInput: The function read() reads values, an implicit input."]);
+  assert.deepEqual(messages("captured-push-for-initializer.ts", `function outer() {
+  const values = [0];
+  function read() { return values[2]; }
+  for (let index = values.push(1); index < 2; index++) {}
+  return read();
+}
+`), []);
+  assert.deepEqual(messages("captured-second-push.ts", `function outer() {
+  const values = [0];
+  function read() { return values[2]; }
+  values.push(1);
+  values.push(2);
+  return read();
+}
+`), ["3:ImplicitInput: The function read() reads values, an implicit input."]);
+  assert.deepEqual(messages("captured-second-push-existing.ts", `function outer() {
+  const values = [0];
+  function read() { return values[0]; }
+  values.push(1);
+  values.push(2);
+  return read();
+}
+`), []);
   assert.deepEqual(messages("captured-push-whole-array-read.ts", `function outer() {
   const values = [0];
   const alias = values;
@@ -1746,6 +1812,13 @@ test("eager native iterator consumers force generator summaries", () => {
 
 test("storage cells retain selection and execution ownership", () => {
   const cases = [
+    ["pushed-caller-private-sibling.ts", "function run(items: number[]) {\n  const values: number[][] = [[]];\n  values.push(items);\n  values[0].push(1);\n}\n", []],
+    ["pushed-caller-added-element.ts", "function run(items: number[]) {\n  const values: number[][] = [[]];\n  values.push(items);\n  values[1].push(1);\n}\n", [[4, "ImplicitOutput"]]],
+    ["loop-pushed-caller-private-sibling.ts", "function run(items: number[]) {\n  const values: number[][] = [[]];\n  for (let i = 0; i < 2; i++) values.push(items);\n  values[0].push(1);\n}\n", []],
+    ["loop-pushed-caller-second-element.ts", "function run(items: number[]) {\n  const values: number[][] = [[]];\n  for (let i = 0; i < 2; i++) values.push(items);\n  values[2].push(1);\n}\n", [[4, "ImplicitOutput"]]],
+    ["second-push-private-sibling.ts", "function run(items: number[]) {\n  const values: number[][] = [];\n  values.push([]);\n  values.push(items);\n  values[0].push(1);\n}\n", []],
+    ["second-push-caller-element.ts", "function run(items: number[]) {\n  const values: number[][] = [];\n  values.push([]);\n  values.push(items);\n  values[1].push(1);\n}\n", [[5, "ImplicitOutput"]]],
+    ["conditional-push-private-sibling.ts", "function run(items: number[], flag: boolean) {\n  const values: number[][] = [[]];\n  if (flag) values.push([]);\n  values.push(items);\n  values[0].push(1);\n}\n", []],
     ["initial-field-replaced.ts", "function run(items: number[]) {\n  const box = { items };\n  box.items = [];\n  box.items.push(1);\n}\n", []],
     ["initial-field-retained.ts", "function run(items: number[]) {\n  const box = { items };\n  box.items.push(1);\n}\n", [[3, "ImplicitOutput"]]],
     ["initial-element-replaced.ts", "function run(items: number[]) {\n  const box = [items];\n  box[0] = [];\n  box[0].push(1);\n}\n", []],
