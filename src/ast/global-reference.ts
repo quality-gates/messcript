@@ -1,6 +1,7 @@
 // messcript-disable ConstantNamingConventions
 import ts from "typescript";
 import { isLocallyBound } from "./local-bindings";
+import type { ScopeModel } from "./scopes";
 
 // Names of the global object. A global is also reached through them, as in globalThis.process.
 const globalObjectNames = new Set(["globalThis", "self", "window"]);
@@ -71,4 +72,13 @@ export function globalReference(node: ts.Expression): string | undefined {
  */
 export function memberChainName(node: ts.Expression): string | undefined {
   return dottedName(node, false);
+}
+
+/** Gives the dotted global name of the callee, or undefined when its root is bound in the file. */
+export function globalName(callee: ts.Expression, model: ScopeModel): string | undefined {
+  let root = unwrapExpression(callee);
+  while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root)) {
+    root = unwrapExpression(root.expression);
+  }
+  return ts.isIdentifier(root) && model.resolve(root) ? undefined : globalReference(callee);
 }

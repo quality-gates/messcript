@@ -46,6 +46,8 @@ export type ScopeModel = {
   /** Tells if the identifier refers to a value or a type, and is not a declaration name, property name, or label. */
   isReference(identifier: ts.Identifier): boolean;
   resolve(identifier: ts.Identifier): Binding | undefined;
+  /** Resolves a local type alias or a declaration that shadows a host type name. */
+  resolveType(identifier: ts.Identifier): LocalType | undefined;
   /** Gives the write to the root identifier or "this" of a write target, as "a" in a.b = 1 or a.push(1). */
   writeOf(node: ts.Node): Write | undefined;
 };
@@ -402,6 +404,7 @@ function buildModel(sourceFile: ts.SourceFile): ScopeModel {
     bindings: builder.bindings,
     isReference: (identifier) => builder.resolved.has(identifier),
     resolve: (identifier) => builder.resolved.get(identifier),
+    resolveType: resolveLocalType,
     writeOf: (node) => builder.writes.get(node),
   };
 }
@@ -419,4 +422,31 @@ export function analyzeScopes(sourceFile: ts.SourceFile): ScopeModel {
     modelCache.set(sourceFile, model);
   }
   return model;
+}
+
+type LocalType = { readonly kind: "alias"; readonly type: ts.TypeNode } | { readonly kind: "shadowed" };
+
+function resolveLocalType(name: ts.Identifier): LocalType | undefined {
+  for (let current: ts.Node | undefined = name.parent; current; current = current.parent) {
+    const parameter = typeParameters(current)?.find((item) => item.name.text === name.text);
+    const declaration = blockTypeDeclaration(current, name.text);
+    if (parameter || declaration) {
+      return declaration && ts.isTypeAliasDeclaration(declaration)
+        ? { kind: "alias", type: declaration.type } : { kind: "shadowed" };
+    }
+  }
+  return undefined;
+}
+
+function typeParameters(node: ts.Node): readonly ts.TypeParameterDeclaration[] | undefined {
+  return ts.isFunctionLike(node) || ts.isClassLike(node) || ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)
+    ? node.typeParameters : undefined;
+}
+
+function blockTypeDeclaration(node: ts.Node, name: string): ts.TypeAliasDeclaration | ts.InterfaceDeclaration | undefined {
+  if (!ts.isBlock(node) && !ts.isSourceFile(node) && !ts.isModuleBlock(node)) {
+    return undefined;
+  }
+  return node.statements.find((statement): statement is ts.TypeAliasDeclaration | ts.InterfaceDeclaration =>
+    (ts.isTypeAliasDeclaration(statement) || ts.isInterfaceDeclaration(statement)) && statement.name.text === name);
 }

@@ -10,7 +10,6 @@ import { runCli as runCliInProcess } from "../dist/cli.js";
 import { findImplicitInput } from "../dist/rules/implicit-input.js";
 import { findImplicitOutput } from "../dist/rules/implicit-output.js";
 
-
 let workspace;
 let strictRuleset;
 
@@ -52,6 +51,62 @@ function messages(name, source, ruleset = "explicitness") {
   assert.equal(stderr.read(), "");
   return JSON.parse(stdout.read()).findings.map((finding) => `${finding.line}:${finding.ruleName}: ${finding.message}`);
 }
+
+test("indirect writes make reads of the original shared storage implicit", () => {
+  assert.deepEqual(messages("shared-alias-write.ts", `const shared: number[] = [];
+function write() { const alias = shared; alias.push(1); }
+function read() { return shared.length; }
+`), [
+    "2:ImplicitInput: The function write() reads shared, an implicit input.",
+    "2:ImplicitOutput: The function write() mutates caller-owned value alias, an implicit output.",
+    "3:ImplicitInput: The function read() reads shared, an implicit input.",
+  ]);
+  assert.deepEqual(messages("shared-helper-write.ts", `const shared: number[] = [];
+function mutate(value: number[]) { value.push(1); }
+function write() { mutate(shared); }
+function read() { return shared.length; }
+`), [
+    "2:ImplicitOutput: The function mutate() mutates argument value, an implicit output.",
+    "3:ImplicitOutput: The function write() mutates caller-owned value shared, an implicit output.",
+    "3:ImplicitInput: The function write() reads shared, an implicit input.",
+    "4:ImplicitInput: The function read() reads shared, an implicit input.",
+  ]);
+  assert.deepEqual(messages("private-alias-read.ts", `const shared: number[] = [];
+function read() { const alias = shared; return alias.length; }
+`), []);
+});
+
+test("value exports and exported callable returns expose container storage", () => {
+  assert.deepEqual(messages("named-container-export.ts", `const shared: number[] = [];
+export { shared as values };
+function read() { return shared.length; }
+`), [
+    "3:ImplicitInput: The function read() reads shared, an implicit input.",
+  ]);
+  assert.deepEqual(messages("exported-storage-return.ts", `const shared: number[] = [];
+export function get() { return shared; }
+function read() { return shared.length; }
+`), [
+    "2:ImplicitInput: The function get() reads shared, an implicit input.",
+    "3:ImplicitInput: The function read() reads shared, an implicit input.",
+  ]);
+  assert.deepEqual(messages("named-callable-export.ts", `const shared: number[] = [];
+const get = () => shared;
+export { get as values };
+function read() { return shared.length; }
+`), [
+    "2:ImplicitInput: The arrow function get() reads shared, an implicit input.",
+    "4:ImplicitInput: The function read() reads shared, an implicit input.",
+  ]);
+  assert.deepEqual(messages("exported-scalar-copy.ts", `const shared: number[] = [1];
+export function get() { return shared.slice(); }
+function read() { return shared.length; }
+`), []);
+  assert.deepEqual(messages("type-only-container-export.ts", `const shared: number[] = [];
+export type { shared };
+function read() { return shared.length; }
+`), []);
+});
 
 test("the book add_to_total example reports its global input and its global and console outputs", () => {
   assert.deepEqual(messages("book.js", `let total = 0;
@@ -125,6 +180,7 @@ function send(body) { return fetch("/api", { body }); }
     "1:ImplicitInput: The function stamp() calls Math.random(), an implicit input.",
     "2:ImplicitInput: The function today() calls new Date(), an implicit input.",
     "3:ImplicitOutput: The function render() writes document, an implicit output.",
+    "3:UnknownEffect: The function render() calls unresolved callable, an unknown effect.",
     "4:ImplicitInput: The function language() reads navigator, an implicit input.",
     "5:ImplicitOutput: The function send() uses fetch, an implicit output.",
   ]);
@@ -290,25 +346,25 @@ const classSource = `class Counter {
 
 test("class state is an unknown effect by default", () => {
   assert.deepEqual(messages("class-default.js", classSource), [
-    "3:UnknownEffect: The method increment() reads this.count, an unknown effect.",
-    "3:UnknownEffect: The method increment() writes this.count, an unknown effect.",
-    "4:UnknownEffect: The method format() reads this.count, an unknown effect.",
-    "5:UnknownEffect: The method self() reads this, an unknown effect.",
+    "3:UnknownEffect: The method Counter.increment() reads this.count, an unknown effect.",
+    "3:UnknownEffect: The method Counter.increment() writes this.count, an unknown effect.",
+    "4:UnknownEffect: The method Counter.format() reads this.count, an unknown effect.",
+    "5:UnknownEffect: The method Counter.self() reads this, an unknown effect.",
   ]);
 });
 
 test("include-this reports class state reads and writes, but not method calls or constructors", () => {
   assert.deepEqual(messages("class-strict.js", classSource, strictRuleset), [
-    "3:ImplicitInput: The method increment() reads this.count, an implicit input.",
-    "3:ImplicitOutput: The method increment() writes this.count, an implicit output.",
-    "4:ImplicitInput: The method format() reads this.count, an implicit input.",
-    "5:ImplicitInput: The method self() reads this, an implicit input.",
+    "3:ImplicitInput: The method Counter.increment() reads this.count, an implicit input.",
+    "3:ImplicitOutput: The method Counter.increment() writes this.count, an implicit output.",
+    "4:ImplicitInput: The method Counter.format() reads this.count, an implicit input.",
+    "5:ImplicitInput: The method Counter.self() reads this, an implicit input.",
   ]);
   assert.deepEqual(messages("class-after-strict.js", classSource), [
-      "3:UnknownEffect: The method increment() reads this.count, an unknown effect.",
-      "3:UnknownEffect: The method increment() writes this.count, an unknown effect.",
-      "4:UnknownEffect: The method format() reads this.count, an unknown effect.",
-      "5:UnknownEffect: The method self() reads this, an unknown effect.",
+      "3:UnknownEffect: The method Counter.increment() reads this.count, an unknown effect.",
+      "3:UnknownEffect: The method Counter.increment() writes this.count, an unknown effect.",
+      "4:UnknownEffect: The method Counter.format() reads this.count, an unknown effect.",
+      "5:UnknownEffect: The method Counter.self() reads this, an unknown effect.",
   ]);
 });
 
@@ -325,10 +381,10 @@ test("include-this recognizes element-access members on this", () => {
   writeTemplate() { this[\`count\`] = 2; }
 }
 `, strictRuleset), [
-    "7:ImplicitInput: The method readString() reads this.count, an implicit input.",
-    "8:ImplicitInput: The method readTemplate() reads this.count, an implicit input.",
-    "9:ImplicitOutput: The method writeString() writes this.count, an implicit output.",
-    "10:ImplicitOutput: The method writeTemplate() writes this.count, an implicit output.",
+    "7:ImplicitInput: The method Worker.readString() reads this.count, an implicit input.",
+    "8:ImplicitInput: The method Worker.readTemplate() reads this.count, an implicit input.",
+    "9:ImplicitOutput: The method Worker.writeString() writes this.count, an implicit output.",
+    "10:ImplicitOutput: The method Worker.writeTemplate() writes this.count, an implicit output.",
   ]);
 });
 
@@ -337,7 +393,7 @@ test("include-this treats this used as a key as a read of this, not a member cal
   run(handlers: Record<string, () => void>) { handlers[this](); }
 }
 `, strictRuleset), [
-    "2:ImplicitInput: The method run() reads this, an implicit input.",
+    "2:ImplicitInput: The method Worker.run() reads this, an implicit input.",
   ]);
 });
 
@@ -357,10 +413,10 @@ test("include-this unwraps wrapped this receivers before classifying member read
 `, strictRuleset).map((finding) => finding.replace(/^\d+:/, ""));
 
   assert.deepEqual(findings, [
-    "ImplicitOutput: The method parenthesizedWrite() writes this.state, an implicit output.",
-    "ImplicitOutput: The method nonNullWrite() writes this.state, an implicit output.",
-    "ImplicitOutput: The method asWrite() writes this.state, an implicit output.",
-    "ImplicitOutput: The method satisfiesWrite() writes this.state, an implicit output.",
+    "ImplicitOutput: The method Worker.parenthesizedWrite() writes this.state, an implicit output.",
+    "ImplicitOutput: The method Worker.nonNullWrite() writes this.state, an implicit output.",
+    "ImplicitOutput: The method Worker.asWrite() writes this.state, an implicit output.",
+    "ImplicitOutput: The method Worker.satisfiesWrite() writes this.state, an implicit output.",
   ]);
 });
 
@@ -461,8 +517,6 @@ test("closures capturing a loop variable mutated in the loop body still report I
   return hs;
 }
 `), [
-    "3:ImplicitInput: The function incClosureMutation() reads i, an implicit input.",
-    "3:ImplicitOutput: The function incClosureMutation() writes i, an implicit output.",
     "3:ImplicitInput: The arrow function anonymous() reads i, an implicit input.",
     "3:ImplicitOutput: The arrow function anonymous() writes i, an implicit output.",
     "4:ImplicitInput: The arrow function anonymous() reads i, an implicit input.",
@@ -568,6 +622,8 @@ function pick(source) {
   return a;
 }
 `), [
+    "2:ImplicitInput: The module reads fallback, an implicit input.",
+    "2:ImplicitOutput: The module writes fallback, an implicit output.",
     "5:ImplicitInput: The function pick() reads fallback, an implicit input.",
   ]);
 });
@@ -715,6 +771,7 @@ function writeUnknown() {
 `), [
     "4:ImplicitOutput: The function mutate() mutates argument values, an implicit output.",
     "7:ImplicitOutput: The function writeShared() mutates caller-owned value shared, an implicit output.",
+    "7:ImplicitInput: The function writeShared() reads shared, an implicit input.",
     "10:UnknownEffect: The function writeUnknown() mutates value with unknown ownership, an unknown effect.",
     "10:UnknownEffect: The function writeUnknown() calls unresolved callable, an unknown effect.",
   ]);
@@ -759,6 +816,7 @@ function missingCallback(values: number[]) {
     "4:UnknownEffect: The function apply() calls unresolved callable, an unknown effect.",
     "7:ImplicitOutput: The function push() mutates argument values, an implicit output.",
     "10:ImplicitOutput: The function sharedWrite() mutates caller-owned callback argument, an implicit output.",
+    "10:ImplicitInput: The function sharedWrite() reads shared, an implicit input.",
     "13:UnknownEffect: The function unknownWrite() mutates value with unknown ownership, an unknown effect.",
     "13:UnknownEffect: The function unknownWrite() calls unresolved callable, an unknown effect.",
     "16:UnknownEffect: The function missingCallback() calls unresolved callable, an unknown effect.",
@@ -774,6 +832,7 @@ function change(values: { n: number }[], flag: boolean) {
 `), [
     "3:UnknownEffect: The function change() calls unresolved callable, an unknown effect.",
     "4:ImplicitOutput: The function change() mutates caller-owned value target, an implicit output.",
+    "4:UnknownEffect: The function change() mutates value with unknown ownership, an unknown effect.",
   ]);
 });
 
@@ -891,5 +950,461 @@ function run(value: number, notify: (value: number) => void) {
 }
 `), [
     "5:UnknownEffect: The function run() calls unresolved callable, an unknown effect.",
+  ]);
+});
+
+function effectSites(name, source) {
+  const path = join(workspace, name);
+  writeFileSync(path, source);
+  const stdout = captureOutput();
+  const stderr = captureOutput();
+  runCliInProcess([path, "json", "explicitness", "--strict"], { stdout: stdout.stream, stderr: stderr.stream });
+  assert.equal(stderr.read(), "");
+  const report = JSON.parse(stdout.read());
+  assert.deepEqual(report.errors, []);
+  return report.findings.map(({ line, ruleName, context }) => [line, ruleName, context]);
+}
+
+test("module writes and exported container reads have distinct owners", () => {
+  assert.deepEqual(effectSites("module-export.ts", `export const OFFSET = [0];
+console.log("loaded");
+function add(value: number) {
+  return value + OFFSET[0];
+}
+`), [
+    [2, "ImplicitOutput", "<module>"],
+    [4, "ImplicitInput", "function add()"],
+  ]);
+  assert.deepEqual(effectSites("exported-scalar.ts", `export const OFFSET = 1;
+function add(value: number) { return value + OFFSET; }
+`), []);
+});
+
+test("returned closures instantiate captured argument storage at their invocation", () => {
+  assert.deepEqual(effectSites("factory-storage.ts", `function make(values: number[]) {
+  const alias = values;
+  return () => alias.push(1);
+}
+function privateCall() {
+  const later = make([]);
+  later();
+}
+function caller(values: number[]) {
+  make(values)();
+}
+`), [
+    [3, "ImplicitOutput", "arrow function anonymous()"],
+    [10, "ImplicitOutput", "function caller()"],
+  ]);
+});
+
+test("callback effects follow branch assignments and renamed forwarders", () => {
+  assert.deepEqual(effectSites("callback-branches.ts", `function inner(values: number[], change: (values: number[]) => void) {
+  change(values);
+}
+function outer(values: number[], renamed: (values: number[]) => void) {
+  inner(values, renamed);
+}
+function mutate(values: number[]) {
+  values.push(1);
+}
+function caller(values: number[], condition: boolean) {
+  let change = (values: number[]) => values.length;
+  if (condition) { change = mutate; }
+  outer(values, change);
+}
+function privateCall() { outer([], mutate); }
+`), [
+    [2, "UnknownEffect", "function inner()"],
+    [5, "UnknownEffect", "function outer()"],
+    [8, "ImplicitOutput", "function mutate()"],
+    [13, "ImplicitOutput", "function caller()"],
+  ]);
+});
+
+test("known library callback effects replace injected callback uncertainty", () => {
+  assert.deepEqual(effectSites("library-callback.ts", `function apply(value: number, act: (value: number) => void) {
+  act(value);
+}
+function write(value: number) { apply(value, console.log); }
+function pure(value: number) { apply(value, Math.abs); }
+`), [
+    [2, "UnknownEffect", "function apply()"],
+    [4, "ImplicitOutput", "function write()"],
+  ]);
+});
+
+test("standard callback methods execute named and anonymous callback bodies", () => {
+  assert.deepEqual(effectSites("library-method-callbacks.ts", `function write(value: number) { console.log(value); return value; }
+function caller(values: number[]) {
+  values.some(write);
+  values.filter((value) => { console.log(value); return true; });
+  values.map(write);
+  values.reduce((sum, value) => { console.log(value); return sum + value; }, 0);
+  values.slice().sort((left, right) => { console.log(left); return left - right; });
+}
+`), [
+    [1, "ImplicitOutput", "function write()"],
+    [3, "ImplicitOutput", "function caller()"],
+    [4, "ImplicitOutput", "arrow function anonymous()"],
+    [6, "ImplicitOutput", "arrow function anonymous()"],
+    [7, "ImplicitOutput", "arrow function anonymous()"],
+  ]);
+});
+
+test("a standard method name needs a known standard receiver", () => {
+  assert.deepEqual(effectSites("standard-receivers.ts", `interface Lookup { get(key: string): number; }
+function unknown(value: Lookup) { return value.get("key"); }
+function map(value: ReadonlyMap<string, number>) { return value.get("key"); }
+function strings(value: string) { return value.trim().slice(1); }
+function arrays(value: number[]) { return value.slice().map(item => item + 1); }
+function joined(flag: boolean, left: number[], right: number[]) {
+  const value = flag ? left : right;
+  return value.slice();
+}
+function custom(flag: boolean, left: number[], right: Lookup) {
+  const value = flag ? left : right;
+  return value.toString();
+}
+`), [
+    [2, "UnknownEffect", "function unknown()"],
+    [12, "UnknownEffect", "function custom()"],
+  ]);
+});
+
+test("local type declarations cannot impersonate standard receivers", () => {
+  assert.deepEqual(effectSites("shadowed-receiver-types.ts", `interface Array { toString(): string; }
+function shadowed(value: Array) { return value.toString(); }
+function generic<Array>(value: Array) { return value.toString(); }
+type Numbers = number[];
+function alias(value: Numbers) { return value.slice(); }
+`), [
+    [2, "UnknownEffect", "function shadowed()"],
+    [3, "UnknownEffect", "function generic()"],
+  ]);
+});
+
+test("copy rebinding preserves standard receiver facts and private writes", () => {
+  assert.deepEqual(effectSites("copy-rebinding.ts", `function pure(items: number[]) {
+  items = items.slice();
+  items.push(2);
+  return items;
+}
+function action(items: number[]) {
+  items.push(2);
+  items = items.slice();
+  items.push(2);
+  return items;
+}
+function local() {
+  let items = [1];
+  items = items.slice();
+  return items.slice();
+}
+`), [
+    [7, "ImplicitOutput", "function action()"],
+  ]);
+});
+
+test("mapped and reduced values retain caller storage through callback returns", () => {
+  assert.deepEqual(effectSites("mapped-storage.ts", `function mapped(values: number[][]) {
+  const copy = values.map((value) => value);
+  copy[0].push(1);
+}
+function reduced(values: number[][], target: number[]) {
+  const output = values.reduce((sum, value) => value, target);
+  output.push(1);
+}
+function privateMap(values: number[]) {
+  const output = values.map((value) => [value]);
+  output[0].push(1);
+}
+`), [
+    [3, "ImplicitOutput", "function mapped()"],
+    [7, "ImplicitOutput", "function reduced()"],
+  ]);
+});
+
+test("hot async calls transfer at the call and native Promise waits stay quiet", () => {
+  assert.deepEqual(effectSites("hot-async.ts", `async function stamp() {
+  await Promise.resolve(0);
+  return Date.now();
+}
+async function run() {
+  const pending = stamp();
+  return await pending;
+}
+async function identity(pending: Promise<number>) { return await pending; }
+async function pure() { return 1; }
+`), [
+    [3, "ImplicitInput", "function stamp()"],
+    [6, "ImplicitInput", "function run()"],
+  ]);
+});
+
+test("async closures start at invocation while their factory stays quiet", () => {
+  assert.deepEqual(effectSites("async-factory.ts", `function make() {
+  return async () => Date.now();
+}
+async function run() {
+  const later = make();
+  return await later();
+}
+`), [
+    [2, "ImplicitInput", "arrow function anonymous()"],
+    [6, "ImplicitInput", "function run()"],
+  ]);
+});
+
+test("generator bodies transfer at iteration and next calls, not creation", () => {
+  assert.deepEqual(effectSites("cold-generators.ts", `function* lines() {
+  yield Date.now();
+}
+function make() { return lines(); }
+function collect() {
+  const iterator = lines();
+  const alias = iterator;
+  for (const line of alias) { return line; }
+}
+function next() {
+  const iterator = lines();
+  return iterator.next();
+}
+function direct() { return [...lines()]; }
+function from() { return Array.from(lines()); }
+`), [
+    [2, "ImplicitInput", "function lines()"],
+    [8, "ImplicitInput", "function collect()"],
+    [12, "ImplicitInput", "function next()"],
+    [14, "ImplicitInput", "function direct()"],
+    [15, "ImplicitInput", "function from()"],
+  ]);
+});
+
+test("ordinary containers are quiet and unresolved iterator or conversion hooks are unknown", () => {
+  assert.deepEqual(effectSites("value-protocols.ts", `function ordinary(values: number[], text: string) { return [...values, ...text]; }
+function iterator(values: Iterable<number>) { return [...values]; }
+function loop(values: Iterable<number>) { for (const value of values) { return value; } }
+function convert(value: object) { return \`value: \${value}\`; }
+function scalar(value: number) { return \`value: \${value}\`; }
+async function thenable(value: { then: Function }) { return await value; }
+`), [
+    [2, "UnknownEffect", "function iterator()"],
+    [3, "UnknownEffect", "function loop()"],
+    [4, "UnknownEffect", "function convert()"],
+    [6, "UnknownEffect", "function thenable()"],
+  ]);
+});
+
+test("defaults execute only for missing or possibly undefined arguments", () => {
+  assert.deepEqual(effectSites("default-invocations.ts", `function stamp(value: number, time = Date.now()) { return value + time; }
+function missing(value: number) { return stamp(value); }
+function given(value: number) { return stamp(value, 0); }
+function explicitUndefined(value: number) { return stamp(value, undefined); }
+function spread(values: number[]) { return stamp(...values); }
+`), [
+    [1, "ImplicitInput", "function stamp()"],
+    [2, "ImplicitInput", "function missing()"],
+    [4, "ImplicitInput", "function explicitUndefined()"],
+    [5, "ImplicitInput", "function spread()"],
+  ]);
+});
+
+test("class construction transfers fields and inherited argument writes", () => {
+  assert.deepEqual(effectSites("constructor-effects.ts", `class Base {
+  constructor(values: number[]) { values.push(1); }
+}
+class Derived extends Base {
+  stamp = Date.now();
+}
+function caller(values: number[]) { return new Derived(values); }
+function privateCall() { return new Base([]); }
+`), [
+    [2, "ImplicitOutput", "constructor"],
+    [4, "ImplicitOutput", "constructor"],
+    [5, "ImplicitInput", "constructor"],
+    [7, "ImplicitInput", "function caller()"],
+    [7, "ImplicitOutput", "function caller()"],
+  ]);
+});
+
+test("static fields execute at definition while instance fields execute on construction", () => {
+  assert.deepEqual(effectSites("field-lifecycle.ts", `function define() {
+  class Clock {
+    static now = Date.now();
+    stamp = Math.random();
+  }
+  return Clock;
+}
+class Local {
+  stamp = Date.now();
+}
+function create() { return new Local(); }
+`), [
+    [3, "ImplicitInput", "function define()"],
+    [4, "ImplicitInput", "constructor"],
+    [9, "ImplicitInput", "constructor"],
+    [11, "ImplicitInput", "function create()"],
+  ]);
+});
+
+test("method dispatch follows local receiver shapes and subclass overrides", () => {
+  assert.deepEqual(effectSites("class-dispatch.ts", `class Base {
+  run() { return this.effect(); }
+  effect() { return 1; }
+}
+class Derived extends Base {
+  constructor() { super(); }
+  effect() { console.log(1); return 1; }
+}
+function caller() { return new Derived().run(); }
+`), [
+    [2, "ImplicitOutput", "method Base.run()"],
+    [7, "ImplicitOutput", "method Derived.effect()"],
+    [9, "ImplicitOutput", "function caller()"],
+  ]);
+});
+
+test("accessors and tagged templates transfer their executable bodies", () => {
+  assert.deepEqual(effectSites("accessors-tags.ts", `class Counter {
+  get value() { console.log("read"); return 1; }
+  set value(value: number) { console.log(value); }
+}
+function tag(parts: TemplateStringsArray, value: number) { console.log(value); return value; }
+function caller() {
+  const counter = new Counter();
+  counter.value++;
+  return tag\`value \${counter.value}\`;
+}
+`), [
+    [2, "ImplicitOutput", "accessor Counter.value()"],
+    [3, "ImplicitOutput", "accessor Counter.value()"],
+    [5, "ImplicitOutput", "function tag()"],
+    [8, "ImplicitOutput", "function caller()"],
+  ]);
+});
+
+test("shorthand holders keep reachable storage shared while copied outers are private", () => {
+  assert.deepEqual(effectSites("holding-shorthand.ts", `function hold(values: number[]) {
+  const holder = { values };
+  holder.values.push(1);
+}
+function copy(values: number[]) {
+  const copied = Array.from(values);
+  copied.push(1);
+  return copied;
+}
+`), [[3, "ImplicitOutput", "function hold()"]]);
+});
+
+test("Date calls read the clock even with arguments while explicit construction is quiet", () => {
+  assert.deepEqual(effectSites("date-call.ts", `function clock() {
+  return Date(1);
+}
+function fixed() {
+  return new Date(1).getTime();
+}
+`), [[2, "ImplicitInput", "function clock()"]]);
+});
+
+test("copied scalar elements have private storage across supported array type shapes", () => {
+  assert.deepEqual(effectSites("scalar-elements.ts", `function scalar(value: number | string) {
+  const copy = { value };
+  copy.value = 1;
+}
+function tuple(values: [number, string]) {
+  const copy = values.map(value => [value]);
+  copy[0].push(1);
+}
+function named(values: [value: number]) {
+  const copy = values.map(value => [value]);
+  copy[0].push(1);
+}
+function generic(values: Array<number>) {
+  const copy = values.map(value => [value]);
+  copy[0].push(1);
+}
+function readOnly(values: readonly number[]) {
+  const copy = values.map(value => [value]);
+  copy[0].push(1);
+}
+function union(values: number[] | string[]) {
+  const copy = values.map(value => [value]);
+  copy[0].push(1);
+}
+function nested(values: number[][]) {
+  const copy = values.map(value => value);
+  copy[0].push(1);
+}
+`), [[27, "ImplicitOutput", "function nested()"]]);
+});
+
+test("standard protocol type names honor local interfaces and type parameters", () => {
+  assert.deepEqual(effectSites("shadowed-protocols.ts", `interface Promise<T> {
+  then(callback: (value: T) => unknown): unknown;
+}
+interface Array<T> {
+  [Symbol.iterator](): Iterator<T>;
+}
+async function awaitCustom(value: Promise<number>) {
+  return await value;
+}
+function iterateCustom(value: Array<number>) {
+  return [...value];
+}
+async function awaitGeneric<Promise>(value: Promise) {
+  return await value;
+}
+function iterateGeneric<Array>(value: Array) {
+  return [...value];
+}
+export {};
+`), [
+    [8, "UnknownEffect", "function awaitCustom()"],
+    [11, "UnknownEffect", "function iterateCustom()"],
+    [14, "UnknownEffect", "function awaitGeneric()"],
+    [17, "UnknownEffect", "function iterateGeneric()"],
+  ]);
+});
+
+test("protocol aliases retain native operations and unresolved thenables", () => {
+  assert.deepEqual(effectSites("aliased-protocols.ts", `type Native = Promise<number>;
+type Values = readonly number[];
+type Custom = PromiseLike<number>;
+async function native(value: Native) {
+  return await value;
+}
+function values(value: Values) {
+  return [...value];
+}
+async function custom(value: Custom) {
+  return await value;
+}
+`), [[11, "UnknownEffect", "function custom()"]]);
+});
+
+test("protocols follow operand values returned by logical, comma, and assignment expressions", () => {
+  assert.deepEqual(effectSites("protocol-operand-values.ts", `async function logical(value: PromiseLike<number>) {
+  return await (value || value);
+}
+async function nativeLogical(value: Promise<number>) {
+  return await (value || value);
+}
+async function comma(value: PromiseLike<number>) {
+  return await (0, value);
+}
+async function nativeComma(value: Promise<number>) {
+  return await (0, value);
+}
+async function assignment(value: PromiseLike<number>) {
+  return await (value = value);
+}
+async function nativeAssignment(value: Promise<number>) {
+  return await (value = value);
+}
+`), [
+    [2, "UnknownEffect", "function logical()"],
+    [8, "UnknownEffect", "function comma()"],
+    [14, "UnknownEffect", "function assignment()"],
   ]);
 });

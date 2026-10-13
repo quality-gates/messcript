@@ -112,22 +112,37 @@ calculation subset covers exact built-in numeric operations, plain built-in
 arrays and records, lexical same-file functions and methods, local aliases,
 standard pure built-ins such as `Math.min`, `String`, `Object.keys`, and
 non-mutating array/string methods, plus known sinks and nondeterministic built-ins
-listed above. Branches with literal `true` or `false` conditions are treated as
+listed above. A pure method name needs a known standard receiver; a custom
+interface with the same method name remains unknown. Branches with literal
+`true` or `false` conditions are treated as
 the only reachable branch; other control-flow conditions are joined. Type
 annotations do not certify runtime values. User objects with custom arithmetic,
-iteration, getters, proxies, or monkey-patched standard bindings are outside the
+iteration, unresolved getters, proxies, or monkey-patched standard bindings are outside the
 proved subset.
 
-Imported functions, unresolved property calls, dynamic callable lookup, injected
-callbacks, escaped aliases with unknown ownership, async scheduling, generators,
-lazy iteration, and unmodeled definition-time effects stay `UnknownEffect` unless
-the syntax analysis establishes a known built-in or same-file target. Returning
-or storing a callback does not execute the callback body. Invoking the callback
-does propagate its effects to the invoking callable.
+Async functions start at invocation. Their effects transfer at the call, including
+effects after an `await`. A native Promise wait is quiet. A generator reports its
+own body effects, but its caller receives those effects only when it iterates the
+value or calls `next`, `return`, or `throw`. Returning or storing a closure does
+not execute it. Invoking it propagates its effects and captured storage ownership.
 
-Imports and `const` bindings are reported only when the file mutates them or an
-unresolved call uses them. Calls to supported same-file calculations and standard
-pure operations are not reported as unknown.
+Constructors execute instance field initializers. Static fields, static blocks,
+computed definition names, and top-level statements execute in the `<module>`
+owner. Same-file getters, setters, tagged templates, callback methods, returned
+closures, and local receiver shapes transfer their known effects. Literal false
+branches stay quiet.
+
+Parameter-reached reads are explicit inputs. A private `const` container that
+never changes is quiet. Exported containers and mutable captured or module state
+are shared inputs. Shallow copies retain the ownership of their elements, while
+copied scalar elements have no mutable storage.
+
+Imported functions, unresolved property calls, dynamic callable lookup, injected
+callbacks, and writes with unknown ownership stay `UnknownEffect`. Unresolved
+iteration hooks, conversion hooks, and non-native thenable waits also stay
+unknown. Calls to supported same-file calculations and standard pure operations
+are quiet. Proxies and monkey-patched standard bindings remain outside the
+supported subset.
 
 To also treat class state as implicit, set `include-this`:
 
@@ -143,4 +158,5 @@ To also treat class state as implicit, set `include-this`:
 ```
 
 With `include-this=true`, `this.count` reads are inputs and writes are outputs.
-Calls such as `this.format()` and all code in constructors are not reported.
+Calls such as `this.format()` resolve their method bodies. Receiver state in a
+constructor is private. Other constructor effects are reported normally.

@@ -1,7 +1,8 @@
 import ts from "typescript";
-import { isFunctionLike, type FunctionLike } from "../ast/functions";
+import { isFunctionLike } from "../ast/functions";
 import { outerExpression } from "../ast/expressions";
 import type { Binding } from "../ast/scopes";
+import type { EffectOwner } from "./owners";
 
 /**
  * A value that a binding can receive.
@@ -34,16 +35,13 @@ export function bindingAssignments(binding: Binding): Assignment[] {
 }
 
 /** Gives the values of the binding that can reach the site in the owner, in source order. A joined value does not replace earlier values. */
-export function assignmentsBeforeSite(binding: Binding, owner: FunctionLike, site: ts.Node): Assignment[] {
+export function assignmentsBeforeSite(binding: Binding, owner: EffectOwner, site: ts.Node): Assignment[] {
   return bindingAssignments(binding)
     .filter((assignment) => inside(assignment.node, owner))
     .flatMap((assignment) => reaching(assignment, owner, site));
 }
 
-// An assignment reaches a site when it precedes the site. It may also reach the site when a loop around
-// both can repeat it, or when a nested function can run it at an unknown time. Those, and assignments
-// that run only on some paths, join with earlier values.
-function reaching(assignment: Assignment, owner: FunctionLike, site: ts.Node): Assignment[] {
+function reaching(assignment: Assignment, owner: EffectOwner, site: ts.Node): Assignment[] {
   if (deferred(assignment.node, owner) || repeated(assignment, owner, site)) {
     return [{ ...assignment, join: true }];
   }
@@ -53,7 +51,7 @@ function reaching(assignment: Assignment, owner: FunctionLike, site: ts.Node): A
   return [unconditional(assignment.node, owner) ? assignment : { ...assignment, join: true }];
 }
 
-function repeated(assignment: Assignment, owner: FunctionLike, site: ts.Node): boolean {
+function repeated(assignment: Assignment, owner: EffectOwner, site: ts.Node): boolean {
   for (let current: ts.Node | undefined = site.parent; current && current !== owner; current = current.parent) {
     if (ts.isIterationStatement(current, false) && inside(assignment.node, current)) {
       return assignment.node.end > site.getStart() || !unconditional(assignment.node, owner);
@@ -62,7 +60,7 @@ function repeated(assignment: Assignment, owner: FunctionLike, site: ts.Node): b
   return false;
 }
 
-function deferred(node: ts.Node, owner: FunctionLike): boolean {
+function deferred(node: ts.Node, owner: EffectOwner): boolean {
   for (let current: ts.Node | undefined = node.parent; current && current !== owner; current = current.parent) {
     if (isFunctionLike(current)) {
       return true;
@@ -71,8 +69,6 @@ function deferred(node: ts.Node, owner: FunctionLike): boolean {
   return false;
 }
 
-// Catch variables receive a thrown value this analysis does not trace. A for-of variable holds an
-// element of the iterated value. A destructured variable holds a part of its initializer.
 function declarationAssignment(node: ts.Node, identifier: ts.Identifier): Assignment | undefined {
   if (!ts.isVariableDeclaration(node)) {
     return undefined;
@@ -90,7 +86,6 @@ function declarationAssignment(node: ts.Node, identifier: ts.Identifier): Assign
   return { node, value: node.initializer, element: node.name !== identifier };
 }
 
-// Compound arithmetic, bitwise, and string assignments store a primitive, which needs no ownership.
 function referenceAssignment(reference: ts.Identifier): Assignment | undefined {
   const target = outerExpression(reference);
   const parent = target.parent;
@@ -115,7 +110,6 @@ export function isShortCircuit(operator: number): boolean {
     operator === ts.SyntaxKind.QuestionQuestionToken || isLogicalAssignment(operator);
 }
 
-// A destructuring assignment target or a for-of or for-in target receives a value this analysis does not trace.
 function patternOrLoopTarget(target: ts.Expression): boolean {
   let current: ts.Node = target;
   while (isPatternPart(current.parent)) {
@@ -146,7 +140,7 @@ export function inside(node: ts.Node, ancestor: ts.Node): boolean {
 }
 
 /** Tells if the node runs on every path through the owner, with no branch, loop, handler, or nested function around it. */
-export function unconditional(node: ts.Node, owner: FunctionLike): boolean {
+export function unconditional(node: ts.Node, owner: EffectOwner): boolean {
   for (let current: ts.Node | undefined = node.parent; current && current !== owner; current = current.parent) {
     if (isBranch(current)) {
       return false;

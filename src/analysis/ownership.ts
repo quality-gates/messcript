@@ -1,8 +1,8 @@
 import ts from "typescript";
-import { isFunctionLike, type FunctionLike } from "../ast/functions";
 import { unwrapExpression } from "../ast/expressions";
 import type { Binding, ScopeModel } from "../ast/scopes";
-import { assignmentsBeforeSite, inside, isShortCircuit } from "./assignments";
+import * as assignments from "./assignments";
+import { ownerParameters, type EffectOwner } from "./owners";
 
 /**
  * Where storage can come from.
@@ -10,7 +10,7 @@ import { assignmentsBeforeSite, inside, isShortCircuit } from "./assignments";
  * Receiver storage belongs to this. A parameter origin names the argument that supplies the storage.
  * Unknown storage has an origin this analysis does not trace.
  */
-export type StorageOrigin = "private" | "unknown" | "external" | "receiver" | `param:${number}`;
+export type StorageOrigin = "private" | "unknown" | "external" | "receiver" | `param:${number}` | `external:${number}`;
 
 /** The origins of a value's own storage, and of the storage reachable through its members or elements. */
 export type StorageFact = {
@@ -23,14 +23,14 @@ export type StoragePath = "outer" | "reachable";
 /** Gives the storage a call returns, or undefined when the call is not resolved. */
 export type CallStorageResolver = (
   call: ts.Expression,
-  owner: FunctionLike,
+  owner: EffectOwner,
   site: ts.Node,
   seen: ReadonlySet<Binding>,
 ) => StorageFact | undefined;
 
 type FactContext = {
   readonly model: ScopeModel;
-  readonly owner: FunctionLike;
+  readonly owner: EffectOwner;
   readonly site: ts.Node;
   readonly seen: ReadonlySet<Binding>;
   readonly callStorage?: CallStorageResolver;
@@ -38,16 +38,8 @@ type FactContext = {
 
 type Handler = (value: ts.Expression, context: FactContext) => StorageFact;
 
-type MemberShape = { readonly expression: ts.Expression };
-type ConditionalShape = { readonly whenTrue: ts.Expression; readonly whenFalse: ts.Expression };
-type BinaryShape = { readonly left: ts.Expression; readonly right: ts.Expression; readonly operatorToken: ts.Node };
-type ElementsShape = { readonly elements: readonly ts.Expression[] };
-type PropertiesShape = { readonly properties: readonly ts.Node[] };
-type NewShape = { readonly expression: ts.Expression; readonly arguments?: readonly ts.Expression[] };
-
 const PRIVATE_FACT: StorageFact = { outer: ["private"], reachable: ["private"] };
 const UNKNOWN_FACT: StorageFact = { outer: ["unknown"], reachable: ["unknown"] };
-const EXTERNAL_FACT: StorageFact = { outer: ["external"], reachable: ["external"] };
 const RECEIVER_FACT: StorageFact = { outer: ["receiver"], reachable: ["receiver"] };
 
 // Standard constructors whose instance is fresh storage that can hold the arguments.
@@ -67,6 +59,12 @@ const PRIMITIVE_OR_FRESH_KINDS = new Set<number>([
 
 const PRIMITIVE_GLOBALS = new Set(["undefined", "NaN", "Infinity"]);
 
+const SCALAR_TYPE_KINDS = new Set<number>([
+  ts.SyntaxKind.NumberKeyword, ts.SyntaxKind.StringKeyword, ts.SyntaxKind.BooleanKeyword,
+  ts.SyntaxKind.BigIntKeyword, ts.SyntaxKind.SymbolKeyword, ts.SyntaxKind.UndefinedKeyword,
+  ts.SyntaxKind.VoidKeyword, ts.SyntaxKind.NeverKeyword,
+]);
+
 const HANDLERS = new Map<number, Handler>([
   [ts.SyntaxKind.ArrayLiteralExpression, arrayLiteralFact],
   [ts.SyntaxKind.ObjectLiteralExpression, objectLiteralFact],
@@ -83,7 +81,7 @@ const HANDLERS = new Map<number, Handler>([
 export function storageFactAt(
   model: ScopeModel,
   binding: Binding,
-  owner: FunctionLike,
+  owner: EffectOwner,
   site: ts.Node,
   seen: ReadonlySet<Binding> = new Set(),
   callStorage?: CallStorageResolver,
@@ -93,7 +91,7 @@ export function storageFactAt(
   }
   const context = { model, owner, seen: new Set(seen).add(binding), callStorage };
   let fact = initialFact(binding, owner);
-  for (const assignment of assignmentsBeforeSite(binding, owner, site)) {
+  for (const assignment of assignments.assignmentsBeforeSite(binding, owner, site)) {
     const assigned = assignment.value ? expressionFact(assignment.value, { ...context, site: assignment.node }) : UNKNOWN_FACT;
     const next = assignment.element ? elementFact(assigned) : assigned;
     fact = assignment.join ? joinFacts(fact, next) : next;
@@ -105,7 +103,7 @@ export function storageFactAt(
 export function expressionStorageFact(
   model: ScopeModel,
   expression: ts.Expression,
-  owner: FunctionLike,
+  owner: EffectOwner,
   site: ts.Node,
   callStorage?: CallStorageResolver,
 ): StorageFact {
@@ -128,7 +126,11 @@ export function parameterOriginIndexes(origins: readonly StorageOrigin[]): numbe
 }
 
 export function hasExternalOrigin(origins: readonly StorageOrigin[]): boolean {
-  return origins.includes("external");
+  return origins.some((origin) => origin === "external" || origin.startsWith("external:"));
+}
+
+export function externalBindingOrigin(binding: Binding): StorageOrigin {
+  return `external:${binding.declarations[0].identifier.getStart()}`;
 }
 
 export function hasUnknownOrigin(origins: readonly StorageOrigin[]): boolean {
@@ -151,15 +153,64 @@ export function joinStorageOrigins(origins: readonly StorageOrigin[]): readonly 
   return joinOrigins(origins);
 }
 
-function initialFact(binding: Binding, owner: FunctionLike): StorageFact {
-  const index = owner.parameters.findIndex((parameter) =>
+function initialFact(binding: Binding, owner: EffectOwner): StorageFact {
+  const index = ownerParameters(owner).findIndex((parameter) =>
     binding.declarations.some((item) => item.kind === "parameter" && item.node === parameter),
   );
   if (index >= 0) {
-    const origin = `param:${index}` as const;
-    return { outer: [origin], reachable: [origin] };
+    return typedOriginFact(`param:${index}`, ownerParameters(owner)[index].type);
   }
-  return inside(binding.scope.node, owner) ? PRIVATE_FACT : EXTERNAL_FACT;
+  if (assignments.inside(binding.scope.node, owner)) {
+    return PRIVATE_FACT;
+  }
+  const declaration = binding.declarations.find((item) => ts.isVariableDeclaration(item.node))?.node;
+  const type = declaration && ts.isVariableDeclaration(declaration) ? declaration.type : undefined;
+  return typedOriginFact(externalBindingOrigin(binding), type);
+}
+
+function typedOriginFact(origin: StorageOrigin, type: ts.TypeNode | undefined): StorageFact {
+  if (scalarType(type)) {
+    return PRIVATE_FACT;
+  }
+  return { outer: [origin], reachable: scalarElements(type) ? ["private"] : [origin] };
+}
+
+function scalarType(type: ts.TypeNode | undefined): boolean {
+  if (!type) {
+    return false;
+  }
+  if (ts.isParenthesizedTypeNode(type)) {
+    return scalarType(type.type);
+  }
+  if (ts.isUnionTypeNode(type)) {
+    return type.types.every(scalarType);
+  }
+  return SCALAR_TYPE_KINDS.has(type.kind) || ts.isLiteralTypeNode(type);
+}
+
+function scalarElements(type: ts.TypeNode | undefined): boolean {
+  if (!type) {
+    return false;
+  }
+  if (ts.isArrayTypeNode(type)) {
+    return scalarType(type.elementType);
+  }
+  if (ts.isTupleTypeNode(type)) {
+    return type.elements.every((element) => scalarType(ts.isNamedTupleMember(element) ? element.type : element));
+  }
+  if (ts.isTypeOperatorNode(type) || ts.isParenthesizedTypeNode(type)) {
+    return scalarElements(type.type);
+  }
+  if (ts.isUnionTypeNode(type)) {
+    return type.types.every(scalarElements);
+  }
+  return scalarArrayReference(type);
+}
+
+function scalarArrayReference(type: ts.TypeNode): boolean {
+  return ts.isTypeReferenceNode(type) && ts.isIdentifier(type.typeName) &&
+    (type.typeName.text === "Array" || type.typeName.text === "ReadonlyArray") &&
+    scalarType(type.typeArguments?.[0]);
 }
 
 function expressionFact(expression: ts.Expression, context: FactContext): StorageFact {
@@ -178,30 +229,34 @@ function expressionFact(expression: ts.Expression, context: FactContext): Storag
   return PRIMITIVE_OR_FRESH_KINDS.has(value.kind) ? PRIVATE_FACT : UNKNOWN_FACT;
 }
 
-// A constructor builds this in fresh storage. Elsewhere this is the receiver.
+// A constructor or field initializer builds this in fresh storage. Elsewhere this is the receiver.
 function thisFact(value: ts.Expression, context: FactContext): StorageFact {
-  return ts.isConstructorDeclaration(context.owner) ? PRIVATE_FACT : RECEIVER_FACT;
+  const owner = context.owner;
+  return ts.isConstructorDeclaration(owner) || ts.isClassLike(owner) ? PRIVATE_FACT : RECEIVER_FACT;
 }
 
 function memberFact(value: ts.Expression, context: FactContext): StorageFact {
-  return elementFact(expressionFact((value as unknown as MemberShape).expression, context));
+  return ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)
+    ? elementFact(expressionFact(value.expression, context)) : UNKNOWN_FACT;
 }
 
 function conditionalFact(value: ts.Expression, context: FactContext): StorageFact {
-  const conditional = value as unknown as ConditionalShape;
-  return joinFacts(expressionFact(conditional.whenTrue, context), expressionFact(conditional.whenFalse, context));
+  return ts.isConditionalExpression(value)
+    ? joinFacts(expressionFact(value.whenTrue, context), expressionFact(value.whenFalse, context)) : UNKNOWN_FACT;
 }
 
 // Short-circuit operators give either operand. A comma or assignment gives its right operand.
 // Other binary operators give a primitive.
 function binaryFact(value: ts.Expression, context: FactContext): StorageFact {
-  const binary = value as unknown as BinaryShape;
-  const operator = binary.operatorToken.kind;
-  if (operator === ts.SyntaxKind.CommaToken || operator === ts.SyntaxKind.EqualsToken) {
-    return expressionFact(binary.right, context);
+  if (!ts.isBinaryExpression(value)) {
+    return UNKNOWN_FACT;
   }
-  if (isShortCircuit(operator)) {
-    return joinFacts(expressionFact(binary.left, context), expressionFact(binary.right, context));
+  const operator = value.operatorToken.kind;
+  if (operator === ts.SyntaxKind.CommaToken || operator === ts.SyntaxKind.EqualsToken) {
+    return expressionFact(value.right, context);
+  }
+  if (assignments.isShortCircuit(operator)) {
+    return joinFacts(expressionFact(value.left, context), expressionFact(value.right, context));
   }
   return PRIVATE_FACT;
 }
@@ -211,13 +266,19 @@ function callFact(value: ts.Expression, context: FactContext): StorageFact {
 }
 
 function arrayLiteralFact(value: ts.Expression, context: FactContext): StorageFact {
-  return freshHolding((value as unknown as ElementsShape).elements, context);
+  return ts.isArrayLiteralExpression(value) ? freshHolding(value.elements, context) : UNKNOWN_FACT;
 }
 
 function objectLiteralFact(value: ts.Expression, context: FactContext): StorageFact {
-  const parts = (value as unknown as PropertiesShape).properties.flatMap((property) => {
+  if (!ts.isObjectLiteralExpression(value)) {
+    return UNKNOWN_FACT;
+  }
+  const parts = value.properties.flatMap((property) => {
     if (ts.isSpreadAssignment(property)) {
       return [property.expression];
+    }
+    if (ts.isShorthandPropertyAssignment(property)) {
+      return [property.name];
     }
     return ts.isPropertyAssignment(property) ? [property.initializer] : [];
   });
@@ -226,9 +287,11 @@ function objectLiteralFact(value: ts.Expression, context: FactContext): StorageF
 
 // A known standard or same-file class constructor gives fresh outer storage that can hold its arguments.
 function newFact(value: ts.Expression, context: FactContext): StorageFact {
-  const created = value as unknown as NewShape;
-  return knownConstructor(context.model, unwrapExpression(created.expression))
-    ? freshHolding(created.arguments ?? [], context)
+  if (!ts.isNewExpression(value)) {
+    return UNKNOWN_FACT;
+  }
+  return knownConstructor(context.model, unwrapExpression(value.expression))
+    ? freshHolding(value.arguments ?? [], context)
     : UNKNOWN_FACT;
 }
 
@@ -265,7 +328,7 @@ function returnsFromConstructor(node: ts.Node): boolean {
   const visit = (child: ts.Node): void => {
     if (ts.isReturnStatement(child) && child.expression) {
       found = true;
-    } else if (!isFunctionLike(child)) {
+    } else if (!ts.isFunctionLike(child)) {
       ts.forEachChild(child, visit);
     }
   };

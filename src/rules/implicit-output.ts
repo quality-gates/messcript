@@ -1,7 +1,7 @@
 // messcript-disable ConstantNamingConventions
 import type ts from "typescript";
 import { collectImplicitFlows } from "../analysis/explicitness";
-import { getFunctionContext } from "../ast/functions";
+import { ownerContext, ownerSubject } from "../analysis/owners";
 import type { Finding } from "../finding";
 import { createDesignFinding } from "./design-finding";
 import type { RuleDefinition } from "./catalog";
@@ -14,8 +14,9 @@ export function findImplicitOutput(sourceFile: ts.SourceFile): Finding[] {
   return collectImplicitFlows(sourceFile, properties["include-this"])
     .filter((flow) => flow.kind === "output")
     .map((flow) => {
-      const context = getFunctionContext(flow.functionNode, sourceFile);
-      return createDesignFinding(flow.node, sourceFile, ruleName, priority, context, `The ${context} ${flow.description}, an implicit output.`);
+      const context = ownerContext(flow.owner, sourceFile);
+      const subject = ownerSubject(flow.owner, sourceFile);
+      return createDesignFinding(flow.node, sourceFile, ruleName, priority, context, `The ${subject} ${flow.description}, an implicit output.`);
     });
 }
 
