@@ -113,6 +113,29 @@ function outer() {
 });
 
 test("alias writes leave disjoint captured fields quiet", () => {
+  assert.deepEqual(messages("captured-disjoint-one-level.ts", `function outer() {
+  const box = { n: 0, m: 0 };
+  function read() { return box.m; }
+  box.n = 1;
+  return read();
+}
+`), []);
+  assert.deepEqual(messages("captured-disjoint-one-level-alias.ts", `function outer() {
+  const box = { n: 0, m: 0 };
+  const alias = box;
+  function read() { return box.m; }
+  alias.n = 1;
+  return read();
+}
+`), []);
+  assert.deepEqual(messages("captured-disjoint-array-elements.ts", `function outer() {
+  const values = [0, 0];
+  const alias = values;
+  function read() { return values[1]; }
+  alias[0] = 1;
+  return read();
+}
+`), []);
   assert.deepEqual(messages("captured-disjoint-array.ts", `function outer() {
   const box = { n: 0, items: [0] };
   const alias = box.items;

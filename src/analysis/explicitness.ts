@@ -103,7 +103,7 @@ type AnalysisState = {
   summaries: ReadonlyMap<EffectOwner, CallableSummary>;
   readonly includeThis: boolean;
   readonly sharedBindings: Set<Binding>;
-  readonly sharedLocalBindings: Map<Binding, Map<string, { fact: StorageFact; origin: StorageOrigin }>>;
+  readonly sharedLocalBindings: Map<Binding, Map<string, { fact: StorageFact; origin: StorageOrigin; slot?: string }>>;
   readonly bindingOrigins: ReadonlyMap<StorageOrigin, Binding>;
 };
 
@@ -255,10 +255,10 @@ function capturedReadSharesMutation(state: AnalysisState, binding: Binding, node
     return false;
   }
   const path = selectedSlots(node);
-  return [...writes.values()].some(({ fact, origin }) =>
-    Array.from({ length: path.length + 1 }, (_, length) =>
-      originsForPath(fact, length ? path.slice(0, length) : "outer"))
-      .some((origins) => origins.includes(origin)));
+  return [...writes.values()].some(({ fact, origin, slot }) =>
+    Array.from({ length: path.length + 1 }, (_, length) => length)
+      .some((length) => originsForPath(fact, length ? path.slice(0, length) : "outer").includes(origin) &&
+        (slot === undefined || pathsOverlap(path.slice(length), [slot]))));
 }
 
 function selectedSlots(node: ts.Identifier): string[] {
@@ -469,6 +469,7 @@ function shareAliasedLocalBindings(
   if (localOrigins.length === 0) {
     return;
   }
+  const slot = mutatedSlot(state, site);
   for (const binding of state.model.bindings) {
     if (!binding.declarations.some((declaration) =>
       (declaration.kind === "variable" || declaration.kind === "parameter") && inside(declaration.node, owner))) {
@@ -478,11 +479,19 @@ function shareAliasedLocalBindings(
     for (const origin of localOrigins) {
       if ([...fact.outer, ...fact.reachable].includes(origin)) {
         const writes = state.sharedLocalBindings.get(binding) ?? new Map();
-        writes.set(`${site.getStart()}/${origin}`, { fact, origin });
+        writes.set(`${site.getStart()}/${origin}`, { fact, origin, slot });
         state.sharedLocalBindings.set(binding, writes);
       }
     }
   }
+}
+
+function mutatedSlot(state: AnalysisState, site: ts.Node): string | undefined {
+  if (!ts.isIdentifier(site)) {
+    return undefined;
+  }
+  const write = state.model.writeOf(site);
+  return write && !write.contents && !write.viaCall && !write.reassign ? selectedSlots(site).at(-1) : undefined;
 }
 
 function sharedBindingCount(state: AnalysisState): number {
