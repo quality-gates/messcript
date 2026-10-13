@@ -155,7 +155,7 @@ export function mapStorageFact(
   ]) };
 }
 
-export function allocatedFact(value: ts.Expression, parts: readonly { slot: string; fact: StorageFact }[]): StorageFact {
+export function allocatedFact(value: ts.Node, parts: readonly { slot: string; fact: StorageFact }[]): StorageFact {
   const allocation: StorageOrigin = `private:${value.getStart()}`;
   const heap = new Map<string, StorageCell>();
   const initial = { allocation, slot: "@allocation", origins: ["private"] } satisfies StorageCell;
@@ -217,7 +217,7 @@ export function joinOrigins(origins: readonly StorageOrigin[]): readonly Storage
   return unique.length === 0 ? ["private"] : unique.sort();
 }
 
-export function shallowStorageFact(value: ts.Expression, source: StorageFact): StorageFact {
+export function shallowStorageFact(value: ts.Node, source: StorageFact): StorageFact {
   const cells = source.cells?.filter((cell) => source.outer.includes(cell.allocation));
   return cells?.length ? allocatedFact(value, cells.map((cell) => ({ slot: cell.slot,
     fact: { outer: cell.origins, reachable: reachableOrigins(cell.origins, source.cells ?? []), cells: source.cells } })))

@@ -3,7 +3,7 @@ import ts from "typescript";
 import { globalName } from "../ast/global-reference";
 import { isFunctionLike, isFunctionLikeWithBody } from "../ast/functions";
 import { methodName, outerExpression, unwrapExpression } from "../ast/expressions";
-import { analyzeScopes } from "../ast/scopes";
+import { analyzeScopes, isAmbient } from "../ast/scopes";
 import type { Binding, ScopeModel, Write } from "../ast/scopes";
 import { reachableChildren } from "./control-flow";
 import { bindingAssignments, canReachSite, inside, unconditional } from "./assignments";
@@ -156,9 +156,73 @@ function bindingFlow(binding: Binding, node: ts.Identifier, owner: EffectOwner, 
     return ["output", `writes ${node.text}`];
   }
   if (outer) {
-    return shared || isExportedStorage(binding) ? ["input", `reads ${node.text}`] : undefined;
+    return shared || isExportedStorage(binding) || isAmbientStorage(binding, node) ? ["input", `reads ${node.text}`] : undefined;
   }
   return undefined;
+}
+
+/**
+ * Tells if the read reaches storage that a declare statement or a global augmentation leaves to code outside the file:
+ * an ambient variable, or a static member of an ambient class.
+ */
+function isAmbientStorage(binding: Binding, node: ts.Identifier): boolean {
+  const member = memberAccessOn(node);
+  return binding.declarations.some((declaration) => isAmbient(declaration.node) &&
+    (ts.isVariableDeclaration(declaration.node) || (ts.isClassDeclaration(declaration.node) && !!member && !isThisMethodCall(member))));
+}
+
+/**
+ * Gives the flow of an unbound name that names a namespace in the file.
+ * Code outside the file can change an ambient namespace, and a namespace exports its variables.
+ * A namespace member that is a function, class, enum, namespace, or scalar constant is not storage.
+ */
+function namespaceFlow(node: ts.Identifier, write: Write | undefined): [ImplicitFlowKind, string] | undefined {
+  const namespaces = namespaceDeclarations(node);
+  if (namespaces.length === 0) {
+    return undefined;
+  }
+  const member = memberAccessOn(node);
+  if (isThisMethodCall(member)) {
+    return undefined;
+  }
+  if (write && !write.viaCall) {
+    return ["output", `writes ${node.text}`];
+  }
+  const name = member && methodName(member);
+  return name !== undefined && namespaces.every((item) => namespaceConstant(item, name)) ? undefined : ["input", `reads ${node.text}`];
+}
+
+function namespaceDeclarations(node: ts.Identifier): ts.ModuleDeclaration[] {
+  const found: ts.ModuleDeclaration[] = [];
+  const visit = (child: ts.Node): void => {
+    if (ts.isModuleDeclaration(child) && ts.isIdentifier(child.name) && child.name.text === node.text) {
+      found.push(child);
+    }
+    if (ts.isModuleDeclaration(child) || ts.isModuleBlock(child) || ts.isSourceFile(child)) {
+      ts.forEachChild(child, visit);
+    }
+  };
+  visit(node.getSourceFile());
+  return found;
+}
+
+function namespaceConstant(namespace: ts.ModuleDeclaration, name: string): boolean {
+  if (isAmbient(namespace) || !namespace.body || !ts.isModuleBlock(namespace.body)) {
+    return false;
+  }
+  const declarations = namespace.body.statements.flatMap((statement) => namedDeclarations(statement, name));
+  return declarations.length > 0 && declarations.every((declaration) =>
+    !ts.isVariableDeclaration(declaration) ||
+    (!!(declaration.parent.flags & ts.NodeFlags.Const) && !!declaration.initializer && isScalarLiteral(declaration.initializer)));
+}
+
+function namedDeclarations(statement: ts.Statement, name: string): ts.Node[] {
+  if (ts.isVariableStatement(statement)) {
+    return statement.declarationList.declarations.filter((item) => ts.isIdentifier(item.name) && item.name.text === name);
+  }
+  const named = ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement) || ts.isEnumDeclaration(statement) ||
+    ts.isModuleDeclaration(statement);
+  return named && statement.name && ts.isIdentifier(statement.name) && statement.name.text === name ? [statement] : [];
 }
 
 function isModuleScope(binding: Binding): boolean {
@@ -251,9 +315,54 @@ function directReceiverFlows(node: ts.Node, owner: EffectOwner, includeThis: boo
 
 function identifierFlows(state: AnalysisState, node: ts.Identifier, owner: EffectOwner, write: Write | undefined): ImplicitFlow[] {
   const binding = state.model.resolve(node);
-  const shared = binding && bindingSharesRead(state, binding, node, owner);
-  const flow = binding ? bindingFlow(binding, node, owner, write, !!shared) : ambientFlow(node, write !== undefined);
-  return flow ? withCompoundRead(write, { kind: flow[0], node, owner, description: flow[1], ...bindingAccess(binding, node, write) }) : [];
+  if (!binding) {
+    const flow = ambientFlow(node, write !== undefined) ?? namespaceFlow(node, write);
+    return flow ? withCompoundRead(write, { kind: flow[0], node, owner, description: flow[1] }) : [];
+  }
+  if (aliasOf(state.model, node)) {
+    return [];
+  }
+  const shared = bindingSharesRead(state, binding, node, owner);
+  const direct = bindingFlow(binding, node, owner, write, shared);
+  const target = direct ? undefined : aliasTarget(state.model, binding, new Set());
+  const flow = direct ?? (target && bindingFlow(target, node, owner, write, shared || bindingSharesRead(state, target, node, owner)));
+  return flow
+    ? withCompoundRead(write, { kind: flow[0], node, owner, description: flow[1], ...bindingAccess(direct ? binding : target ?? binding, node, write) })
+    : [];
+}
+
+/**
+ * Tells if the reference initializes a constant alias of a constant, as log in const alias = log.
+ * Copying a reference reads neither binding's contents, so the uses of the alias report the target instead.
+ */
+function aliasOf(model: ScopeModel, node: ts.Identifier): boolean {
+  const expression = outerExpression(node);
+  const declaration = expression.parent;
+  return constantDeclaration(declaration) && declaration.initializer === expression && constantBinding(model.resolve(node));
+}
+
+function constantBinding(binding: Binding | undefined): binding is Binding {
+  return !!binding && binding.declarations.length === 1 && constantDeclaration(binding.declarations[0].node);
+}
+
+/** Gives the constant binding that a chain of constant aliases copies, as log for b in const a = log; const b = a. */
+function aliasTarget(model: ScopeModel, binding: Binding, seen: Set<Binding>): Binding | undefined {
+  const declaration = binding.declarations[0]?.node;
+  if (seen.has(binding) || !constantBinding(binding) || !ts.isVariableDeclaration(declaration) || !declaration.initializer) {
+    return undefined;
+  }
+  seen.add(binding);
+  const value = unwrapExpression(declaration.initializer);
+  const target = ts.isIdentifier(value) ? model.resolve(value) : undefined;
+  if (!constantBinding(target)) {
+    return undefined;
+  }
+  return aliasTarget(model, target, seen) ?? target;
+}
+
+function constantDeclaration(node: ts.Node): node is ts.VariableDeclaration {
+  return ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && ts.isVariableDeclarationList(node.parent) &&
+    !!(node.parent.flags & ts.NodeFlags.Const);
 }
 
 function bindingSharesRead(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner): boolean {
@@ -597,9 +706,19 @@ function assignedSlots(state: AnalysisState, site: ts.Identifier): readonly (str
   }
   if (ts.isElementAccessExpression(member) && member.expression === outerExpression(site) && literalArray(state, site) &&
       appendIndex(state, member)) {
-    return ["append:0", "property:length"];
+    return [`append:${appendStart(state, site, member)}`, "property:length"];
   }
   return arrayIndexForSlot(slot) === undefined ? [slot] : [slot, "property:length"];
+}
+
+/** Gives the least index an append by length, as values[values.length] = 1, can write: the array's least length there. */
+function appendStart(state: AnalysisState, site: ts.Identifier, member: ts.ElementAccessExpression): number {
+  const owner = enclosingFunction(site);
+  const binding = state.model.resolve(site);
+  const fact = owner && binding ? storageFactForBinding(state, state.summaries, binding, owner, member) : undefined;
+  const origin = fact?.outer.length === 1 ? fact.outer[0] : undefined;
+  const length = origin === undefined ? undefined : literalAllocationLength(state, origin);
+  return owner && origin !== undefined && length !== undefined ? priorPushStart(state, owner, member, origin, length)?.lowerBound ?? 0 : 0;
 }
 
 function outermostAccess(site: ts.Identifier): ts.Expression {
@@ -2751,7 +2870,46 @@ function analyzeImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): 
       description: "calls unresolved callable",
     })));
   }
-  return [...uniqueFlows(flows)];
+  return uniqueLines(uniqueFlows(withoutPassedReads(state.model, flows)));
+}
+
+/**
+ * Drops the read of a constant reference that a call takes as an argument when the same line reports the call as an unknown effect.
+ * Passing a reference reads no contents; whatever the callee does with them is the unknown effect.
+ */
+function withoutPassedReads(model: ScopeModel, flows: readonly ImplicitFlow[]): ImplicitFlow[] {
+  return flows.filter((flow) => {
+    const call = flow.kind === "input" && ts.isIdentifier(flow.node) && !reassigned(model, flow.binding) ? argumentCall(flow.node) : undefined;
+    return !call || !flows.some((other) => other.kind === "unknown" && other.owner === flow.owner &&
+      (other.node === call || inside(other.node, call.expression)) && sameLine(other.node, flow.node));
+  });
+}
+
+function argumentCall(node: ts.Identifier): ts.CallExpression | undefined {
+  const expression = outerExpression(node);
+  const call = expression.parent;
+  return ts.isCallExpression(call) && call.arguments.some((argument) => argument === expression) ? call : undefined;
+}
+
+function reassigned(model: ScopeModel, binding: Binding | undefined): boolean {
+  return !binding || binding.references.some((reference) => model.writeOf(reference)?.reassign);
+}
+
+function sameLine(left: ts.Node, right: ts.Node): boolean {
+  const sourceFile = left.getSourceFile();
+  return sourceFile.getLineAndCharacterOfPosition(left.getStart()).line === sourceFile.getLineAndCharacterOfPosition(right.getStart()).line;
+}
+
+// One line gives one finding per owner and kind, so two reasons for the same effect do not report it twice.
+function uniqueLines(flows: readonly ImplicitFlow[]): ImplicitFlow[] {
+  const seen = new Set<string>();
+  return flows.filter((flow) => {
+    const line = flow.node.getSourceFile().getLineAndCharacterOfPosition(flow.node.getStart()).line;
+    const key = `${ownerKey(flow.owner)}:${flow.kind}:${line}`;
+    const fresh = !seen.has(key);
+    seen.add(key);
+    return fresh;
+  });
 }
 
 const flowCacheSymbol = Symbol("explicitnessFlowCache");

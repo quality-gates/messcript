@@ -86,34 +86,94 @@ export function storageFactAt(
   let fact = initialFact(model, binding, owner);
   const alias = ambientAlias(binding, owner);
   if (alias) {
-    fact = expressionFact(alias, { ...context, site });
+    fact = selectedFact(expressionFact(alias.value, { ...context, site }), alias, { ...context, site });
   }
   const events = [
     ...assignments.assignmentsBeforeSite(binding, owner, site).map((assignment) => ({
       node: assignment.node, replace: !assignment.join,
       value: assignment.value ? expressionFact(assignment.value, { ...context, site: assignment.node }) : UNKNOWN_FACT,
       element: assignment.element,
+      iterated: assignment.iterated,
+      pattern: assignment.pattern,
+      context: { ...context, site: assignment.node },
     })),
     ...(resolver?.insertions(owner, site) ?? []).filter((insertion) => insertion.kind === "binding" && insertion.binding === binding)
-      .map((insertion) => ({ node: insertion.node, replace: insertion.replace, value: insertion.value, element: false })),
+      .map((insertion) => ({ node: insertion.node, replace: insertion.replace, value: insertion.value, element: false, iterated: false, pattern: undefined, context: { ...context, site } })),
   ].sort((left, right) => left.node.end - right.node.end);
   for (const event of events) {
-    const next = event.element ? storage.elementFact(event.value) : event.value;
+    const next = selectedFact(event.value, event, event.context);
     fact = event.replace ? next : storage.joinFacts(fact, next);
   }
   return insertedFact(fact, { ...context, site });
 }
 
-function ambientAlias(binding: Binding, owner: EffectOwner): ts.Expression | undefined {
+type Selection = { readonly element?: boolean; readonly iterated?: boolean; readonly pattern?: ts.Identifier };
+
+/**
+ * Gives the part of the value that an element assignment selects: an iterated element, then each destructuring step.
+ * A property step selects the member, a rest step copies the members it keeps, and a default joins its own value.
+ * A step this analysis cannot place, as an array pattern over map entries, gives whatever the value reaches.
+ */
+function selectedFact(value: StorageFact, selection: Selection, context: FactContext): StorageFact {
+  if (!selection.element) {
+    return value;
+  }
+  const steps: ts.BindingElement[] = [];
+  for (let node = selection.pattern?.parent; node && ts.isBindingElement(node); node = node.parent.parent) {
+    steps.unshift(node);
+  }
+  if (!selection.iterated && steps.length === 0) {
+    return storage.elementFact(value);
+  }
+  return steps.reduce((fact, element) => patternStep(fact, element, context), selection.iterated ? iteratedFact(value) : value);
+}
+
+function iteratedFact(value: StorageFact): StorageFact {
+  return entryCells(value) ? reachedFact(value) : storage.elementFact(value);
+}
+
+function patternStep(fact: StorageFact, element: ts.BindingElement, context: FactContext): StorageFact {
+  const pattern = element.parent;
+  const selected = ts.isObjectBindingPattern(pattern) ? propertyStep(fact, element) : arrayStep(fact, element, pattern);
+  return element.initializer ? storage.joinFacts(selected, expressionFact(element.initializer, context)) : selected;
+}
+
+function propertyStep(fact: StorageFact, element: ts.BindingElement): StorageFact {
+  if (element.dotDotDotToken) {
+    return storage.shallowStorageFact(element.name, fact);
+  }
+  const key = element.propertyName ?? element.name;
+  const name = ts.isComputedPropertyName(key) ? storage.literalKey(key.expression)
+    : ts.isIdentifier(key) || ts.isStringLiteral(key) || ts.isNumericLiteral(key) ? key.text : undefined;
+  return storage.memberStorageFact(fact, name === undefined ? undefined : `property:${name}`);
+}
+
+function arrayStep(fact: StorageFact, element: ts.BindingElement, pattern: ts.ArrayBindingPattern): StorageFact {
+  if (entryCells(fact)) {
+    return reachedFact(fact);
+  }
+  return element.dotDotDotToken ? storage.allocatedFact(element.name, [{ slot: "*", fact: storage.elementFact(fact) }])
+    : storage.memberStorageFact(fact, `property:${pattern.elements.indexOf(element)}`);
+}
+
+/** Tells if the value holds map entries, whose iteration gives fresh key and value pairs. */
+function entryCells(fact: StorageFact): boolean {
+  return !!fact.cells?.some((cell) => fact.outer.includes(cell.allocation) && cell.slot.startsWith("entry:"));
+}
+
+/** Gives a value that may be anything the given value reaches. */
+function reachedFact(fact: StorageFact): StorageFact {
+  return { outer: fact.reachable, reachable: fact.reachable, cells: fact.cells };
+}
+
+function ambientAlias(binding: Binding, owner: EffectOwner): assignments.Assignment & { readonly value: ts.Expression } | undefined {
   if (assignments.inside(binding.scope.node, owner)) {
     return undefined;
   }
-  const declaration = binding.declarations.find((item) => ts.isVariableDeclaration(item.node))?.node;
-  if (!declaration || !ts.isVariableDeclaration(declaration) || !declaration.initializer) {
-    return undefined;
-  }
-  const value = unwrapExpression(declaration.initializer);
-  return ts.isIdentifier(value) || ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value) ? value : undefined;
+  const declaration = binding.declarations.find((item) => ts.isVariableDeclaration(item.node));
+  const assignment = declaration && assignments.declarationAssignment(declaration.node, declaration.identifier);
+  const value = assignment?.value && ts.isVariableDeclaration(assignment.node) && unwrapExpression(assignment.value);
+  return value && (ts.isIdentifier(value) || ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)) ? { ...assignment, value } : undefined;
 }
 
 /** Gives the storage the expression evaluates to at the site in the owner. */

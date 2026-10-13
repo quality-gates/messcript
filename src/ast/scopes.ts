@@ -81,7 +81,8 @@ function scopeKindOf(node: ts.Node): ScopeKind | undefined {
   if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
     return "class";
   }
-  if (ts.isModuleBlock(node)) {
+  // A global augmentation declares names in the global scope, which this model folds into the file scope.
+  if (ts.isModuleBlock(node) && (node.parent.flags & ts.NodeFlags.GlobalAugmentation) === 0) {
     return "namespace";
   }
   const block = ts.isBlock(node) || ts.isCaseBlock(node) || ts.isCatchClause(node) || ts.isForStatement(node) ||
@@ -109,6 +110,16 @@ function isReference(identifier: ts.Identifier): boolean {
   const propertyName = "propertyName" in parent && parent.propertyName === identifier;
   const label = "label" in parent && parent.label === identifier;
   return !named && !propertyName && !label;
+}
+
+/** Tells if a declare modifier or a declaration file leaves the node to code outside the file. */
+export function isAmbient(node: ts.Node): boolean {
+  for (let current: ts.Node | undefined = node; current; current = current.parent) {
+    if (ts.canHaveModifiers(current) && ts.getModifiers(current)?.some((modifier) => modifier.kind === ts.SyntaxKind.DeclareKeyword)) {
+      return true;
+    }
+  }
+  return node.getSourceFile().isDeclarationFile;
 }
 
 function isInside(node: ts.Node, ancestor: ts.Node): boolean {
@@ -151,7 +162,8 @@ function isUpdateExpression(node: ts.Node): node is ts.PrefixUnaryExpression | t
     (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken);
 }
 
-function writeTargets(node: ts.Node): ts.Expression[] {
+/** Gives the expressions the node assigns, updates, or deletes. */
+export function writeTargets(node: ts.Node): ts.Expression[] {
   if (ts.isBinaryExpression(node) && isAssignmentOperator(node.operatorToken.kind)) {
     return assignmentTargets(node.left);
   }

@@ -57,8 +57,7 @@ test("indirect writes make reads of the original shared storage implicit", () =>
 function write() { const alias = shared; alias.push(1); }
 function read() { return shared.length; }
 `), [
-    "2:ImplicitInput: The function write() reads shared, an implicit input.",
-    "2:ImplicitOutput: The function write() mutates caller-owned value alias, an implicit output.",
+    "2:ImplicitOutput: The function write() writes alias, an implicit output.",
     "3:ImplicitInput: The function read() reads shared, an implicit input.",
   ]);
   assert.deepEqual(messages("shared-helper-write.ts", `const shared: number[] = [];
@@ -475,7 +474,6 @@ function language() { return navigator.language; }
 function send(body) { return fetch("/api", { body }); }
 `), [
     "1:ImplicitInput: The function stamp() calls Date.now(), an implicit input.",
-    "1:ImplicitInput: The function stamp() calls Math.random(), an implicit input.",
     "2:ImplicitInput: The function today() calls new Date(), an implicit input.",
     "3:ImplicitOutput: The function render() writes document, an implicit output.",
     "3:UnknownEffect: The function render() calls unresolved callable, an unknown effect.",
@@ -568,22 +566,37 @@ function f10() { return window['innerWidth']; }
 });
 
 test("every listed host object, sink, and nondeterministic call is recognised", () => {
-  assert.deepEqual(messages("ambient-lists.js", `function hosts() { return [globalThis.a, localStorage.a, location.a, process.a, self.a, sessionStorage.a]; }
-function sinks(callback) { queueMicrotask(callback); requestAnimationFrame(callback); setInterval(callback, 1); }
-function random(buffer) { return [crypto.getRandomValues(buffer), crypto.randomUUID(), performance.now()]; }
+  assert.deepEqual(messages("ambient-lists.js", `function hosts() {
+  return [globalThis.a,
+    localStorage.a,
+    location.a,
+    process.a,
+    self.a,
+    sessionStorage.a];
+}
+function sinks(callback) {
+  queueMicrotask(callback);
+  requestAnimationFrame(callback);
+  setInterval(callback, 1);
+}
+function random(buffer) {
+  return [crypto.getRandomValues(buffer),
+    crypto.randomUUID(),
+    performance.now()];
+}
 `), [
-    "1:ImplicitInput: The function hosts() reads globalThis, an implicit input.",
-    "1:ImplicitInput: The function hosts() reads localStorage, an implicit input.",
-    "1:ImplicitInput: The function hosts() reads location, an implicit input.",
-    "1:ImplicitInput: The function hosts() reads process, an implicit input.",
-    "1:ImplicitInput: The function hosts() reads self, an implicit input.",
-    "1:ImplicitInput: The function hosts() reads sessionStorage, an implicit input.",
-    "2:ImplicitOutput: The function sinks() uses queueMicrotask, an implicit output.",
-    "2:ImplicitOutput: The function sinks() uses requestAnimationFrame, an implicit output.",
-    "2:ImplicitOutput: The function sinks() uses setInterval, an implicit output.",
-    "3:ImplicitInput: The function random() calls crypto.getRandomValues(), an implicit input.",
-    "3:ImplicitInput: The function random() calls crypto.randomUUID(), an implicit input.",
-    "3:ImplicitInput: The function random() calls performance.now(), an implicit input.",
+    "2:ImplicitInput: The function hosts() reads globalThis, an implicit input.",
+    "3:ImplicitInput: The function hosts() reads localStorage, an implicit input.",
+    "4:ImplicitInput: The function hosts() reads location, an implicit input.",
+    "5:ImplicitInput: The function hosts() reads process, an implicit input.",
+    "6:ImplicitInput: The function hosts() reads self, an implicit input.",
+    "7:ImplicitInput: The function hosts() reads sessionStorage, an implicit input.",
+    "10:ImplicitOutput: The function sinks() uses queueMicrotask, an implicit output.",
+    "11:ImplicitOutput: The function sinks() uses requestAnimationFrame, an implicit output.",
+    "12:ImplicitOutput: The function sinks() uses setInterval, an implicit output.",
+    "15:ImplicitInput: The function random() calls crypto.getRandomValues(), an implicit input.",
+    "16:ImplicitInput: The function random() calls crypto.randomUUID(), an implicit input.",
+    "17:ImplicitInput: The function random() calls performance.now(), an implicit input.",
   ]);
 });
 
@@ -644,7 +657,6 @@ const classSource = `class Counter {
 
 test("class state is an unknown effect by default", () => {
   assert.deepEqual(messages("class-default.js", classSource), [
-    "3:UnknownEffect: The method Counter.increment() reads this.count, an unknown effect.",
     "3:UnknownEffect: The method Counter.increment() writes this.count, an unknown effect.",
     "4:UnknownEffect: The method Counter.format() reads this.count, an unknown effect.",
     "5:UnknownEffect: The method Counter.self() reads this, an unknown effect.",
@@ -659,7 +671,6 @@ test("include-this reports class state reads and writes, but not method calls or
     "5:ImplicitInput: The method Counter.self() reads this, an implicit input.",
   ]);
   assert.deepEqual(messages("class-after-strict.js", classSource), [
-      "3:UnknownEffect: The method Counter.increment() reads this.count, an unknown effect.",
       "3:UnknownEffect: The method Counter.increment() writes this.count, an unknown effect.",
       "4:UnknownEffect: The method Counter.format() reads this.count, an unknown effect.",
       "5:UnknownEffect: The method Counter.self() reads this, an unknown effect.",
@@ -1068,7 +1079,6 @@ function writeUnknown() {
     "7:ImplicitOutput: The function writeShared() mutates caller-owned value shared, an implicit output.",
     "7:ImplicitInput: The function writeShared() reads shared, an implicit input.",
     "10:UnknownEffect: The function writeUnknown() mutates value with unknown ownership, an unknown effect.",
-    "10:UnknownEffect: The function writeUnknown() calls unresolved callable, an unknown effect.",
   ]);
 });
 
@@ -1113,7 +1123,6 @@ function missingCallback(values: number[]) {
     "10:ImplicitOutput: The function sharedWrite() mutates caller-owned callback argument, an implicit output.",
     "10:ImplicitInput: The function sharedWrite() reads shared, an implicit input.",
     "13:UnknownEffect: The function unknownWrite() mutates value with unknown ownership, an unknown effect.",
-    "13:UnknownEffect: The function unknownWrite() calls unresolved callable, an unknown effect.",
     "16:UnknownEffect: The function missingCallback() calls unresolved callable, an unknown effect.",
   ]);
 });

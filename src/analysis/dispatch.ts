@@ -1,7 +1,7 @@
 import ts from "typescript";
 import * as expressions from "../ast/expressions";
-import { isFunctionLikeWithBody } from "../ast/functions";
-import type { Binding, ScopeModel } from "../ast/scopes";
+import { isFunctionLike, isFunctionLikeWithBody } from "../ast/functions";
+import { writeTargets, type Binding, type ScopeModel } from "../ast/scopes";
 import * as assignments from "./assignments";
 import * as owners from "./owners";
 
@@ -70,9 +70,9 @@ function bindingTargets(dispatch: Dispatch, binding: Binding, seen: ReadonlySet<
     ts.isFunctionDeclaration(declaration.node) && declaration.node.body ? [declaration.node] : [],
   );
   const assigned = assignments.bindingAssignments(binding);
-  const groups = assigned.map((assignment) => assignment.value && !assignment.element
-    ? callableTargets(dispatch, assignment.value, next)
-    : UNKNOWN);
+  const groups = assigned.map((assignment) => !assignment.value ? UNKNOWN
+    : assignment.element ? elementTargets(dispatch, binding, assignment.node, assignment.value, next)
+      : callableTargets(dispatch, assignment.value, next));
   if (functions.length > 0) {
     groups.push({ targets: functions, complete: true });
   }
@@ -80,6 +80,18 @@ function bindingTargets(dispatch: Dispatch, binding: Binding, seen: ReadonlySet<
     groups.push(UNKNOWN);
   }
   return groups.length > 0 ? joinTargets(groups) : UNKNOWN;
+}
+
+// A plain name in an object pattern, as in "const { add } = api", takes the member the name selects.
+function elementTargets(dispatch: Dispatch, binding: Binding, node: ts.Node, value: ts.Expression, seen: ReadonlySet<Binding>): Targets {
+  const element = binding.declarations.find((declaration) => declaration.node === node)?.identifier.parent;
+  if (!element || !ts.isBindingElement(element) || !ts.isObjectBindingPattern(element.parent) || element.parent.parent !== node ||
+      element.dotDotDotToken || element.initializer) {
+    return UNKNOWN;
+  }
+  const key = element.propertyName ?? element.name;
+  const name = ts.isIdentifier(key) || ts.isStringLiteralLike(key) ? key.text : undefined;
+  return name === undefined ? UNKNOWN : namedTargets(dispatch, value, name, "call", seen, node);
 }
 
 export function classTargets(model: ScopeModel, expression: ts.Expression, seen: ReadonlySet<Binding> = new Set()): readonly ts.ClassLikeDeclaration[] | undefined {
@@ -124,21 +136,35 @@ export function memberTargets(dispatch: Dispatch, expression: ts.Expression, kin
   if (receiver.kind === ts.SyntaxKind.ThisKeyword || receiver.kind === ts.SyntaxKind.SuperKeyword) {
     return receiverTargets(dispatch, expression, name, kind, receiver.kind === ts.SyntaxKind.SuperKeyword);
   }
-  const shapes = receiverShapes(dispatch.model, receiver, seen);
+  return namedTargets(dispatch, receiver, name, kind, seen, expression);
+}
+
+/** Gives the members a name selects on the value of the receiver at the site. */
+function namedTargets(dispatch: Dispatch, receiver: ts.Expression, name: string, kind: MemberKind, seen: ReadonlySet<Binding>, site: ts.Node): Targets {
+  const shapes = receiverShapes(dispatch.model, receiver, seen, site);
   if (shapes) {
-    return joinTargets(shapes.map((shape) => shapeMembers(dispatch, shape, name, kind, seen)));
+    return joinTargets([...shapes.map((shape) => shapeMembers(dispatch, shape, name, kind, seen)), patchedTargets(site, name, kind)]);
+  }
+  // A global object holds no method of this file unless the file stores one there, which it reports as a write.
+  if (ts.isIdentifier(receiver) && !dispatch.model.resolve(receiver)) {
+    return UNKNOWN;
   }
   const candidates = dispatch.owners.filter((owner) => memberMatches(owner, name, kind));
   return { targets: candidates, complete: false };
 }
 
-function receiverShapes(model: ScopeModel, expression: ts.Expression, seen: ReadonlySet<Binding>): readonly ts.Node[] | undefined {
+// A method that code in the file replaces by name can hold any value.
+function patchedTargets(site: ts.Node, name: string, kind: MemberKind): Targets {
+  return kind === "call" && fileWrites(site.getSourceFile()).names.has(name) ? UNKNOWN : EMPTY;
+}
+
+function receiverShapes(model: ScopeModel, expression: ts.Expression, seen: ReadonlySet<Binding>, site: ts.Node): readonly ts.Node[] | undefined {
   const value = expressions.unwrapExpression(expression);
   if (ts.isNewExpression(value)) {
-    return classTargets(model, value.expression);
+    return closedShapes(model, classTargets(model, value.expression));
   }
   if (ts.isObjectLiteralExpression(value)) {
-    return [value];
+    return closedShapes(model, [value]);
   }
   if (!ts.isIdentifier(value)) {
     return undefined;
@@ -148,20 +174,20 @@ function receiverShapes(model: ScopeModel, expression: ts.Expression, seen: Read
     return classes;
   }
   const binding = model.resolve(value);
-  if (!binding || seen.has(binding)) {
+  if (!binding || seen.has(binding) || !sealed(model, binding, site, new Set())) {
     return undefined;
   }
-  return bindingShapes(model, binding, new Set(seen).add(binding));
+  return bindingShapes(model, binding, new Set(seen).add(binding), site);
 }
 
-function bindingShapes(model: ScopeModel, binding: Binding, seen: ReadonlySet<Binding>): readonly ts.Node[] | undefined {
+function bindingShapes(model: ScopeModel, binding: Binding, seen: ReadonlySet<Binding>, site: ts.Node): readonly ts.Node[] | undefined {
+  if (binding.declarations.some((declaration) => declaration.kind === "parameter" || declaration.kind === "import")) {
+    return undefined;
+  }
   const shapes: ts.Node[] = [];
   for (const assignment of assignments.bindingAssignments(binding)) {
-    if (!assignment.value || assignment.element) {
-      return undefined;
-    }
-    const targets = receiverShapes(model, assignment.value, seen);
-    if (!targets || (targets.some(ts.isObjectLiteralExpression) && replacesMembers(model, binding, targets))) {
+    const targets = assignment.value && !assignment.element ? receiverShapes(model, assignment.value, seen, site) : undefined;
+    if (!targets) {
       return undefined;
     }
     shapes.push(...targets);
@@ -169,35 +195,116 @@ function bindingShapes(model: ScopeModel, binding: Binding, seen: ReadonlySet<Bi
   return shapes.length > 0 ? shapes : undefined;
 }
 
+/** Gives the shapes when no code they run can hand their object to code that replaces its members. */
+function closedShapes(model: ScopeModel, shapes: readonly ts.Node[] | undefined): readonly ts.Node[] | undefined {
+  return shapes?.every((shape) => thisStaysInside(model, shape, new Set())) ? shapes : undefined;
+}
+
+function thisStaysInside(model: ScopeModel, shape: ts.Node, seen: ReadonlySet<ts.Node>): boolean {
+  const visit = (node: ts.Node): boolean => node.kind === ts.SyntaxKind.ThisKeyword
+    ? memberUse(node as ts.Expression)
+    : !ts.forEachChild(node, (child) => visit(child) ? undefined : true);
+  const base = ts.isClassLike(shape) ? owners.baseClassExpression(shape) : undefined;
+  const parents = base ? classTargets(model, base) ?? [] : [];
+  return !seen.has(shape) && visit(shape) && parents.every((parent) => thisStaysInside(model, parent, new Set(seen).add(shape)));
+}
+
 /**
- * True when code can change the members of the object a binding holds.
- * A call to a method every shape declares runs that method instead of a library mutator of the same name,
- * so it changes members only when a method body writes through this.
+ * True when no use of the binding that can run before the site lets other code replace members of its object.
+ * Reading or calling a named member, copying members out, and making an alias that is itself sealed keep the object closed.
  */
-function replacesMembers(model: ScopeModel, binding: Binding, shapes: readonly ts.Node[]): boolean {
-  return binding.references.some((reference) => {
-    const write = model.writeOf(reference);
-    return !!write && !write.viaCall && !ownMethodCall(reference, shapes);
-  }) || shapes.some((shape) => writesThis(model, shape));
-}
-
-function ownMethodCall(reference: ts.Expression, shapes: readonly ts.Node[]): boolean {
-  const receiver = expressions.outerExpression(reference);
-  const access = receiver.parent;
-  if ((!ts.isPropertyAccessExpression(access) && !ts.isElementAccessExpression(access)) || access.expression !== receiver) {
-    return false;
+function sealed(model: ScopeModel, binding: Binding, site: ts.Node, seen: ReadonlySet<Binding>): boolean {
+  if (seen.has(binding)) {
+    return true;
   }
-  const callee = expressions.outerExpression(access);
-  const name = expressions.methodName(access);
-  return ts.isCallExpression(callee.parent) && callee.parent.expression === callee && name !== undefined &&
-    shapes.every((shape) => ts.isObjectLiteralExpression(shape) && shape.properties.some((member) => declarationName(member) === name));
+  const next = new Set(seen).add(binding);
+  const exported = binding.declarations.some((declaration) => ts.isVariableDeclaration(declaration.node) &&
+    ts.getModifiers(declaration.node.parent.parent as ts.VariableStatement)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword));
+  return !exported && binding.references.every((reference) => !reaches(reference, site) || closedUse(model, reference, site, next));
 }
 
-function writesThis(model: ScopeModel, shape: ts.Node): boolean {
-  const visit = (node: ts.Node): boolean =>
-    (node.kind === ts.SyntaxKind.ThisKeyword && model.writeOf(node) !== undefined) || (ts.forEachChild(node, visit) ?? false);
-  return ts.isObjectLiteralExpression(shape) && visit(shape);
+function closedUse(model: ScopeModel, reference: ts.Identifier, site: ts.Node, seen: ReadonlySet<Binding>): boolean {
+  const value = expressions.outerExpression(reference);
+  const parent = value.parent;
+  if (ts.isVariableDeclaration(parent) && parent.initializer === value) {
+    const alias = ts.isIdentifier(parent.name)
+      ? model.bindings.find((binding) => binding.declarations.some((declaration) => declaration.identifier === parent.name))
+      : undefined;
+    return ts.isObjectBindingPattern(parent.name) || (!!alias && sealed(model, alias, site, seen));
+  }
+  return memberUse(reference) || ts.isSpreadAssignment(parent) || ts.isTypeQueryNode(parent) ||
+    (ts.isBinaryExpression(parent) && parent.left === value && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken);
 }
+
+// Reading a member, calling it, or writing one by name leaves the object where it is; a write by name is a patch the file records.
+function memberUse(node: ts.Expression): boolean {
+  const value = expressions.outerExpression(node);
+  const access = value.parent;
+  return (ts.isPropertyAccessExpression(access) || ts.isElementAccessExpression(access)) && access.expression === value &&
+    (expressions.methodName(access) !== undefined || !fileWrites(node.getSourceFile()).targets.has(access));
+}
+
+function reaches(use: ts.Node, site: ts.Node): boolean {
+  let owner: ts.Node = site.parent;
+  while (!isFunctionLike(owner) && !ts.isClassLike(owner) && !ts.isSourceFile(owner)) {
+    owner = owner.parent;
+  }
+  return !assignments.inside(use, owner) || assignments.canReachSite(use, owner as owners.EffectOwner, site);
+}
+
+type FileWrites = { readonly targets: ReadonlySet<ts.Node>; readonly names: ReadonlySet<string> };
+
+// messcript-disable-next-line GlobalVariable
+const fileWritesCache = new WeakMap<ts.SourceFile, FileWrites>();
+
+/** Gives every member the file writes, and the names of the members it writes or defines by name. */
+function fileWrites(sourceFile: ts.SourceFile): FileWrites {
+  const cached = fileWritesCache.get(sourceFile);
+  if (cached) {
+    return cached;
+  }
+  const targets = new Set<ts.Node>();
+  const names = new Set<string>();
+  const visit = (node: ts.Node): void => {
+    for (const target of writeTargets(node)) {
+      const value = expressions.unwrapExpression(target);
+      targets.add(value);
+      const name = (ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)) ? expressions.methodName(value) : undefined;
+      if (name !== undefined) {
+        names.add(name);
+      }
+    }
+    for (const name of definedNames(node)) {
+      names.add(name);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  const writes = { targets, names };
+  fileWritesCache.set(sourceFile, writes);
+  return writes;
+}
+
+// Object.defineProperty, Reflect.set, and Object.assign write members whose names they spell out.
+function definedNames(node: ts.Node): string[] {
+  if (!ts.isCallExpression(node)) {
+    return [];
+  }
+  const callee = expressions.unwrapExpression(node.expression);
+  const library = ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) ? `${callee.expression.text}.${callee.name.text}` : "";
+  const [, key] = node.arguments;
+  if (key && ts.isStringLiteralLike(expressions.unwrapExpression(key)) && DEFINERS.has(library)) {
+    return [(expressions.unwrapExpression(key) as ts.StringLiteralLike).text];
+  }
+  return library === "Object.assign"
+    ? node.arguments.slice(1).flatMap((source) => {
+      const value = expressions.unwrapExpression(source);
+      return ts.isObjectLiteralExpression(value) ? value.properties.flatMap((property) => declarationName(property) ?? []) : [];
+    })
+    : [];
+}
+
+const DEFINERS = new Set(["Object.defineProperty", "Reflect.defineProperty", "Reflect.set"]);
 
 function receiverTargets(dispatch: Dispatch, node: ts.Node, name: string, kind: MemberKind, baseOnly: boolean): Targets {
   const owner = owners.enclosingClass(node);
@@ -215,7 +322,8 @@ function receiverTargets(dispatch: Dispatch, node: ts.Node, name: string, kind: 
   }))];
   const subtypes = classes.filter((candidate) => descendsFrom(dispatch.model, candidate, owner, new Set()));
   const groups = [owner, ...subtypes].map((candidate) => classMembers(dispatch, candidate, name, kind, new Set()));
-  if (isOpenMember(owner, name)) {
+  groups.push(patchedTargets(node, name, kind));
+  if (isOpenMember(owner, name) || !closedShapes(dispatch.model, [owner, ...subtypes])) {
     groups.push(UNKNOWN);
   }
   return joinTargets(groups);
@@ -238,10 +346,8 @@ function descendsFrom(model: ScopeModel, candidate: ts.ClassLikeDeclaration, anc
 }
 
 function shapeMembers(dispatch: Dispatch, shape: ts.Node, name: string, kind: MemberKind, seen: ReadonlySet<Binding>): Targets {
-  if (ts.isClassLike(shape)) {
-    return classMembers(dispatch, shape, name, kind, new Set());
-  }
-  return ts.isObjectLiteralExpression(shape) ? membersTargets(dispatch, shape.properties, name, kind, seen) : UNKNOWN;
+  return ts.isClassLike(shape) ? classMembers(dispatch, shape, name, kind, new Set())
+    : membersTargets(dispatch, (shape as ts.ObjectLiteralExpression).properties, name, kind, seen);
 }
 
 function classMembers(dispatch: Dispatch, shape: ts.ClassLikeDeclaration, name: string, kind: MemberKind, seen: ReadonlySet<ts.Node>): Targets {
@@ -261,16 +367,32 @@ function classMembers(dispatch: Dispatch, shape: ts.ClassLikeDeclaration, name: 
 }
 
 function membersTargets(dispatch: Dispatch, members: readonly ts.Node[], name: string, kind: MemberKind, seen: ReadonlySet<Binding>): Targets {
-  const groups = members.filter((member) => declarationName(member) === name).flatMap((member) => {
+  const groups = members.flatMap((member): Targets[] => {
+    if (ts.isSpreadAssignment(member)) {
+      return [namedTargets(dispatch, member.expression, name, kind, seen, member)];
+    }
+    if (declarationName(member) !== name) {
+      return openName(member) ? [UNKNOWN] : [];
+    }
     if (memberMatches(member, name, kind)) {
-      return [{ targets: [member], complete: true } satisfies Targets];
+      return [{ targets: [member], complete: true }];
     }
-    if (kind === "call" && (ts.isPropertyDeclaration(member) || ts.isPropertyAssignment(member)) && member.initializer) {
-      return [callableTargets(dispatch, member.initializer, seen)];
-    }
-    return [];
+    const value = ts.isShorthandPropertyAssignment(member) ? member.name
+      : ts.isPropertyDeclaration(member) || ts.isPropertyAssignment(member) ? member.initializer : undefined;
+    return kind === "call" && value ? [callableTargets(dispatch, value, seen)] : [];
   });
   return joinTargets(groups);
+}
+
+// A computed name other than a literal or a symbol can be any member name.
+function openName(member: ts.Node): boolean {
+  const name = (member as { name?: ts.Node }).name;
+  if (!name || !ts.isComputedPropertyName(name)) {
+    return false;
+  }
+  const key = expressions.unwrapExpression(name.expression);
+  const symbol = ts.isPropertyAccessExpression(key) && ts.isIdentifier(key.expression) && key.expression.text === "Symbol";
+  return !symbol && literalName(key) === undefined;
 }
 
 function memberMatches(node: ts.Node, name: string, kind: MemberKind): node is owners.EffectOwner {
@@ -284,9 +406,16 @@ function memberMatches(node: ts.Node, name: string, kind: MemberKind): node is o
 
 function declarationName(node: ts.Node): string | undefined {
   if (!ts.isMethodDeclaration(node) && !ts.isGetAccessorDeclaration(node) && !ts.isSetAccessorDeclaration(node) &&
-      !ts.isPropertyDeclaration(node) && !ts.isPropertyAssignment(node)) {
+      !ts.isPropertyDeclaration(node) && !ts.isPropertyAssignment(node) && !ts.isShorthandPropertyAssignment(node)) {
     return undefined;
   }
   const name = node.name;
-  return ts.isIdentifier(name) || ts.isStringLiteralLike(name) || ts.isNumericLiteral(name) ? name.text : undefined;
+  if (ts.isComputedPropertyName(name)) {
+    return literalName(expressions.unwrapExpression(name.expression));
+  }
+  return ts.isIdentifier(name) ? name.text : literalName(name);
+}
+
+function literalName(name: ts.Node): string | undefined {
+  return ts.isStringLiteralLike(name) || ts.isNumericLiteral(name) ? name.text : undefined;
 }
