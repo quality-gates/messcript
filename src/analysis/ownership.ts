@@ -20,6 +20,7 @@ export type StorageInsertion = ({ readonly kind: "cell" } | { readonly kind: "bi
   readonly target: StorageFact;
   readonly value: StorageFact;
   readonly slot?: string;
+  readonly appendCall?: ts.CallExpression;
   readonly replace: boolean;
 };
 

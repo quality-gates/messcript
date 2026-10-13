@@ -1704,7 +1704,7 @@ async function nativeAssignment(value: Promise<number>) {
   ]);
 });
 
-function ownerRecords(name, source) {
+function ownerRecords(name, source, context = "function run()") {
   const path = join(workspace, name);
   writeFileSync(path, source);
   const stdout = captureOutput();
@@ -1713,9 +1713,127 @@ function ownerRecords(name, source) {
   assert.equal(stderr.read(), "");
   const report = JSON.parse(stdout.read());
   assert.deepEqual(report.errors, []);
-  return report.findings.filter((finding) => finding.context === "function run()")
+  return report.findings.filter((finding) => finding.context === context)
     .map((finding) => [finding.line, finding.ruleName]);
 }
+
+test("helper pushes preserve appended slots across calls and loops", () => {
+  const cases = [
+    ["helper-push-existing.ts", `function run() {
+  const values = [0];
+  function add(item: number) { values.push(item); }
+  function read() { return values[0]; }
+  add(1);
+  add(2);
+  return read();
+}
+`, []],
+    ["helper-push-second.ts", `function run() {
+  const values = [0];
+  function add(item: number) { values.push(item); }
+  function read() { return values[2]; }
+  add(1);
+  add(2);
+  return read();
+}
+`, [[4, "ImplicitInput"]]],
+    ["helper-push-future.ts", `function run() {
+  const values = [0];
+  function add(item: number) { values.push(item); }
+  function read() { return values[3]; }
+  add(1);
+  add(2);
+  return read();
+}
+`, []],
+    ["helper-push-loop-existing.ts", `function run() {
+  const values = [0];
+  function add(item: number) { values.push(item); }
+  function read() { return values[0]; }
+  for (const item of [1, 2]) add(item);
+  return read();
+}
+`, []],
+    ["helper-push-loop-second.ts", `function run() {
+  const values = [0];
+  function add(item: number) { values.push(item); }
+  function read() { return values[2]; }
+  for (const item of [1, 2]) add(item);
+  return read();
+}
+`, [[4, "ImplicitInput"]]],
+    ["helper-then-direct-second.ts", `function run() {
+  const values = [0];
+  function add(item: number) { values.push(item); }
+  function read() { return values[2]; }
+  add(1);
+  values.push(2);
+  return read();
+}
+`, [[4, "ImplicitInput"]]],
+    ["helper-as-push-argument.ts", `function run() {
+  const values = [0];
+  function add(item: number) { return values.push(item); }
+  function read() { return values[2]; }
+  values.push(add(1));
+  return read();
+}
+`, [[4, "ImplicitInput"]]],
+    ["helper-false-branch.ts", `function run() {
+  const values = [0];
+  function add(item: number) { values.push(item); }
+  function read() { return values[2]; }
+  if (false) add(1);
+  add(2);
+  return read();
+}
+`, []],
+    ["nested-push-existing.ts", `function run() {
+  const values = [0];
+  function read() { return values[0]; }
+  values.push(values.push(1));
+  return read();
+}
+`, []],
+    ["nested-push-second.ts", `function run() {
+  const values = [0];
+  function read() { return values[2]; }
+  values.push(values.push(1));
+  return read();
+}
+`, [[3, "ImplicitInput"]]],
+  ];
+  for (const [name, source, expected] of cases) {
+    assert.deepEqual(ownerRecords(name, source, "function read()"), expected, name);
+  }
+});
+
+test("helper appends retain caller element provenance without touching private siblings", () => {
+  const append = "function append(values: number[][], item: number[]) { values.push(item); }\n";
+  const cases = [
+    ["helper-append-private.ts", "function run(items: number[]) {\n  const values: number[][] = [[]];\n  append(values, items);\n  values[0].push(1);\n}\n", []],
+    ["helper-append-shared.ts", "function run(items: number[]) {\n  const values: number[][] = [[]];\n  append(values, items);\n  values[1].push(1);\n}\n", [[5, "ImplicitOutput"]]],
+    ["helper-append-future.ts", "function run(items: number[]) {\n  const values: number[][] = [[]];\n  append(values, items);\n  values[2]?.push(1);\n}\n", []],
+    ["helper-append-other-array.ts", "function run(items: number[]) {\n  const first: number[][] = [[]], second: number[][] = [[]];\n  append(second, items);\n  append(first, items);\n  first[1].push(1);\n}\n", [[6, "ImplicitOutput"]]],
+    ["helper-append-other-array-private.ts", "function run(items: number[]) {\n  const first: number[][] = [[]], second: number[][] = [[]];\n  append(second, items);\n  append(first, items);\n  first[0].push(1);\n}\n", []],
+  ];
+  for (const [name, source, expected] of cases) {
+    assert.deepEqual(ownerRecords(name, append + source), expected, name);
+  }
+  const callback = "function invoke(action: (values: number[][], item: number[]) => void, values: number[][], item: number[]) { action(values, item); }\n" + append;
+  assert.deepEqual(ownerRecords("callback-append-private.ts", callback + `function run(items: number[]) {
+  const values: number[][] = [[]];
+  invoke(append, values, items);
+  values[0].push(1);
+}
+`), []);
+  assert.deepEqual(ownerRecords("callback-append-shared.ts", callback + `function run(items: number[]) {
+  const values: number[][] = [[]];
+  invoke(append, values, items);
+  values[1].push(1);
+}
+`), [[6, "ImplicitOutput"]]);
+});
 
 test("scalar container storage honors lexical Array and ReadonlyArray bindings", () => {
   const cases = [
