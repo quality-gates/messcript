@@ -103,6 +103,7 @@ type AnalysisState = {
   summaries: ReadonlyMap<EffectOwner, CallableSummary>;
   readonly includeThis: boolean;
   readonly sharedBindings: Set<Binding>;
+  readonly sharedLocalBindings: Map<Binding, Map<string, { fact: StorageFact; origin: StorageOrigin }>>;
   readonly bindingOrigins: ReadonlyMap<StorageOrigin, Binding>;
 };
 
@@ -147,7 +148,7 @@ function bindingFlow(binding: Binding, node: ts.Identifier, owner: EffectOwner, 
     return ["output", `writes ${node.text}`];
   }
   if (outer) {
-    return binding.mutated || shared || isExportedStorage(binding) ? ["input", `reads ${node.text}`] : undefined;
+    return shared || isExportedStorage(binding) ? ["input", `reads ${node.text}`] : undefined;
   }
   return undefined;
 }
@@ -242,8 +243,56 @@ function directReceiverFlows(node: ts.Node, owner: EffectOwner, includeThis: boo
 
 function identifierFlows(state: AnalysisState, node: ts.Identifier, owner: EffectOwner, write: Write | undefined): ImplicitFlow[] {
   const binding = state.model.resolve(node);
-  const flow = binding ? bindingFlow(binding, node, owner, write, state.sharedBindings.has(binding)) : ambientFlow(node, write !== undefined);
+  const shared = binding && (state.sharedBindings.has(binding) || capturedReadSharesMutation(state, binding, node, owner) ||
+    directMutationAffectsRead(state, binding, node));
+  const flow = binding ? bindingFlow(binding, node, owner, write, !!shared) : ambientFlow(node, write !== undefined);
   return flow ? withCompoundRead(write, { kind: flow[0], node, owner, description: flow[1], ...bindingAccess(binding, node, write) }) : [];
+}
+
+function capturedReadSharesMutation(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner): boolean {
+  const writes = state.sharedLocalBindings.get(binding);
+  if (!writes || inside(binding.scope.node, owner)) {
+    return false;
+  }
+  const path = selectedSlots(node);
+  return [...writes.values()].some(({ fact, origin }) =>
+    Array.from({ length: path.length + 1 }, (_, length) =>
+      originsForPath(fact, length ? path.slice(0, length) : "outer"))
+      .some((origins) => origins.includes(origin)));
+}
+
+function selectedSlots(node: ts.Identifier): string[] {
+  const slots: string[] = [];
+  let current: ts.Expression = outerExpression(node);
+  while ((ts.isPropertyAccessExpression(current.parent) || ts.isElementAccessExpression(current.parent)) &&
+      current.parent.expression === current) {
+    slots.push(storageSlot(current.parent) ?? "*");
+    current = outerExpression(current.parent);
+  }
+  return slots;
+}
+
+function directMutationAffectsRead(state: AnalysisState, binding: Binding, read: ts.Identifier): boolean {
+  if (!binding.mutated) {
+    return false;
+  }
+  const readPath = selectedSlots(read);
+  return binding.references.some((reference) => {
+    const write = state.model.writeOf(reference);
+    if (!write || write.viaCall) {
+      return false;
+    }
+    if (write.reassign) {
+      return true;
+    }
+    const path = write.contents ? writePath(reference, write) : selectedSlots(reference);
+    return pathsOverlap(readPath, path === "outer" ? [] : path);
+  });
+}
+
+function pathsOverlap(left: readonly string[], right: readonly string[]): boolean {
+  return left.slice(0, Math.min(left.length, right.length)).every((slot, index) =>
+    slot === right[index] || slot === "*" || right[index] === "*");
 }
 
 function bindingAccess(binding: Binding | undefined, node: ts.Identifier, write: Write | undefined): Partial<ImplicitFlow> {
@@ -263,7 +312,7 @@ function withCompoundRead(write: Write | undefined, flow: ImplicitFlow): Implici
   return [flow, { ...flow, kind: flow.kind === "unknown" ? "unknown" : "input", access: "read", description: flow.description.replace("writes ", "reads ") }];
 }
 
-function writePath(node: ts.Expression, write: Write): StoragePath {
+function writePath(node: ts.Expression, write: Write): "outer" | readonly string[] {
   const slots: string[] = [];
   let current: ts.Expression = outerExpression(node);
   while ((ts.isPropertyAccessExpression(current.parent) || ts.isElementAccessExpression(current.parent)) &&
@@ -396,7 +445,8 @@ function originFlows(
 function collectCallables(sourceFile: ts.SourceFile, model: ScopeModel, includeThis: boolean): AnalysisState {
   return {
     model, sourceFile, callables: collectOwners(sourceFile), summaries: new Map(), includeThis,
-    sharedBindings: new Set(), bindingOrigins: new Map(model.bindings.map((binding) => [externalBindingOrigin(binding), binding])),
+    sharedBindings: new Set(), sharedLocalBindings: new Map(),
+    bindingOrigins: new Map(model.bindings.map((binding) => [externalBindingOrigin(binding), binding])),
   };
 }
 
@@ -425,10 +475,18 @@ function shareAliasedLocalBindings(
       continue;
     }
     const fact = storageFactForBinding(state, state.summaries, binding, owner, site);
-    if ([...fact.outer, ...fact.reachable].some((origin) => localOrigins.includes(origin))) {
-      state.sharedBindings.add(binding);
+    for (const origin of localOrigins) {
+      if ([...fact.outer, ...fact.reachable].includes(origin)) {
+        const writes = state.sharedLocalBindings.get(binding) ?? new Map();
+        writes.set(`${site.getStart()}/${origin}`, { fact, origin });
+        state.sharedLocalBindings.set(binding, writes);
+      }
     }
   }
+}
+
+function sharedBindingCount(state: AnalysisState): number {
+  return state.sharedBindings.size + [...state.sharedLocalBindings.values()].reduce((count, writes) => count + writes.size, 0);
 }
 
 function shareExposedReturns(state: AnalysisState, summary: CallableSummary): void {
@@ -1789,7 +1847,7 @@ function analyzeImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): 
   for (let index = 0; index < state.callables.length + 8; index += 1) {
     state.summaries = summaries;
     let changed = false;
-    const sharedCount = state.sharedBindings.size;
+    const sharedCount = sharedBindingCount(state);
     const next = new Map<EffectOwner, CallableSummary>();
     for (const owner of state.callables) {
       const summary = summarizeCallable(state, summaries, owner, includeThis);
@@ -1798,7 +1856,7 @@ function analyzeImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): 
       changed ||= summaryKey(summary) !== summaryKey(summaries.get(owner) ?? summary);
     }
     summaries = next;
-    if (!changed && sharedCount === state.sharedBindings.size) {
+    if (!changed && sharedCount === sharedBindingCount(state)) {
       converged = true;
       break;
     }

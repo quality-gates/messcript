@@ -112,6 +112,39 @@ function outer() {
 `), []);
 });
 
+test("alias writes leave disjoint captured fields quiet", () => {
+  assert.deepEqual(messages("captured-disjoint-array.ts", `function outer() {
+  const box = { n: 0, items: [0] };
+  const alias = box.items;
+  function read() { return box.n; }
+  alias[0] = 1;
+  return read();
+}
+`), []);
+  assert.deepEqual(messages("captured-disjoint-record.ts", `function outer() {
+  const box = { left: { n: 0 }, right: { n: 0 } };
+  const alias = box.left;
+  function read() { return box.right.n; }
+  alias.n = 1;
+  return read();
+}
+`), []);
+  assert.deepEqual(messages("captured-disjoint-direct.ts", `function outer() {
+  const box = { left: { n: 0 }, right: { n: 0 } };
+  function read() { return box.right.n; }
+  box.left.n = 1;
+  return read();
+}
+`), []);
+  assert.deepEqual(messages("captured-matching-direct.ts", `function outer() {
+  const box = { left: { n: 0 }, right: { n: 0 } };
+  function read() { return box.right.n; }
+  box.right.n = 1;
+  return read();
+}
+`), ["3:ImplicitInput: The function read() reads box, an implicit input."]);
+});
+
 test("value exports and exported callable returns expose container storage", () => {
   assert.deepEqual(messages("named-container-export.ts", `const shared: number[] = [];
 export { shared as values };
