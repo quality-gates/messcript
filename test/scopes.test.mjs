@@ -246,11 +246,11 @@ delete box.inner;
   const model = analyzeScopes(file);
   const writes = (text) => identifiers(file, text).map((identifier) => model.writeOf(identifier) ?? null);
 
-  assert.deepEqual(writes("plain"), [null, { viaCall: false, reassign: true, compound: false }, { viaCall: false, reassign: true, compound: false }, { viaCall: false, reassign: true, compound: false }]);
-  assert.deepEqual(writes("counter"), [null, { viaCall: false, reassign: true, compound: true }]);
-  assert.deepEqual(writes("box"), [null, { viaCall: false, reassign: false, compound: false }, { viaCall: false, reassign: false, compound: false }, { viaCall: false, reassign: false, compound: false }]);
-  assert.deepEqual(writes("make"), [{ viaCall: true, reassign: false, compound: false }]);
-  assert.deepEqual(writes("list"), [null, { viaCall: false, reassign: false, compound: false }, { viaCall: false, reassign: false, compound: false }, { viaCall: false, reassign: true, compound: false }]);
+  assert.deepEqual(writes("plain"), [null, { contents: false, viaCall: false, reassign: true, compound: false }, { contents: false, viaCall: false, reassign: true, compound: false }, { contents: false, viaCall: false, reassign: true, compound: false }]);
+  assert.deepEqual(writes("counter"), [null, { contents: false, viaCall: false, reassign: true, compound: true }]);
+  assert.deepEqual(writes("box"), [null, { contents: false, viaCall: false, reassign: false, compound: false }, { contents: true, viaCall: false, reassign: false, compound: false }, { contents: false, viaCall: false, reassign: false, compound: false }]);
+  assert.deepEqual(writes("make"), [{ contents: false, viaCall: true, reassign: false, compound: false }]);
+  assert.deepEqual(writes("list"), [null, { contents: true, viaCall: false, reassign: false, compound: false }, { contents: true, viaCall: false, reassign: false, compound: false }, { contents: false, viaCall: false, reassign: true, compound: false }]);
 });
 
 test("writes to this are classified", () => {
@@ -268,7 +268,7 @@ test("writes to this are classified", () => {
     ts.forEachChild(node, visit);
   })(file);
 
-  assert.deepEqual(thisNodes.map((node) => model.writeOf(node) ?? null), [{ viaCall: false, reassign: false, compound: true }, null]);
+  assert.deepEqual(thisNodes.map((node) => model.writeOf(node) ?? null), [{ contents: false, viaCall: false, reassign: false, compound: true }, null]);
 });
 
 test("a binding is mutated by a direct write or a mutating method call but not by a read or a call result write", () => {

@@ -1,0 +1,15 @@
+name: Functional explicitness
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    uses: quality-gates/mess-detection/.github/workflows/explicitness.yml@4cc35bf32ed81e13406624dd51a943f22c72710c
+    with:
+      language: typescript
+      contract_ref: 4cc35bf32ed81e13406624dd51a943f22c72710c

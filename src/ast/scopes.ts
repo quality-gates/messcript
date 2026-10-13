@@ -30,6 +30,8 @@ export type Binding = {
 };
 
 export type Write = {
+  /** The write mutates the value's contents instead of replacing the root binding. */
+  readonly contents: boolean;
   /** The write goes through a call result, as in f().x = 1. */
   readonly viaCall: boolean;
   /** The write replaces the value of the binding, as in x = 1. */
@@ -236,6 +238,51 @@ function isOuterChild(node: ts.Node, child: ts.Node): boolean {
   return (ts.isForInStatement(node) || ts.isForOfStatement(node)) && node.expression === child;
 }
 
+function literalBooleanValue(expression: ts.Expression): boolean | undefined {
+  const value = unwrapExpression(expression);
+  if (value.kind === ts.SyntaxKind.TrueKeyword) {
+    return true;
+  }
+  if (value.kind === ts.SyntaxKind.FalseKeyword) {
+    return false;
+  }
+  return undefined;
+}
+
+function visitReachableChildren(node: ts.Node, scope: Scope, visit: (node: ts.Node, scope: Scope) => void): boolean {
+  if (ts.isIfStatement(node)) {
+    visit(node.expression, scope);
+    const condition = literalBooleanValue(node.expression);
+    if (condition === true) {
+      visit(node.thenStatement, scope);
+    } else if (condition === false) {
+      if (node.elseStatement) {
+        visit(node.elseStatement, scope);
+      }
+    } else {
+      visit(node.thenStatement, scope);
+      if (node.elseStatement) {
+        visit(node.elseStatement, scope);
+      }
+    }
+    return true;
+  }
+  if (ts.isConditionalExpression(node)) {
+    visit(node.condition, scope);
+    const condition = literalBooleanValue(node.condition);
+    if (condition === true) {
+      visit(node.whenTrue, scope);
+    } else if (condition === false) {
+      visit(node.whenFalse, scope);
+    } else {
+      visit(node.whenTrue, scope);
+      visit(node.whenFalse, scope);
+    }
+    return true;
+  }
+  return false;
+}
+
 class ScopeBuilder {
   readonly bindings: MutableBinding[] = [];
   readonly resolved = new Map<ts.Identifier, MutableBinding | undefined>();
@@ -307,6 +354,9 @@ class ScopeBuilder {
     const kind = scopeKindOf(node);
     const inner = kind ? { kind, node, parent: scope } : scope;
     this.declareNames(node, scope, inner);
+    if (visitReachableChildren(node, inner, (child, childScope) => this.visit(child, childScope))) {
+      return;
+    }
     ts.forEachChild(node, (child) => this.visit(child, isOuterChild(node, child) ? scope : inner));
   }
 
@@ -328,7 +378,7 @@ class ScopeBuilder {
       current = unwrapExpression(current.expression);
     }
     if (ts.isIdentifier(current) || current.kind === ts.SyntaxKind.ThisKeyword) {
-      this.writes.set(current, { viaCall, reassign, compound });
+      this.writes.set(current, { contents: contentsOnly, viaCall, reassign, compound });
     }
   }
 

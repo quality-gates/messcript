@@ -208,6 +208,7 @@ function f10() { return window['innerWidth']; }
     "7:ImplicitOutput: The function f7() uses queueMicrotask, an implicit output.",
     "8:ImplicitOutput: The function f8() uses alert, an implicit output.",
     "9:ImplicitInput: The function f9() reads window, an implicit input.",
+    "9:UnknownEffect: The function f9() calls unresolved callable, an unknown effect.",
     "10:ImplicitInput: The function f10() reads window, an implicit input.",
   ]);
 });
@@ -261,6 +262,7 @@ function caught() { try { return 1; } catch (count) { return 2; } finally { void
     "3:ImplicitOutput: The function bump() writes count, an implicit output.",
     "4:ImplicitInput: The function negate() reads count, an implicit input.",
     "5:ImplicitInput: The function check() reads count, an implicit input.",
+    "9:UnknownEffect: The function schedule() calls unresolved callable, an unknown effect.",
     "10:ImplicitOutput: The function nudge() mutates argument point, an implicit output.",
     "12:ImplicitInput: The function caught() reads count, an implicit input.",
   ]);
@@ -286,8 +288,13 @@ const classSource = `class Counter {
 }
 `;
 
-test("class state is not reported by default", () => {
-  assert.deepEqual(messages("class-default.js", classSource), []);
+test("class state is an unknown effect by default", () => {
+  assert.deepEqual(messages("class-default.js", classSource), [
+    "3:UnknownEffect: The method increment() reads this.count, an unknown effect.",
+    "3:UnknownEffect: The method increment() writes this.count, an unknown effect.",
+    "4:UnknownEffect: The method format() reads this.count, an unknown effect.",
+    "5:UnknownEffect: The method self() reads this, an unknown effect.",
+  ]);
 });
 
 test("include-this reports class state reads and writes, but not method calls or constructors", () => {
@@ -297,7 +304,12 @@ test("include-this reports class state reads and writes, but not method calls or
     "4:ImplicitInput: The method format() reads this.count, an implicit input.",
     "5:ImplicitInput: The method self() reads this, an implicit input.",
   ]);
-  assert.deepEqual(messages("class-after-strict.js", classSource), []);
+  assert.deepEqual(messages("class-after-strict.js", classSource), [
+      "3:UnknownEffect: The method increment() reads this.count, an unknown effect.",
+      "3:UnknownEffect: The method increment() writes this.count, an unknown effect.",
+      "4:UnknownEffect: The method format() reads this.count, an unknown effect.",
+      "5:UnknownEffect: The method self() reads this, an unknown effect.",
+  ]);
 });
 
 test("include-this recognizes element-access members on this", () => {
@@ -449,6 +461,8 @@ test("closures capturing a loop variable mutated in the loop body still report I
   return hs;
 }
 `), [
+    "3:ImplicitInput: The function incClosureMutation() reads i, an implicit input.",
+    "3:ImplicitOutput: The function incClosureMutation() writes i, an implicit output.",
     "3:ImplicitInput: The arrow function anonymous() reads i, an implicit input.",
     "3:ImplicitOutput: The arrow function anonymous() writes i, an implicit output.",
     "4:ImplicitInput: The arrow function anonymous() reads i, an implicit input.",
@@ -555,5 +569,327 @@ function pick(source) {
 }
 `), [
     "5:ImplicitInput: The function pick() reads fallback, an implicit input.",
+  ]);
+});
+
+test("an alias of an argument retains caller ownership", () => {
+  assert.deepEqual(messages("alias.ts", `function change(values: number[]) {
+  const alias = values;
+  alias.push(1);
+}
+`), ["3:ImplicitOutput: The function change() mutates caller-owned value alias, an implicit output."]);
+
+  assert.deepEqual(messages("returned-alias.ts", `function alias(values: number[]) {
+  return values;
+}
+function direct(values: number[]) {
+  alias(values).push(1);
+}
+function indirect(values: number[]) {
+  const output = alias(values);
+  output.push(1);
+}
+`), [
+    "5:ImplicitOutput: The function direct() mutates argument values, an implicit output.",
+    "9:ImplicitOutput: The function indirect() mutates caller-owned value output, an implicit output.",
+  ]);
+});
+
+test("a fresh replacement is private and a conditional replacement is not proof", () => {
+  assert.deepEqual(messages("copy.ts", `function change(values: number[]) {
+  values = [...values];
+  values.push(1);
+  return values;
+}
+`), []);
+  assert.deepEqual(messages("conditional-copy.ts", `function change(values: number[], copy: boolean) {
+  if (copy) { values = [...values]; }
+  values.push(1);
+}
+`), ["3:ImplicitOutput: The function change() mutates argument values, an implicit output."]);
+});
+
+test("known effects propagate through transitive and recursive calls", () => {
+  assert.deepEqual(messages("propagation.ts", `function leaf(value: number) { console.log(value); }
+function middle(value: number) { leaf(value); }
+function wrapper(value: number) { middle(value); }
+`), [
+    "1:ImplicitOutput: The function leaf() uses console, an implicit output.",
+    "2:ImplicitOutput: The function middle() uses console, an implicit output.",
+    "3:ImplicitOutput: The function wrapper() uses console, an implicit output.",
+  ]);
+
+  assert.deepEqual(messages("recursive-pure.ts", `function loop(value: number): number {
+  return value <= 0 ? 0 : loop(value - 1);
+}
+`), []);
+});
+
+test("unknown callback effects propagate without fabricating input or output", () => {
+  assert.deepEqual(messages("unknown-propagation.ts", `function leaf(value: number, notify: (value: number) => number) {
+  return notify(value);
+}
+function wrapper(value: number, notify: (value: number) => number) {
+  return leaf(value, notify);
+}
+`), [
+    "2:UnknownEffect: The function leaf() calls unresolved callable, an unknown effect.",
+    "5:UnknownEffect: The function wrapper() calls unresolved callable, an unknown effect.",
+  ]);
+});
+
+test("known callback arguments replace parameter-relative unknown effects", () => {
+  assert.deepEqual(messages("known-callback.ts", `function apply(value: number, calculate: (value: number) => number) {
+  return calculate(value);
+}
+function pure(value: number) {
+  return value + 1;
+}
+function wrapper(value: number) {
+  return apply(value, pure);
+}
+`), [
+    "2:UnknownEffect: The function apply() calls unresolved callable, an unknown effect.",
+  ]);
+
+  assert.deepEqual(messages("known-callback-action.ts", `function apply(value: number, effect: (value: number) => void) {
+  effect(value);
+}
+function write(value: number) {
+  console.log(value);
+}
+function wrapper(value: number) {
+  apply(value, write);
+}
+`), [
+    "2:UnknownEffect: The function apply() calls unresolved callable, an unknown effect.",
+    "5:ImplicitOutput: The function write() uses console, an implicit output.",
+    "8:ImplicitOutput: The function wrapper() uses console, an implicit output.",
+  ]);
+});
+
+test("known callback writes instantiate against the caller argument storage", () => {
+  assert.deepEqual(messages("known-callback-write.ts", `function apply(values: number[], change: (values: number[]) => void) {
+  change(values);
+}
+function push(values: number[]) {
+  values.push(1);
+}
+function wrapper(values: number[]) {
+  apply(values, push);
+}
+`), [
+    "2:UnknownEffect: The function apply() calls unresolved callable, an unknown effect.",
+    "5:ImplicitOutput: The function push() mutates argument values, an implicit output.",
+    "8:ImplicitOutput: The function wrapper() mutates argument values, an implicit output.",
+  ]);
+});
+
+test("parameter write summaries preserve argument identity and missing-argument uncertainty", () => {
+  assert.deepEqual(messages("parameter-summary.ts", `function writeSecond(first: number[], second: number[]) {
+  second.push(1);
+}
+function caller(first: number[], second: number[]) {
+  writeSecond([], second);
+}
+function omitted(first: number[]) {
+  writeSecond(first);
+}
+`), [
+    "2:ImplicitOutput: The function writeSecond() mutates argument second, an implicit output.",
+    "5:ImplicitOutput: The function caller() mutates argument second, an implicit output.",
+    "8:UnknownEffect: The function omitted() calls writable parameter without an argument, an unknown effect.",
+  ]);
+
+  assert.deepEqual(messages("parameter-summary-storage.ts", `const shared: number[] = [];
+declare function load(): number[];
+function mutate(values: number[]) {
+  values.push(1);
+}
+function writeShared() {
+  mutate(shared);
+}
+function writeUnknown() {
+  mutate(load());
+}
+`), [
+    "4:ImplicitOutput: The function mutate() mutates argument values, an implicit output.",
+    "7:ImplicitOutput: The function writeShared() mutates caller-owned value shared, an implicit output.",
+    "10:UnknownEffect: The function writeUnknown() mutates value with unknown ownership, an unknown effect.",
+    "10:UnknownEffect: The function writeUnknown() calls unresolved callable, an unknown effect.",
+  ]);
+});
+
+test("known callbacks passed through a parameter stay unknown only until resolved by a caller", () => {
+  assert.deepEqual(messages("forwarded-known-callback.ts", `function apply(value: number, calculate: (value: number) => number) {
+  return calculate(value);
+}
+function forward(value: number, calculate: (value: number) => number) {
+  return apply(value, calculate);
+}
+function pure(value: number) {
+  return value + 1;
+}
+function wrapper(value: number) {
+  return forward(value, pure);
+}
+`), [
+    "2:UnknownEffect: The function apply() calls unresolved callable, an unknown effect.",
+    "5:UnknownEffect: The function forward() calls unresolved callable, an unknown effect.",
+  ]);
+
+  assert.deepEqual(messages("callback-storage-summary.ts", `const shared: number[] = [];
+declare function load(): number[];
+function apply(values: number[], change: (values: number[]) => void) {
+  change(values);
+}
+function push(values: number[]) {
+  values.push(1);
+}
+function sharedWrite() {
+  apply(shared, push);
+}
+function unknownWrite() {
+  apply(load(), push);
+}
+function missingCallback(values: number[]) {
+  apply(values);
+}
+`), [
+    "4:UnknownEffect: The function apply() calls unresolved callable, an unknown effect.",
+    "7:ImplicitOutput: The function push() mutates argument values, an implicit output.",
+    "10:ImplicitOutput: The function sharedWrite() mutates caller-owned callback argument, an implicit output.",
+    "13:UnknownEffect: The function unknownWrite() mutates value with unknown ownership, an unknown effect.",
+    "13:UnknownEffect: The function unknownWrite() calls unresolved callable, an unknown effect.",
+    "16:UnknownEffect: The function missingCallback() calls unresolved callable, an unknown effect.",
+  ]);
+});
+
+test("unknown storage joined with caller storage keeps both facts without extra output kinds", () => {
+  assert.deepEqual(messages("mixed-ownership.ts", `declare function choose(): { n: number }[];
+function change(values: { n: number }[], flag: boolean) {
+  const target = flag ? values : choose();
+  target[0].n = 1;
+}
+`), [
+    "3:UnknownEffect: The function change() calls unresolved callable, an unknown effect.",
+    "4:ImplicitOutput: The function change() mutates caller-owned value target, an implicit output.",
+  ]);
+});
+
+test("deferred callback creation stays on the callback owner and immediate invocation propagates", () => {
+  assert.deepEqual(messages("factory-callback.ts", `function make(notify: (value: number) => void) {
+  return (value: number) => notify(value);
+}
+`), [
+    "2:UnknownEffect: The arrow function anonymous() calls unresolved callable, an unknown effect.",
+  ]);
+
+  assert.deepEqual(messages("invoke-callback.ts", `function run(notify: (value: number) => void) {
+  const callback = (value: number) => notify(value);
+  callback(1);
+}
+`), [
+    "2:UnknownEffect: The arrow function callback() calls unresolved callable, an unknown effect.",
+    "3:UnknownEffect: The function run() calls unresolved callable, an unknown effect.",
+  ]);
+});
+
+test("fixed captures and private top-level calculations stay quiet while module state writes report", () => {
+  assert.deepEqual(messages("fixed-capture.ts", `function makeAdder(start: number) {
+  return (value: number) => start + value;
+}
+`), []);
+
+  assert.deepEqual(messages("private-local.ts", `const cache: number[] = [];
+function localOnly(value: number) {
+  const values: number[] = [];
+  values.push(value);
+}
+function remember(value: number) {
+  cache.push(value);
+}
+`), [
+    "7:ImplicitOutput: The function remember() writes cache, an implicit output.",
+  ]);
+});
+
+test("shallow copies keep shared elements but fresh outers and rebinding stay private", () => {
+  assert.deepEqual(messages("shallow-elements.ts", `function change(values: { n: number }[]) {
+  const next = [...values];
+  next.push({ n: 0 });
+  next[0].n = 1;
+}
+`), [
+    "4:ImplicitOutput: The function change() mutates caller-owned value next, an implicit output.",
+  ]);
+
+  assert.deepEqual(messages("alias-rebinding.ts", `function before(values: number[]) {
+  const alias = values;
+  values = [];
+  alias.push(1);
+  values.push(2);
+}
+function after(values: number[]) {
+  values = [];
+  const alias = values;
+  alias.push(1);
+}
+`), [
+    "4:ImplicitOutput: The function before() mutates caller-owned value alias, an implicit output.",
+  ]);
+
+  assert.deepEqual(messages("object-member-alias.ts", `function change(values: number[]) {
+  const box = { items: values };
+  const alias = box.items;
+  alias.push(1);
+}
+`), [
+    "4:ImplicitOutput: The function change() mutates caller-owned value alias, an implicit output.",
+  ]);
+});
+
+test("literal false branches do not execute known, unknown, or storage effects", () => {
+  assert.deepEqual(messages("dead-known-action.ts", `function calculate(value: number) {
+  if (false) { console.log(value); }
+  return value;
+}
+function run(value: number) {
+  if (true) { console.log(value); } else { return value; }
+}
+`), [
+    "6:ImplicitOutput: The function run() uses console, an implicit output.",
+  ]);
+
+  assert.deepEqual(messages("dead-unknown-action.ts", `function calculate(value: number, notify: (value: number) => void) {
+  if (false) { notify(value); }
+  return value;
+}
+function run(value: number, notify: (value: number) => void) {
+  if (true) { notify(value); }
+}
+`), [
+    "6:UnknownEffect: The function run() calls unresolved callable, an unknown effect.",
+  ]);
+
+  assert.deepEqual(messages("dead-storage-action.ts", `const cache: number[] = [];
+if (false) { cache.push(1); }
+function read() {
+  return cache.length;
+}
+function calculate(values: number[]) {
+  if (false) { values.push(1); }
+  return values.length;
+}
+`), []);
+
+  assert.deepEqual(messages("dead-conditional-action.ts", `function calculate(value: number, notify: (value: number) => void) {
+  return false ? notify(value) : value;
+}
+function run(value: number, notify: (value: number) => void) {
+  return true ? notify(value) : value;
+}
+`), [
+    "5:UnknownEffect: The function run() calls unresolved callable, an unknown effect.",
   ]);
 });

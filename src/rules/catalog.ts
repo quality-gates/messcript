@@ -45,6 +45,7 @@ import { definition as unusedFormalParameter } from "./unused-formal-parameter";
 import { definition as unusedLocalVariable } from "./unused-local-variable";
 import { definition as unusedPrivateField } from "./unused-private-field";
 import { definition as unusedPrivateMethod } from "./unused-private-method";
+import { definition as unknownEffect } from "./unknown-effect";
 
 export type RuleProperties = Readonly<Record<string, string>>;
 
@@ -125,6 +126,7 @@ const definitionsByName = indexRuleDefinitions([
   camelCaseVariableName,
   implicitInput,
   implicitOutput,
+  unknownEffect,
 ]);
 
 const componentRulesetBase: Readonly<Record<string, readonly string[]>> = {
@@ -172,7 +174,7 @@ export const componentRulesets: Readonly<Record<string, readonly string[]>> = {
   javascript: languagePolicies.javascript.rules,
   typescript: languagePolicies.typescript.rules,
   opinionated: opinionatedRules,
-  explicitness: ["ImplicitInput", "ImplicitOutput"],
+  explicitness: ["ImplicitInput", "ImplicitOutput", "UnknownEffect"],
 };
 
 export function getRuleDefinition(name: string): RuleDefinition | undefined {

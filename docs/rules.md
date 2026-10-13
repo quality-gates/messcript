@@ -75,6 +75,7 @@ executable metric findings. Prefer `typescript` for mixed JS/TS repositories.
 | `controversial` | `CamelCaseVariableName` | 1 | `allow-underscore=false` | Flags variable names that are not camelCase, after ordinary short-name and constant exemptions. `allow-underscore` permits a single leading underscore. |
 | `explicitness` | `ImplicitInput` | 3 | `include-this=false` | Flags data that enters a function other than through its arguments: reads of outer or module bindings that are mutated somewhere in the file, reads of host objects (`window`, `document`, `process`, storage, and similar), and nondeterministic calls (`Date.now()`, `Math.random()`, `new Date()`, and similar). Set `include-this=true` to also flag `this.x` reads outside constructors. |
 | `explicitness` | `ImplicitOutput` | 3 | `include-this=false` | Flags data that leaves a function other than through its return value: writes to outer or module bindings, mutation of an argument (reassignment is not an output), writes to host objects, and use of sinks (`console`, `fetch`, `alert`, timers), also through `window`, `globalThis`, or `self`. Set `include-this=true` to also flag `this.x` writes outside constructors. |
+| `explicitness` | `UnknownEffect` | 3 | `include-this=false` | Flags a call or mutation whose effects cannot be established by the native syntax analysis. This includes injected callbacks, imported or otherwise opaque calls, dynamic callable lookup, and mutation of storage with unknown ownership. |
 
 ## Built-in rulesets
 
@@ -87,19 +88,46 @@ Pass one or more of these as the third CLI argument. Comma-separate to compose.
 - **`codesize`** — How big and branchy callables and classes have become. `CyclomaticComplexity`, `NPathComplexity`, `ExcessiveMethodLength`, `ExcessiveClassLength`, `ExcessiveParameterList`, `ExcessivePublicCount`, `TooManyFields`, `TooManyMethods`, `TooManyPublicMethods`, `ExcessiveClassComplexity`
 - **`controversial`** — Strict PascalCase classes and camelCase identifiers. `CamelCaseClassName`, `CamelCaseMethodName`, `CamelCasePropertyName`, `CamelCaseParameterName`, `CamelCaseVariableName`
 - **`javascript`** / **`typescript`** — Recommended low-noise defaults. Same membership: all component rules except the `opinionated` set below, with `LongVariable.maximum=35`. `typescript` adds TypeScript-aware treatment of declarations, overloads, accessibility, parameter properties, enums, namespaces, and type-only syntax.
-- **`explicitness`** — Implicit inputs and outputs of functions, after *Grokking Simplicity*. Not part of the recommended sets; combine as `typescript,explicitness`. `ImplicitInput`, `ImplicitOutput`
+- **`explicitness`** — Implicit inputs, implicit outputs, and unknown effects of functions, after *Grokking Simplicity*. Not part of the recommended sets; combine as `typescript,explicitness`. `ImplicitInput`, `ImplicitOutput`, `UnknownEffect`
 - **`opinionated`** — Stricter checks left out of the recommended sets; combine as `typescript,opinionated`. `ShortVariable`, `UnusedFormalParameter`, `BooleanArgumentFlag`, `ElseExpression`, `StaticAccess`, `CountInLoopExpression`, `ExitExpression`
 
 ### Explicitness
 
 A function's explicit inputs are its arguments, and its explicit output is its
-return value. Any other data flow is implicit. Each finding names the function
-and the data, one finding per function for each distinct flow.
+return value. Any other data flow is implicit. Each finding names the callable
+that owns the effect and the data, one finding per callable for each distinct
+flow.
 
-Imports and `const` bindings are reported only when the file mutates them.
-Calls to other functions are not reported. messcript does not follow calls, so
-a call to a function that itself has implicit inputs or outputs is only reported
-inside that function.
+The explicitness ruleset builds a same-file callable summary. The summary keeps
+known reads, known writes, parameter-relative writes, parameter-relative callback
+invocations, ambient effects, returned callbacks, and unresolved operations.
+Resolved same-file calls are propagated to a fixed point, including recursive
+cycles. A helper that mutates a caller-owned argument makes its caller an action.
+The same helper called with fresh private storage does not. A shallow copy has
+fresh outer storage, but its reachable elements may still be caller-owned.
+
+Clean output means no implicit or unknown effect was found inside this supported
+subset. It does not prove arbitrary JavaScript runtime purity. The trusted
+calculation subset covers exact built-in numeric operations, plain built-in
+arrays and records, lexical same-file functions and methods, local aliases,
+standard pure built-ins such as `Math.min`, `String`, `Object.keys`, and
+non-mutating array/string methods, plus known sinks and nondeterministic built-ins
+listed above. Branches with literal `true` or `false` conditions are treated as
+the only reachable branch; other control-flow conditions are joined. Type
+annotations do not certify runtime values. User objects with custom arithmetic,
+iteration, getters, proxies, or monkey-patched standard bindings are outside the
+proved subset.
+
+Imported functions, unresolved property calls, dynamic callable lookup, injected
+callbacks, escaped aliases with unknown ownership, async scheduling, generators,
+lazy iteration, and unmodeled definition-time effects stay `UnknownEffect` unless
+the syntax analysis establishes a known built-in or same-file target. Returning
+or storing a callback does not execute the callback body. Invoking the callback
+does propagate its effects to the invoking callable.
+
+Imports and `const` bindings are reported only when the file mutates them or an
+unresolved call uses them. Calls to supported same-file calculations and standard
+pure operations are not reported as unknown.
 
 To also treat class state as implicit, set `include-this`:
 
