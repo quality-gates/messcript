@@ -8,7 +8,7 @@ import { unwrapExpression } from "../ast/expressions";
  * Receiver storage belongs to this. A parameter origin names the argument that supplies the storage.
  * Unknown storage has an origin this analysis does not trace.
  */
-export type StorageOrigin = "private" | "unknown" | "external" | "receiver" | `private:${number}` | `private:${number}:${string}` | `param:${number}` | `param:${number}:${string}` | `external:${number}`;
+export type StorageOrigin = "private" | "unknown" | "external" | "receiver" | `private:${number}` | `private:${number}:${string}` | `param:${number}` | `param:${number}:${string}` | `external:${number}` | `external:${number}:${string}`;
 
 /** The origins of a value's own storage, its direct references, and the storage reachable at the query site. */
 export type StorageFact = {
@@ -31,7 +31,7 @@ export function freshStorageFact(value: ts.Expression): StorageFact {
   return allocatedFact(value, []);
 }
 
-export function invokedStorageFact(fact: StorageFact, call: ts.CallExpression): StorageFact {
+export function invokedStorageFact(fact: StorageFact, call: ts.CallExpression | ts.NewExpression): StorageFact {
   const rebase = (origins: readonly StorageOrigin[]) => joinOrigins(origins.map((origin) => invocationOrigin(origin, call.getStart())));
   return mapStorageFact(fact, rebase, rebase);
 }
@@ -75,11 +75,22 @@ export function parameterProjection(origin: StorageOrigin): { parameterIndex: nu
   return { parameterIndex: Number(index), path: path ? path.split("/").map(decodeURIComponent) : [] };
 }
 
+/** Splits an external origin into the binding's own origin and the member path selected from it. */
+export function externalProjection(origin: StorageOrigin): { base: `external:${number}`; path: readonly string[] } | undefined {
+  if (!origin.startsWith("external:")) {
+    return undefined;
+  }
+  const [, binding, path = ""] = origin.split(":");
+  return { base: `external:${Number(binding)}`, path: path ? path.split("/").map(decodeURIComponent) : [] };
+}
+
 function projectedOrigin(origin: StorageOrigin, slot: string): StorageOrigin {
   const projection = parameterProjection(origin);
-  return projection
-    ? `param:${projection.parameterIndex}:${[...projection.path, slot].map(encodeURIComponent).join("/")}`
-    : origin;
+  if (projection) {
+    return `param:${projection.parameterIndex}:${[...projection.path, slot].map(encodeURIComponent).join("/")}`;
+  }
+  const external = externalProjection(origin);
+  return external ? `${external.base}:${[...external.path, slot].map(encodeURIComponent).join("/")}` : origin;
 }
 
 export function hasExternalOrigin(origins: readonly StorageOrigin[]): boolean {

@@ -161,12 +161,42 @@ function bindingShapes(model: ScopeModel, binding: Binding, seen: ReadonlySet<Bi
       return undefined;
     }
     const targets = receiverShapes(model, assignment.value, seen);
-    if (!targets || (binding.mutated && targets.some(ts.isObjectLiteralExpression))) {
+    if (!targets || (targets.some(ts.isObjectLiteralExpression) && replacesMembers(model, binding, targets))) {
       return undefined;
     }
     shapes.push(...targets);
   }
   return shapes.length > 0 ? shapes : undefined;
+}
+
+/**
+ * True when code can change the members of the object a binding holds.
+ * A call to a method every shape declares runs that method instead of a library mutator of the same name,
+ * so it changes members only when a method body writes through this.
+ */
+function replacesMembers(model: ScopeModel, binding: Binding, shapes: readonly ts.Node[]): boolean {
+  return binding.references.some((reference) => {
+    const write = model.writeOf(reference);
+    return !!write && !write.viaCall && !ownMethodCall(reference, shapes);
+  }) || shapes.some((shape) => writesThis(model, shape));
+}
+
+function ownMethodCall(reference: ts.Expression, shapes: readonly ts.Node[]): boolean {
+  const receiver = expressions.outerExpression(reference);
+  const access = receiver.parent;
+  if ((!ts.isPropertyAccessExpression(access) && !ts.isElementAccessExpression(access)) || access.expression !== receiver) {
+    return false;
+  }
+  const callee = expressions.outerExpression(access);
+  const name = expressions.methodName(access);
+  return ts.isCallExpression(callee.parent) && callee.parent.expression === callee && name !== undefined &&
+    shapes.every((shape) => ts.isObjectLiteralExpression(shape) && shape.properties.some((member) => declarationName(member) === name));
+}
+
+function writesThis(model: ScopeModel, shape: ts.Node): boolean {
+  const visit = (node: ts.Node): boolean =>
+    (node.kind === ts.SyntaxKind.ThisKeyword && model.writeOf(node) !== undefined) || (ts.forEachChild(node, visit) ?? false);
+  return ts.isObjectLiteralExpression(shape) && visit(shape);
 }
 
 function receiverTargets(dispatch: Dispatch, node: ts.Node, name: string, kind: MemberKind, baseOnly: boolean): Targets {

@@ -24,6 +24,7 @@ import {
 import {
   arrayIndexForSlot,
   elementFact,
+  externalProjection,
   memberStorageFact,
   mapStorageFact,
   hasExternalOrigin,
@@ -88,7 +89,7 @@ type CallableSummary = {
 };
 
 type StorageInvocation = {
-  readonly call: ts.CallExpression;
+  readonly call: ts.CallExpression | ts.NewExpression;
   readonly callable: ts.Expression;
   readonly argumentFact: (index: number) => StorageFact;
 };
@@ -261,9 +262,15 @@ function bindingSharesRead(state: AnalysisState, binding: Binding, node: ts.Iden
 }
 
 function sharedMarkAffectsRead(state: AnalysisState, binding: Binding, node: ts.Identifier): boolean {
-  const slots = state.sharedBindings.get(binding);
+  const marks = state.sharedBindings.get(binding);
   const path = selectedReadSlots(node);
-  return !!slots && [...slots].some((slot) => slot === "*" || mutationSlotOverlaps(path, slot));
+  return !!marks && [...marks].some((mark) => {
+    const slots = JSON.parse(mark) as string[];
+    const prefix = slots.slice(0, -1);
+    const slot = slots[slots.length - 1];
+    return pathsOverlap(path, prefix) &&
+      (path.length <= prefix.length || slot === "*" || mutationSlotOverlaps(path.slice(prefix.length), slot));
+  });
 }
 
 function capturedReadSharesMutation(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner): boolean {
@@ -332,7 +339,7 @@ function directMutationAffectsRead(state: AnalysisState, binding: Binding, read:
     }
     const prefix = selectedSlots(reference).slice(0, -1);
     return pathsOverlap(readPath, prefix) && (readPath.length <= prefix.length ||
-      assignedSlots(reference).some((slot) => slot === undefined || mutationSlotOverlaps(readPath.slice(prefix.length), slot)));
+      assignedSlots(state, reference).some((slot) => slot === undefined || mutationSlotOverlaps(readPath.slice(prefix.length), slot)));
   });
 }
 
@@ -416,9 +423,6 @@ function mutationEffectsFor(
   if (!write || write.reassign || write.viaCall || !binding) {
     return { flows: [], writes: [] };
   }
-  if (isNestedMethodReceiver(node)) {
-    return { flows: [], writes: [] };
-  }
   const path = writePath(node, write);
   const fact = storageFactForBinding(state, summaries, binding, owner, node);
   if (!inside(binding.scope.node, owner)) {
@@ -428,18 +432,6 @@ function mutationEffectsFor(
   return mutationEffectsFromFact(state, fact, path, node, owner, isParameterOf(binding, owner)
     ? `mutates argument ${node.text}`
     : `mutates caller-owned value ${node.text}`);
-}
-
-function isNestedMethodReceiver(node: ts.Identifier): boolean {
-  let current: ts.Expression = outerExpression(node);
-  while ((ts.isPropertyAccessExpression(current.parent) || ts.isElementAccessExpression(current.parent)) && current.parent.expression === current) {
-    current = current.parent;
-  }
-  if (!ts.isCallExpression(current.parent) || current.parent.expression !== current ||
-      (!ts.isPropertyAccessExpression(current) && !ts.isElementAccessExpression(current))) {
-    return false;
-  }
-  return !ts.isIdentifier(unwrapExpression(current.expression));
 }
 
 function mutationEffectsFromFact(
@@ -506,16 +498,26 @@ function collectCallables(sourceFile: ts.SourceFile, model: ScopeModel, includeT
   };
 }
 
-/** Marks the slots of each origin's binding that code outside the binding's owner can change. "*" marks every slot. */
+/**
+ * Marks the slots of each origin's binding that code outside the binding's owner can change. "*" marks every slot.
+ * A mark is the member path from the binding to the changed storage followed by the changed slot.
+ */
 function shareOrigins(state: AnalysisState, origins: readonly StorageOrigin[], slots: readonly string[] = ["*"]): void {
   for (const origin of origins) {
-    const binding = state.bindingOrigins.get(origin);
-    if (binding) {
-      const marks = state.sharedBindings.get(binding) ?? new Set<string>();
-      slots.forEach((slot) => marks.add(slot));
-      state.sharedBindings.set(binding, marks);
+    const external = originBinding(state, origin);
+    if (external) {
+      const marks = state.sharedBindings.get(external.binding) ?? new Set<string>();
+      slots.forEach((slot) => marks.add(JSON.stringify([...external.path, slot])));
+      state.sharedBindings.set(external.binding, marks);
     }
   }
+}
+
+/** Gives the binding an external origin names and the member path the origin selects from it. */
+function originBinding(state: AnalysisState, origin: StorageOrigin): { binding: Binding; path: readonly string[] } | undefined {
+  const projection = externalProjection(origin);
+  const binding = projection && state.bindingOrigins.get(projection.base);
+  return binding && projection ? { binding, path: projection.path } : undefined;
 }
 
 function shareCapturedWrite(
@@ -543,7 +545,7 @@ function capturedWriteSlots(
   }
   const write = state.model.writeOf(node);
   const push = pushCallForMutation(node);
-  const slots = write && !write.contents ? assignedSlots(node)
+  const slots = write && !write.contents ? assignedSlots(state, node)
     : push ? pushSlots(push, owner, { lowerBound: length, exact: false }) : [undefined];
   return slots.map((slot) => slot ?? "*");
 }
@@ -572,6 +574,13 @@ function enclosingFunction(node: ts.Node): EffectOwner | undefined {
   return undefined;
 }
 
+/** True when the identifier always holds the array its single initializer creates. */
+function literalArray(state: AnalysisState, site: ts.Identifier): boolean {
+  const binding = state.model.resolve(site);
+  return !!binding && binding.declarations.every((declaration) => declaration.kind === "variable") &&
+    literalArrayLength(binding) !== undefined;
+}
+
 function literalArrayLength(binding: Binding): number | undefined {
   const assignments = bindingAssignments(binding);
   const value = assignments.length === 1 && assignments[0].value ? unwrapExpression(assignments[0].value) : undefined;
@@ -579,12 +588,16 @@ function literalArrayLength(binding: Binding): number | undefined {
 }
 
 /** Gives the slots a member assignment through the identifier changes in the object it selects; undefined is every slot. */
-function assignedSlots(site: ts.Identifier): readonly (string | undefined)[] {
+function assignedSlots(state: AnalysisState, site: ts.Identifier): readonly (string | undefined)[] {
   const access = outermostAccess(site);
   const member = unwrapExpression(access);
   const slot = ts.isPropertyAccessExpression(member) || ts.isElementAccessExpression(member) ? storageSlot(member) : undefined;
   if (slot === "property:length") {
     return [slot, truncatedSlot(access)];
+  }
+  if (ts.isElementAccessExpression(member) && member.expression === outerExpression(site) && literalArray(state, site) &&
+      appendIndex(state, member)) {
+    return ["append:0", "property:length"];
   }
   return arrayIndexForSlot(slot) === undefined ? [slot] : [slot, "property:length"];
 }
@@ -638,7 +651,7 @@ function mutatedSlots(state: AnalysisState, site: ts.Node, owner: EffectOwner): 
   if (ts.isIdentifier(site)) {
     const write = state.model.writeOf(site);
     if (write && !write.contents && !write.viaCall && !write.reassign) {
-      return assignedSlots(site);
+      return assignedSlots(state, site);
     }
   }
   return pushedArraySlots(state, site, owner) ?? [undefined];
@@ -678,25 +691,87 @@ type TransferSource = { readonly node: ts.Node; readonly writeNode?: ts.Node; re
  * Otherwise a push lands at or after the caller's start, unless the call can also shrink the array.
  */
 function transferredPushSlots(
-  state: AnalysisState, fact: StorageFact, source: TransferSource, sourceOwner: EffectOwner,
-  site: ts.Node, owner: EffectOwner,
+  state: AnalysisState, root: StorageFact, source: TransferSource, sourceOwner: EffectOwner,
+  site: ts.Node, owner: EffectOwner, path: StoragePath = "outer",
 ): readonly string[] | undefined {
   const push = pushCallForMutation(source.writeNode ?? source.node);
-  const invocation = invocationAt(site);
-  if (!push || !invocation) {
+  if (!push || path === "reachable") {
     return undefined;
   }
-  const callerStart = knownPushStartFromFact(state, fact, owner, invocation);
+  const fact = path === "outer" ? root : path.reduce((value, slot) => memberStorageFact(value, slot), root);
+  return isGenerator(sourceOwner) ? generatorPushSlots(state, fact, source, push, sourceOwner, site, owner)
+    : invokedPushSlots(state, fact, source, push, sourceOwner, invocationAt(site), owner);
+}
+
+/** Gives the slots a callee's push changes when the invocation runs the callee's body at once. */
+function invokedPushSlots(
+  state: AnalysisState, fact: StorageFact, source: TransferSource, push: ts.CallExpression,
+  sourceOwner: EffectOwner, invocation: Invocation | undefined, owner: EffectOwner,
+): readonly string[] | undefined {
+  const callerStart = invocation && knownPushStartFromFact(state, fact, owner, invocation);
   const offset = transferOffset(state, source, push, sourceOwner);
-  if (!callerStart || !offset || invocationResets(state, fact, invocation)) {
+  if (!invocation || !callerStart || !offset || invocationResets(state, fact, invocation)) {
     return undefined;
   }
   return pushSlots(push, sourceOwner, { lowerBound: callerStart.lowerBound + offset.lowerBound,
     exact: callerStart.exact && offset.exact && !repeatedCall(invocation, owner) });
 }
 
-function invocationAt(site: ts.Node): ts.CallExpression | undefined {
-  return ts.isCallExpression(site) ? site : ts.isCallExpression(site.parent) ? site.parent : undefined;
+/** A call or construction, the points a push start is computed at. */
+type Invocation = ts.CallExpression | ts.NewExpression;
+
+function invocationAt(site: ts.Node): Invocation | undefined {
+  return isInvocation(site) ? site : isInvocation(site.parent) && site.parent.expression === site ? site.parent : undefined;
+}
+
+function isInvocation(node: ts.Node): node is Invocation {
+  return ts.isCallExpression(node) || ts.isNewExpression(node);
+}
+
+/** The arguments evaluated as part of the point, which run before its callee's body. */
+function pointArguments(point: ts.Node): readonly ts.Expression[] {
+  return isInvocation(point) ? point.arguments ?? [] : [];
+}
+
+/**
+ * Gives the slots a generator's push changes, or undefined for every slot. The body runs while the site forces the
+ * iterator, interleaved with the consumer, so the push keeps only a lower bound: the least length the array can have
+ * up to the end of the site, plus the generator's own earlier pushes.
+ */
+function generatorPushSlots(
+  state: AnalysisState, fact: StorageFact, source: TransferSource, push: ts.CallExpression,
+  sourceOwner: EffectOwner, site: ts.Node, owner: EffectOwner,
+): readonly string[] | undefined {
+  const point = forcingPoint(state, site);
+  const origin = fact.outer.length === 1 ? fact.outer[0] : undefined;
+  const length = origin === undefined ? undefined : literalAllocationLength(state, origin);
+  const offset = transferOffset(state, source, push, sourceOwner);
+  const bounds = point && origin && length !== undefined ? priorPushBounds(state, owner, point, origin, length) : undefined;
+  if (!bounds || !offset) {
+    return undefined;
+  }
+  return pushSlots(push, sourceOwner, { lowerBound: bounds.floor + offset.lowerBound, exact: false });
+}
+
+/** Gives the node whose evaluation forces a generator at the site, or undefined when the site does not force it. */
+function forcingPoint(state: AnalysisState, site: ts.Node): ts.Node | undefined {
+  if (iterates(site) || (ts.isCallExpression(site) && iteratorStep(site))) {
+    return site;
+  }
+  return ts.isCallExpression(site.parent) && site.parent.expression === site && iteratedArgument(site.parent, state.model) !== undefined
+    ? site.parent : undefined;
+}
+
+/** True when the node iterates its operand as part of its own evaluation. */
+function iterates(node: ts.Node): boolean {
+  return ts.isForOfStatement(node) || ts.isSpreadElement(node) || ts.isYieldExpression(node) || ts.isVariableDeclaration(node);
+}
+
+/** True when the call steps an iterator through next, return or throw. */
+function iteratorStep(call: ts.CallExpression): boolean {
+  const callee = unwrapExpression(call.expression);
+  return (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) &&
+    ["next", "return", "throw"].includes(methodName(callee) ?? "");
 }
 
 function transferOffset(state: AnalysisState, source: TransferSource, push: ts.CallExpression, sourceOwner: EffectOwner): PushStart | undefined {
@@ -704,7 +779,7 @@ function transferOffset(state: AnalysisState, source: TransferSource, push: ts.C
 }
 
 /** True when the call can change an origin of the fact in a way other than appending. */
-function invocationResets(state: AnalysisState, fact: StorageFact, invocation: ts.CallExpression): boolean {
+function invocationResets(state: AnalysisState, fact: StorageFact, invocation: Invocation): boolean {
   return sharedWrites(state).some((write) => write.slot === undefined && fact.outer.includes(write.origin) &&
     (write.site === invocation || write.site === invocation.expression));
 }
@@ -719,7 +794,7 @@ function sharedWrites(state: AnalysisState): SharedWrite[] {
  */
 function calleePushOffset(state: AnalysisState, push: ts.CallExpression, sourceOwner: EffectOwner): PushStart | undefined {
   const summary = state.summaries.get(sourceOwner);
-  const target = pushReceiverBinding(state, push);
+  const target = pushReceiverKey(state, push);
   if (!summary || !target) {
     return undefined;
   }
@@ -735,7 +810,7 @@ function calleePushOffset(state: AnalysisState, push: ts.CallExpression, sourceO
 
 /** Counts one earlier write of the callee; a write other than a push leaves the offset unknown. */
 function advanceCalleeOffset(
-  state: AnalysisState, offset: PushStart, effect: ImplicitFlow | ParameterWrite, target: Binding,
+  state: AnalysisState, offset: PushStart, effect: ImplicitFlow | ParameterWrite, target: string,
   counted: Set<ts.CallExpression>, sourceOwner: EffectOwner,
 ): PushStart | undefined {
   const forwarded = "writeNode" in effect ? effect.writeNode : undefined;
@@ -744,7 +819,7 @@ function advanceCalleeOffset(
     return prior ? offset : undefined;
   }
   counted.add(prior);
-  const same = !forwarded && pushReceiverBinding(state, prior) === target;
+  const same = !forwarded && pushReceiverKey(state, prior) === target;
   return same ? advanceDirectPush(offset, prior, sourceOwner) : { ...offset, exact: false };
 }
 
@@ -752,15 +827,31 @@ function isWritingFlow(flow: ImplicitFlow): boolean {
   return flow.kind !== "input" && flow.access !== "read" && flow.receiver !== "read";
 }
 
-function pushReceiverBinding(state: AnalysisState, push: ts.CallExpression): Binding | undefined {
+/** Names the storage a push appends to as its root binding and literal member path, or undefined when either is unknown. */
+function pushReceiverKey(state: AnalysisState, push: ts.CallExpression): string | undefined {
   const callee = unwrapExpression(push.expression);
-  const receiver = ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee) ? unwrapExpression(callee.expression) : undefined;
-  return receiver && ts.isIdentifier(receiver) ? state.model.resolve(receiver) : undefined;
+  return ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee) ? storageKey(state, callee.expression) : undefined;
+}
+
+/** Names the storage an expression selects as its root binding and literal member path, or undefined when either is unknown. */
+function storageKey(state: AnalysisState, expression: ts.Expression): string | undefined {
+  let receiver = unwrapExpression(expression);
+  const slots: string[] = [];
+  while (ts.isPropertyAccessExpression(receiver) || ts.isElementAccessExpression(receiver)) {
+    const slot = storageSlot(receiver);
+    if (slot === undefined) {
+      return undefined;
+    }
+    slots.unshift(slot);
+    receiver = unwrapExpression(receiver.expression);
+  }
+  const binding = ts.isIdentifier(receiver) ? state.model.resolve(receiver) : undefined;
+  return binding ? JSON.stringify([binding.declarations[0].identifier.getStart(), ...slots]) : undefined;
 }
 
 /** True when the node can run before the call: earlier in source, inside its arguments, or in a loop around both. */
-function mayRunBefore(node: ts.Node, call: ts.CallExpression, owner: EffectOwner): boolean {
-  if (call.arguments.some((argument) => inside(node, argument))) {
+function mayRunBefore(node: ts.Node, call: ts.Node, owner: EffectOwner): boolean {
+  if (pointArguments(call).some((argument) => inside(node, argument))) {
     return true;
   }
   if (inside(node, call)) {
@@ -769,7 +860,7 @@ function mayRunBefore(node: ts.Node, call: ts.CallExpression, owner: EffectOwner
   return node.end <= call.getStart() || sharesLoop(node, call, owner);
 }
 
-function sharesLoop(node: ts.Node, call: ts.CallExpression, owner: EffectOwner): boolean {
+function sharesLoop(node: ts.Node, call: ts.Node, owner: EffectOwner): boolean {
   for (let current: ts.Node | undefined = call.parent; current && current !== owner; current = current.parent) {
     if (ts.isIterationStatement(current, false) && repeatedPartOfIteration(call, current) && inside(node, current)) {
       return true;
@@ -778,7 +869,7 @@ function sharesLoop(node: ts.Node, call: ts.CallExpression, owner: EffectOwner):
   return false;
 }
 
-function repeatedCall(call: ts.CallExpression, owner: EffectOwner): boolean {
+function repeatedCall(call: ts.Node, owner: EffectOwner): boolean {
   for (let current: ts.Node | undefined = call.parent; current && current !== owner; current = current.parent) {
     if (ts.isIterationStatement(current, false) && repeatedPartOfIteration(call, current)) {
       return true;
@@ -787,7 +878,7 @@ function repeatedCall(call: ts.CallExpression, owner: EffectOwner): boolean {
   return false;
 }
 
-function repeatedPartOfIteration(call: ts.CallExpression, loop: ts.IterationStatement): boolean {
+function repeatedPartOfIteration(call: ts.Node, loop: ts.IterationStatement): boolean {
   if (inside(call, loop.statement)) {
     return true;
   }
@@ -798,7 +889,7 @@ function repeatedPartOfIteration(call: ts.CallExpression, loop: ts.IterationStat
 }
 
 function pushCallForMutation(site: ts.Node): ts.CallExpression | undefined {
-  const member = ts.isIdentifier(site) ? outerExpression(site).parent : site;
+  const member = ts.isIdentifier(site) ? unwrapExpression(outermostAccess(site)) : site;
   if ((!ts.isPropertyAccessExpression(member) && !ts.isElementAccessExpression(member)) || methodName(member) !== "push") {
     return undefined;
   }
@@ -814,22 +905,29 @@ function knownPushStart(state: AnalysisState, receiver: ts.Expression, owner: Ef
   return knownPushStartFromFact(state, fact, owner, call);
 }
 
-function knownPushStartFromFact(state: AnalysisState, fact: StorageFact, owner: EffectOwner, call: ts.CallExpression): PushStart | undefined {
+function knownPushStartFromFact(state: AnalysisState, fact: StorageFact, owner: EffectOwner, call: Invocation): PushStart | undefined {
   if (fact.outer.length !== 1) {
     return undefined;
   }
   const origin = fact.outer[0];
+  const length = literalAllocationLength(state, origin);
+  return length === undefined ? undefined : priorPushStart(state, owner, call, origin, length);
+}
+
+/** Gives the length an array literal origin starts with, or undefined when the origin is not one or spreads. */
+function literalAllocationLength(state: AnalysisState, origin: StorageOrigin): number | undefined {
   const position = /^private:(\d+)$/.exec(origin)?.[1];
   const allocation = position === undefined ? undefined : state.arrayLiterals.get(Number(position));
-  if (!allocation || allocation.elements.some(ts.isSpreadElement)) {
-    return undefined;
-  }
-  return priorPushStart(state, owner, call, origin, allocation.elements.length);
+  return allocation && !allocation.elements.some(ts.isSpreadElement) ? allocation.elements.length : undefined;
+}
+
+function calleeOf(point: ts.Node): ts.Node | undefined {
+  return isInvocation(point) ? point.expression : undefined;
 }
 
 type ArrayReference = { readonly reference: ts.Identifier; readonly fact: StorageFact };
 
-function priorArrayReferences(state: AnalysisState, owner: EffectOwner, call: ts.CallExpression, origin: StorageOrigin): ArrayReference[] {
+function priorArrayReferences(state: AnalysisState, owner: EffectOwner, call: ts.Node, origin: StorageOrigin): ArrayReference[] {
   const references: { reference: ts.Identifier; fact: StorageFact }[] = [];
   for (const binding of state.model.bindings) {
     const bindingFact = storageFactForBinding(state, state.summaries, binding, owner, call);
@@ -837,8 +935,7 @@ function priorArrayReferences(state: AnalysisState, owner: EffectOwner, call: ts
       continue;
     }
     for (const reference of binding.references) {
-      if (!inside(reference, call.expression) && inside(reference, owner) && !nestedFunctionBetween(reference, owner) &&
-          (reference.getStart() < call.end || sharesLoop(reference, call, owner))) {
+      if (referenceBefore(reference, call, owner)) {
         references.push({ reference, fact: bindingFact });
       }
     }
@@ -846,9 +943,17 @@ function priorArrayReferences(state: AnalysisState, owner: EffectOwner, call: ts
   return references.sort((left, right) => left.reference.getStart() - right.reference.getStart());
 }
 
+/** True when the reference runs in the owner before the point ends, outside the point's callee. */
+function referenceBefore(reference: ts.Identifier, call: ts.Node, owner: EffectOwner): boolean {
+  const callee = calleeOf(call);
+  return !(callee && inside(reference, callee)) && inside(reference, owner) && !nestedFunctionBetween(reference, owner) &&
+    (reference.getStart() < call.end || sharesLoop(reference, call, owner));
+}
+
+/** True when the node sits in code that runs later than its lexical position: a nested function or another class's instance field. */
 function nestedFunctionBetween(node: ts.Node, owner: EffectOwner): boolean {
   for (let current: ts.Node | undefined = node.parent; current && current !== owner; current = current.parent) {
-    if (isFunctionLike(current)) {
+    if (isFunctionLike(current) || (isInstanceField(current) && current.parent !== owner)) {
       return true;
     }
   }
@@ -856,31 +961,46 @@ function nestedFunctionBetween(node: ts.Node, owner: EffectOwner): boolean {
 }
 
 function priorPushStart(
-  state: AnalysisState, owner: EffectOwner, call: ts.CallExpression, origin: StorageOrigin, initialLength: number,
+  state: AnalysisState, owner: EffectOwner, call: ts.Node, origin: StorageOrigin, initialLength: number,
 ): PushStart | undefined {
+  return priorPushBounds(state, owner, call, origin, initialLength)?.start;
+}
+
+/**
+ * Gives the array's length bound just before the point, and the floor: the least lower bound at any earlier step,
+ * which bounds the length throughout the steps.
+ */
+function priorPushBounds(
+  state: AnalysisState, owner: EffectOwner, call: ts.Node, origin: StorageOrigin, initialLength: number,
+): { readonly start: PushStart; readonly floor: number } | undefined {
   let start: PushStart = { lowerBound: initialLength, exact: true };
+  let floor = initialLength;
   const counted = new Set<ts.CallExpression>();
-  for (const item of priorArrayReferences(state, owner, call, origin)) {
+  const references = priorArrayReferences(state, owner, call, origin);
+  for (const item of references) {
     const next = advancePushStart(state, owner, call, origin, start, counted, item);
     if (!next) {
       return undefined;
     }
     start = next;
+    floor = Math.min(floor, start.lowerBound);
   }
   const resolved = priorResolvedPushes(state, owner, call, origin, start);
-  return priorSharedWrites(state, owner, call, origin, resolved);
+  const shared = priorSharedWrites(state, owner, call, origin, resolved, new Set(references.map((item) => item.reference)));
+  return shared && { start: shared, floor };
 }
 
 /**
  * Applies the writes calls and callbacks make to the origin before the push: an append keeps only a lower bound,
- * and any other write leaves the start unknown.
+ * and any other write leaves the start unknown. Writes through the references already applied are skipped.
  */
 function priorSharedWrites(
-  state: AnalysisState, owner: EffectOwner, call: ts.CallExpression, origin: StorageOrigin, initial: PushStart,
+  state: AnalysisState, owner: EffectOwner, call: ts.Node, origin: StorageOrigin, initial: PushStart,
+  applied: ReadonlySet<ts.Node>,
 ): PushStart | undefined {
   let start = initial;
   for (const write of sharedWrites(state)) {
-    if (write.origin !== origin || !inside(write.site, owner) || nestedFunctionBetween(write.site, owner) ||
+    if (write.origin !== origin || applied.has(write.site) || !inside(write.site, owner) || nestedFunctionBetween(write.site, owner) ||
         !mayRunBefore(write.site, call, owner)) {
       continue;
     }
@@ -893,14 +1013,14 @@ function priorSharedWrites(
 }
 
 function priorResolvedPushes(
-  state: AnalysisState, owner: EffectOwner, call: ts.CallExpression, origin: StorageOrigin, initial: PushStart,
+  state: AnalysisState, owner: EffectOwner, call: ts.Node, origin: StorageOrigin, initial: PushStart,
 ): PushStart {
   let start = initial;
   const visit = (node: ts.Node): void => {
-    if (node !== owner && isFunctionLike(node)) {
+    if (node !== owner && (isFunctionLike(node) || (isInstanceField(node) && node.parent !== owner))) {
       return;
     }
-    if (ts.isCallExpression(node) && node !== call && mayRunBefore(node, call, owner)) {
+    if (isInvocation(node) && node !== call && mayRunBefore(node, call, owner)) {
       start = advanceResolvedPushes(state, owner, origin, start, node);
     }
     const reachable = reachableChildren(node);
@@ -914,14 +1034,24 @@ function priorResolvedPushes(
   return start;
 }
 
+/** Gives the callables an invocation runs: the resolved callees of a call, or the constructors of a construction. */
+function invocationTargets(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, call: Invocation): Targets {
+  if (ts.isCallExpression(call)) {
+    return resolveTargets(dispatchFor(state, summaries), call.expression);
+  }
+  const classes = classTargets(state.model, call.expression);
+  return classes ? { targets: classes.map((created) => explicitConstructor(created) ?? created), complete: true } : { targets: [], complete: false };
+}
+
 function advanceResolvedPushes(
-  state: AnalysisState, owner: EffectOwner, origin: StorageOrigin, initial: PushStart, call: ts.CallExpression,
+  state: AnalysisState, owner: EffectOwner, origin: StorageOrigin, initial: PushStart, call: Invocation,
 ): PushStart {
-  const resolved = resolveTargets(dispatchFor(state, state.summaries), call.expression);
+  const resolved = invocationTargets(state, state.summaries, call);
   const counted = new Set<ts.CallExpression>();
+  const args = pointArguments(call);
   const invocation: StorageInvocation = { call, callable: call.expression,
-    argumentFact: (index) => call.arguments[index]
-      ? storageFactForExpression(state, state.summaries, call.arguments[index], owner, call) : unknownFact };
+    argumentFact: (index) => args[index]
+      ? storageFactForExpression(state, state.summaries, args[index], owner, call) : unknownFact };
   let start = initial;
   for (const target of resolved.targets) {
     for (const insertion of state.summaries.get(target)?.storageInsertions ?? []) {
@@ -948,7 +1078,7 @@ function matchingResolvedPush(
 }
 
 function advanceResolvedPush(
-  start: PushStart, push: ts.CallExpression, call: ts.CallExpression, owner: EffectOwner, once: boolean,
+  start: PushStart, push: ts.CallExpression, call: Invocation, owner: EffectOwner, once: boolean,
 ): PushStart {
   return !once || !unconditional(call, owner) || repeatedCall(call, owner) || push.arguments.some(ts.isSpreadElement)
     ? { ...start, exact: false } : { ...start, lowerBound: start.lowerBound + push.arguments.length };
@@ -973,7 +1103,7 @@ function exitsBefore(owner: EffectOwner, node: ts.Node): boolean {
 }
 
 function advancePushStart(
-  state: AnalysisState, owner: EffectOwner, call: ts.CallExpression, origin: StorageOrigin,
+  state: AnalysisState, owner: EffectOwner, call: ts.Node, origin: StorageOrigin,
   start: PushStart, counted: Set<ts.CallExpression>, { reference, fact }: ArrayReference,
 ): PushStart | undefined {
   const prior = receiverPushCall(reference);
@@ -984,7 +1114,7 @@ function advancePushStart(
     counted.add(prior);
     return advanceDirectPush(start, prior, owner);
   }
-  return prior !== call && priorArrayLengthWrite(state, fact, origin, start.lowerBound, reference) ? undefined : start;
+  return prior === call ? start : priorArrayLengthWrite(state, fact, origin, start, reference, owner);
 }
 
 function advanceDirectPush(start: PushStart, prior: ts.CallExpression, owner: EffectOwner): PushStart {
@@ -997,9 +1127,10 @@ function advanceDirectPush(start: PushStart, prior: ts.CallExpression, owner: Ef
 
 function priorPushOnArray(
   prior: ts.CallExpression, reference: ts.Identifier, fact: StorageFact, origin: StorageOrigin,
-  call: ts.CallExpression, counted: ReadonlySet<ts.CallExpression>,
+  call: ts.Node, counted: ReadonlySet<ts.CallExpression>,
 ): boolean {
-  const beforeCall = prior.end <= call.getStart() || call.arguments.some((argument) => inside(prior, argument));
+  const beforeCall = prior.end <= call.getStart() || pointArguments(call).some((argument) => inside(prior, argument)) ||
+    (!isInvocation(call) && inside(prior, call));
   return beforeCall && !counted.has(prior) &&
     originsForPath(fact, selectedSlots(reference).slice(0, -1)).includes(origin);
 }
@@ -1020,28 +1151,83 @@ function receiverPushCall(reference: ts.Identifier): ts.CallExpression | undefin
   return undefined;
 }
 
+/**
+ * Applies a direct write through the reference to the array's length. A write to an index never shrinks the array:
+ * one below the start leaves it, and one at or past it keeps only a lower bound. A literal length assignment and a
+ * pop that runs at most once give a new start. Any other write leaves it unknown.
+ */
 function priorArrayLengthWrite(
   state: AnalysisState,
   fact: StorageFact,
   origin: StorageOrigin,
-  length: number,
+  start: PushStart,
   reference: ts.Identifier,
-): boolean {
+  owner: EffectOwner,
+): PushStart | undefined {
   const write = state.model.writeOf(reference);
   if (!write) {
-    return false;
+    return start;
   }
   if (write.reassign) {
-    return true;
+    return undefined;
   }
   const path = selectedSlots(reference);
-  for (let prefix = 0; prefix <= path.length; prefix += 1) {
-    if (originsForPath(fact, prefix ? path.slice(0, prefix) : "outer").includes(origin)) {
-      const index = arrayIndexForSlot(path[prefix]);
-      return index === undefined || index >= length;
-    }
+  const prefix = [...path.keys(), path.length].find((depth) => originsForPath(fact, depth ? path.slice(0, depth) : "outer").includes(origin));
+  return prefix === undefined ? start : arrayWriteAt(state, start, reference, path, prefix, owner);
+}
+
+/** Applies a write to the slot that follows the array at the depth of the reference's member path. */
+function arrayWriteAt(
+  state: AnalysisState, start: PushStart, reference: ts.Identifier, path: readonly string[], prefix: number, owner: EffectOwner,
+): PushStart | undefined {
+  const index = arrayIndexForSlot(path[prefix]);
+  if (index !== undefined) {
+    return index < start.lowerBound ? start : { ...start, exact: false };
   }
-  return false;
+  if (appendIndexAt(state, reference, prefix)) {
+    return { ...start, exact: false };
+  }
+  return prefix === path.length - 1 ? lengthChange(start, reference, path[prefix], owner) : undefined;
+}
+
+/** Applies a literal length assignment or a pop on the array the reference holds; undefined for anything else. */
+function lengthChange(start: PushStart, reference: ts.Identifier, slot: string, owner: EffectOwner): PushStart | undefined {
+  const access = outermostAccess(reference);
+  const once = unconditional(access, owner);
+  const truncated = slot === "property:length" ? truncatedSlot(access) : undefined;
+  if (truncated !== undefined) {
+    const length = Number(truncated.slice("append:".length));
+    return once ? { lowerBound: length, exact: true } : { lowerBound: Math.min(start.lowerBound, length), exact: false };
+  }
+  const call = access.parent;
+  if (slot !== "property:pop" || !ts.isCallExpression(call) || call.expression !== access || repeatedCall(call, owner)) {
+    return undefined;
+  }
+  return { lowerBound: Math.max(start.lowerBound - 1, 0), exact: start.exact && once };
+}
+
+/** True when the access at the depth indexes its object by that object's own length, as in values[values.length]. */
+function appendIndexAt(state: AnalysisState, reference: ts.Identifier, depth: number): boolean {
+  let access: ts.Expression = outerExpression(reference);
+  for (let step = 0; step <= depth; step += 1) {
+    access = access.parent as ts.Expression;
+    if (!ts.isPropertyAccessExpression(access) && !ts.isElementAccessExpression(access)) {
+      return false;
+    }
+    access = step < depth ? outerExpression(access) : access;
+  }
+  return ts.isElementAccessExpression(access) && appendIndex(state, access);
+}
+
+function appendIndex(state: AnalysisState, access: ts.ElementAccessExpression): boolean {
+  const key = unwrapExpression(access.argumentExpression);
+  return ts.isPropertyAccessExpression(key) && key.name.text === "length" && sameStorage(state, key.expression, access.expression);
+}
+
+/** True when both expressions select the same storage: one binding followed by the same literal member path. */
+function sameStorage(state: AnalysisState, left: ts.Expression, right: ts.Expression): boolean {
+  const key = storageKey(state, left);
+  return key !== undefined && key === storageKey(state, right);
 }
 
 function sharedBindingCount(state: AnalysisState): number {
@@ -1055,7 +1241,7 @@ function shareExposedReturns(state: AnalysisState, summary: CallableSummary): vo
   }
   const origins = summary.returnedAliases.flatMap((fact) => [...fact.outer, ...fact.reachable]);
   shareOrigins(state, origins.filter((origin) => {
-    const binding = state.bindingOrigins.get(origin);
+    const binding = originBinding(state, origin)?.binding;
     return binding?.declarations.some((declaration) =>
       ts.isVariableDeclaration(declaration.node) &&
       (!declaration.node.initializer || !isDefinedLiteral(declaration.node.initializer) ||
@@ -1324,7 +1510,36 @@ function callEffects(
     }] };
   }
   const known = libraryCall(call, state.model);
-  return known ? libraryEffects(state, summaries, call, owner, known) : unknownEffects(call.expression, owner, "calls unresolved callable");
+  if (known) {
+    return libraryEffects(state, summaries, call, owner, known);
+  }
+  escapeStorage(state, callOperandFacts(state, summaries, call, owner), call, owner);
+  return unknownEffects(call.expression, owner, "calls unresolved callable");
+}
+
+/** Gives the storage a call hands to its callee: the receiver object of a member call and each argument. */
+function callOperandFacts(
+  state: AnalysisState,
+  summaries: ReadonlyMap<EffectOwner, CallableSummary>,
+  call: ts.CallExpression | ts.NewExpression,
+  owner: EffectOwner,
+): StorageFact[] {
+  const callee = unwrapExpression(call.expression);
+  const operands = [
+    ...(ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee) ? [callee.expression] : []),
+    ...(call.arguments ?? []).map((argument) => ts.isSpreadElement(argument) ? argument.expression : argument),
+  ];
+  return operands.map((operand) => storageFactForExpression(state, summaries, operand, owner, call));
+}
+
+/**
+ * Marks storage that reaches code this analysis cannot follow as changed in every slot.
+ * The code can keep the reference, so every later reader of that storage can observe a change.
+ */
+function escapeStorage(state: AnalysisState, facts: readonly StorageFact[], site: ts.Node, owner: EffectOwner): void {
+  const origins = joinStorageOrigins(facts.flatMap((fact) => [...fact.outer, ...fact.reachable]));
+  shareOrigins(state, origins);
+  shareAliasedLocalBindings(state, origins, site, owner, [undefined]);
 }
 
 function isIteratorAdvance(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, callee: ts.Expression): boolean {
@@ -1362,6 +1577,7 @@ function resolvedCallEffects(
       : unknownEffects(site, owner, "calls unresolved callable");
   }));
   if (!resolved.complete) {
+    escapeStorage(state, callOperandFacts(state, summaries, call, owner), call, owner);
     groups.push(unknownEffects(call.expression, owner, "calls overridable method"));
   }
   return combineEffects(groups);
@@ -1501,6 +1717,7 @@ function callbackEffects(
     effects.parameterCalls.push({ parameterIndex: index, node, argumentFacts: facts });
     return effects;
   }
+  escapeStorage(state, facts, node, owner);
   return combineEffects([effects, unknownEffects(node, owner, "calls unresolved callable")]);
 }
 
@@ -1607,7 +1824,7 @@ function ownedBindingFlow(
     return emptyCallEffects();
   }
   const fact = storageFactForBinding(state, summaries, binding, owner, node);
-  const slots = transferredPushSlots(state, fact, flow, flow.owner, node, owner);
+  const slots = transferredPushSlots(state, fact, flow, flow.owner, node, owner, flow.path);
   return mutationEffectsFromFact(state, fact, flow.path ?? "outer", node, owner,
     isParameterOf(binding, owner) ? `mutates argument ${binding.name}` : `mutates caller-owned value ${binding.name}`,
     false, false, slots);
@@ -1615,7 +1832,7 @@ function ownedBindingFlow(
 
 function capturedFlow(state: AnalysisState, flow: ImplicitFlow, fact: StorageFact, node: ts.Node, owner: EffectOwner): CallEffects {
   if (flow.access === "contents") {
-    const slots = transferredPushSlots(state, fact, flow, flow.owner, node, owner);
+    const slots = transferredPushSlots(state, fact, flow, flow.owner, node, owner, flow.path);
     return mutationEffectsFromFact(state, fact, flow.path ?? "outer", node, owner, flow.description, false, true, slots);
   }
   return flow.access === "read" ? receiverFlow(state, { ...flow, receiver: "read" }, fact, node, owner) : emptyCallEffects();
@@ -1654,7 +1871,7 @@ function instantiateParameterWrites(
       return unknownEffects(node, owner, "calls writable parameter without an argument");
     }
     const fact = actualFact(write.parameterIndex);
-    const slots = transferredPushSlots(state, fact, write, sourceOwner, node, owner);
+    const slots = transferredPushSlots(state, fact, write, sourceOwner, node, owner, write.path);
     return mutationEffectsFromFact(state, fact, write.path, node, owner,
       `mutates caller-owned value ${actual.getText(state.sourceFile)}`, false, true, slots);
   }));
@@ -1677,6 +1894,7 @@ function instantiateParameterCalls(
     const callback = actuals[parameterCall.parameterIndex];
     const argumentFacts = parameterCall.argumentFacts.map((fact) => instantiateStorageFact(fact, actualFact));
     if (!callback) {
+      escapeStorage(state, argumentFacts, node, owner);
       flows.push({ kind: "unknown", node, owner, description: "calls unresolved callable" });
       continue;
     }
@@ -1691,6 +1909,7 @@ function instantiateParameterCalls(
     if (!callbackTargets) {
       const callbackParameterIndex = parameterCallableIndex(state, callback, owner);
       if (callbackParameterIndex === undefined) {
+        escapeStorage(state, argumentFacts, node, owner);
         flows.push({ kind: "unknown", node, owner, description: "calls unresolved callable" });
       } else {
         forwardedCalls.push({ parameterIndex: callbackParameterIndex, node, argumentFacts });
@@ -1756,7 +1975,7 @@ function instantiateCallableSummaryFromFacts(
   const actualFact = (index: number) => actualFacts[index] ?? unknownFact;
   const writes = summary.parameterWrites.map((write) => {
     const fact = actualFact(write.parameterIndex);
-    const slots = transferredPushSlots(state, fact, { node: write.node, repeated: true }, summary.owner, node, owner);
+    const slots = transferredPushSlots(state, fact, { node: write.node, repeated: true }, summary.owner, node, owner, write.path);
     return mutationEffectsFromFact(state, fact, write.path, node, owner, "mutates caller-owned callback argument", false, true, slots);
   });
   const unresolved = summary.parameterCalls.length > 0 ? [unknownEffects(node, owner, "calls unresolved callable")] : [];
@@ -1771,7 +1990,7 @@ function mutatingMethodEffects(
   known: Exclude<LibraryCall, { kind: "effect" }>,
 ): CallEffects {
   const target = libraryTarget(call, known);
-  if (!target || ts.isIdentifier(unwrapExpression(target)) || rootIsThis(target)) {
+  if (!target || ts.isIdentifier(unwrapExpression(target)) || boundRoot(state, target) || rootIsThis(target)) {
     return emptyCallEffects();
   }
   const fact = storageFactForExpression(state, summaries, target, owner, call);
@@ -1779,6 +1998,15 @@ function mutatingMethodEffects(
   const name = methodName(unwrapExpression(call.expression));
   return mutationEffectsFromFact(state, fact, "outer", call.expression, owner,
     indexes.length === 1 ? `mutates argument ${parameterName(owner, indexes[0])}` : `mutates receiver of ${name ?? "call"}`);
+}
+
+/** True when the expression selects storage through a bound name alone, so the name's own write reports the change. */
+function boundRoot(state: AnalysisState, expression: ts.Expression): boolean {
+  let current = unwrapExpression(expression);
+  while (ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current)) {
+    current = unwrapExpression(current.expression);
+  }
+  return ts.isIdentifier(current) && state.model.resolve(current) !== undefined;
 }
 
 function constructorEffects(
@@ -1791,8 +2019,12 @@ function constructorEffects(
 ): CallEffects {
   const classes = classTargets(state.model, expression);
   if (!classes) {
-    return isPureConstructor(globalName(expression, state.model)) ? emptyCallEffects()
-      : unknownEffects(node, owner, "constructs unresolved class");
+    if (isPureConstructor(globalName(expression, state.model))) {
+      return emptyCallEffects();
+    }
+    escapeStorage(state, actuals.map((actual) =>
+      storageFactForExpression(state, summaries, ts.isSpreadElement(actual) ? actual.expression : actual, owner, node)), node, owner);
+    return unknownEffects(node, owner, "constructs unresolved class");
   }
   return combineEffects(classes.map((created) => {
     const summary = summaries.get(explicitConstructor(created) ?? created);
@@ -2021,41 +2253,21 @@ function storageInsertionsForNode(
         slot: storageSlot(target), replace: unconditional(node, owner) }];
     }
   }
-  return ts.isCallExpression(node) ? callStorageInsertions(state, summaries, node, owner) : [];
+  return isInvocation(node) ? callStorageInsertions(state, summaries, node, owner) : [];
 }
 
 function callStorageInsertions(
   state: AnalysisState,
   summaries: ReadonlyMap<EffectOwner, CallableSummary>,
-  call: ts.CallExpression,
+  call: Invocation,
   owner: EffectOwner,
 ): StorageInsertion[] {
-  const resolved = resolveTargets(dispatchFor(state, summaries), call.expression);
+  const resolved = invocationTargets(state, summaries, call);
   if (resolved.targets.length > 0) {
-    const invocation: StorageInvocation = { call, callable: call.expression,
-      argumentFact: (index) => call.arguments[index] ? storageFactForExpression(state, summaries, call.arguments[index], owner, call) : unknownFact };
-    const sites = resolved.targets.every(isGenerator) ? generatorSites(state, call, owner) : [call];
-    return sites.flatMap((node) => resolved.targets.flatMap((target) => {
-      const summary = summaries.get(target);
-      const direct = (summary?.storageInsertions ?? []).map((insertion) => instantiateInsertion(
-        state, summaries, insertion, invocation, target, node, owner,
-        resolved.targets.length === 1 && resolved.complete && unconditional(node, owner)));
-      const callbacks = (summary?.parameterCalls ?? []).flatMap((parameterCall) => {
-        const callback = call.arguments[parameterCall.parameterIndex];
-        if (!callback) {
-          return [];
-        }
-        const targets = resolveTargets(dispatchFor(state, summaries), callback);
-        const facts = parameterCall.argumentFacts.map((fact) => invocationStorageFact(state, summaries, fact, invocation, owner));
-        const callbackInvocation = { call, callable: callback, argumentFact: (index: number) => facts[index] ?? unknownFact };
-        return targets.targets.filter((callbackTarget) => !isGenerator(callbackTarget)).flatMap((callbackTarget) =>
-          (summaries.get(callbackTarget)?.storageInsertions ?? []).map((insertion) => instantiateInsertion(
-            state, summaries, insertion, callbackInvocation, callbackTarget, node, owner,
-            targets.complete && targets.targets.length === 1 && unconditional(parameterCall.node, target) && unconditional(node, owner), true)),
-        );
-      });
-      return [...direct, ...callbacks];
-    }));
+    return targetStorageInsertions(state, summaries, call, owner, resolved);
+  }
+  if (!ts.isCallExpression(call)) {
+    return [];
   }
   const known = libraryCall(call, state.model);
   return known && known.kind !== "effect" ? [
@@ -2064,20 +2276,55 @@ function callStorageInsertions(
   ] : [];
 }
 
+/** Instantiates the storage insertions of resolved call or construction targets at one invocation. */
+function targetStorageInsertions(
+  state: AnalysisState,
+  summaries: ReadonlyMap<EffectOwner, CallableSummary>,
+  call: Invocation,
+  owner: EffectOwner,
+  resolved: { readonly targets: readonly EffectOwner[]; readonly complete: boolean },
+): StorageInsertion[] {
+  const args = pointArguments(call);
+  const invocation: StorageInvocation = { call, callable: call.expression,
+    argumentFact: (index) => args[index] ? storageFactForExpression(state, summaries, args[index], owner, call) : unknownFact };
+  const sites = ts.isCallExpression(call) && resolved.targets.every(isGenerator) ? generatorSites(state, call, owner) : [call];
+  return sites.flatMap((node) => resolved.targets.flatMap((target) => {
+    const summary = summaries.get(target);
+    const direct = (summary?.storageInsertions ?? []).map((insertion) => instantiateInsertion(
+      state, summaries, insertion, invocation, target, node, owner,
+      resolved.targets.length === 1 && resolved.complete && unconditional(node, owner)));
+    const callbacks = (summary?.parameterCalls ?? []).flatMap((parameterCall) => {
+      const callback = args[parameterCall.parameterIndex];
+      if (!callback) {
+        return [];
+      }
+      const targets = resolveTargets(dispatchFor(state, summaries), callback);
+      const facts = parameterCall.argumentFacts.map((fact) => invocationStorageFact(state, summaries, fact, invocation, owner));
+      const callbackInvocation = { call, callable: callback, argumentFact: (index: number) => facts[index] ?? unknownFact };
+      return targets.targets.filter((callbackTarget) => !isGenerator(callbackTarget)).flatMap((callbackTarget) =>
+        (summaries.get(callbackTarget)?.storageInsertions ?? []).map((insertion) => instantiateInsertion(
+          state, summaries, insertion, callbackInvocation, callbackTarget, node, owner,
+          targets.complete && targets.targets.length === 1 && unconditional(parameterCall.node, target) && unconditional(node, owner), true)),
+      );
+    });
+    return [...direct, ...callbacks];
+  }));
+}
+
 function instantiateInsertion(
   state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, insertion: StorageInsertion,
   invocation: StorageInvocation, sourceOwner: EffectOwner, node: ts.Node, owner: EffectOwner, mayReplace: boolean,
   repeated = false,
 ): StorageInsertion {
   const target = invocationStorageFact(state, summaries, insertion.target, invocation, owner);
-  const slot = transferredInsertionSlot(state, insertion, target, invocation, sourceOwner, owner, repeated);
+  const slot = transferredInsertionSlot(state, insertion, target, invocation, sourceOwner, node, owner, repeated);
   return { ...insertion, node, target, value: invocationStorageFact(state, summaries, insertion.value, invocation, owner), slot,
     replace: mayReplace && (insertion.appendCall ? slot !== undefined && !slot.startsWith("append:") : insertion.replace) };
 }
 
 function transferredInsertionSlot(
   state: AnalysisState, insertion: StorageInsertion, target: StorageFact, invocation: StorageInvocation,
-  sourceOwner: EffectOwner, owner: EffectOwner, repeated: boolean,
+  sourceOwner: EffectOwner, node: ts.Node, owner: EffectOwner, repeated: boolean,
 ): string | undefined {
   const append = insertion.appendCall;
   if (!append) {
@@ -2085,7 +2332,7 @@ function transferredInsertionSlot(
   }
   const push = append.expression;
   const source = { node: push, writeNode: insertion.node === append ? undefined : push, repeated };
-  const slots = transferredPushSlots(state, target, source, sourceOwner, invocation.call, owner);
+  const slots = transferredPushSlots(state, target, source, sourceOwner, isGenerator(sourceOwner) ? node : invocation.call, owner);
   const argumentIndex = append.arguments.findIndex((argument) => argument === insertion.origin);
   return slots && argumentIndex >= 0 ? slots[argumentIndex + 1] : insertion.slot;
 }
@@ -2212,13 +2459,15 @@ function invocationStorageFact(
   const substituted = instantiateStorageFact(invokedStorageFact(fact, invocation.call), invocation.argumentFact);
   const captures = capturesForExpression(state, summaries, invocation.callable, owner, new Set());
   const replace = (origins: readonly StorageOrigin[], select: (capture: StorageFact) => readonly StorageOrigin[]) => joinStorageOrigins(origins.flatMap((origin) => {
-    const binding = state.bindingOrigins.get(origin);
+    const external = originBinding(state, origin);
+    const binding = external?.binding;
     const capture = binding && (captures.get(binding) ?? (inside(binding.scope.node, owner)
       ? storageFactForBinding(state, summaries, binding, owner, invocation.call) : undefined));
-    return capture ? select(capture) : [origin];
+    return capture && external
+      ? select(external.path.reduce((value, slot) => memberStorageFact(value, slot), capture)) : [origin];
   }));
   const capturedCells = [...substituted.outer, ...substituted.reachable].flatMap((origin) => {
-    const binding = state.bindingOrigins.get(origin);
+    const binding = originBinding(state, origin)?.binding;
     return binding && inside(binding.scope.node, owner)
       ? storageFactForBinding(state, summaries, binding, owner, invocation.call).cells ?? [] : [];
   });
