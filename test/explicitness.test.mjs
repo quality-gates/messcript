@@ -531,8 +531,6 @@ test("closures capturing a loop variable mutated in the loop body still report I
   ]);
 });
 
-
-
 test("closures capturing a var loop variable or loop variable declared outside continue to report ImplicitInput", () => {
   assert.deepEqual(messages("var-loop.js", `export function varHandlers(n) {
   const hs = [];
@@ -611,7 +609,6 @@ function f() {
   assert.equal(cachedFlows.length, 2);
   assert.deepEqual(cachedFlows.map((f) => f.description).sort(), ["reads total", "writes total"]);
 });
-
 
 test("a default value in a shorthand destructuring assignment reads the outer binding", () => {
   assert.deepEqual(messages("shorthand.js", `let fallback = 0;
@@ -1513,4 +1510,78 @@ test("eager native iterator consumers force generator summaries", () => {
     if (expected.length === 0) assert.deepEqual(actual, [], name);
     else for (const finding of expected) assert.ok(actual.some((item) => item[0] === finding[0] && item[1] === finding[1]), name + ": " + JSON.stringify(actual));
   }
+});
+
+test("storage cells retain selection and execution ownership", () => {
+  const cases = [
+    ["initial-field-replaced.ts", "function run(items: number[]) {\n  const box = { items };\n  box.items = [];\n  box.items.push(1);\n}\n", []],
+    ["initial-field-retained.ts", "function run(items: number[]) {\n  const box = { items };\n  box.items.push(1);\n}\n", [[3, "ImplicitOutput"]]],
+    ["initial-element-replaced.ts", "function run(items: number[]) {\n  const box = [items];\n  box[0] = [];\n  box[0].push(1);\n}\n", []],
+    ["alias-before-replacement.ts", "function run(items: number[]) {\n  const box = { items };\n  const alias = box.items;\n  box.items = [];\n  alias.push(1);\n}\n", [[5, "ImplicitOutput"]]],
+    ["private-sibling-field.ts", "function run(items: number[]) {\n  const box = { items, other: [] as number[] };\n  box.other.push(1);\n}\n", []],
+    ["private-sibling-element.ts", "function run(items: number[]) {\n  const box = [items, [] as number[]];\n  box[1].push(1);\n}\n", []],
+    ["helper-initial-field-replaced.ts", "function clear(box: {items: number[]}) {\n  box.items = [];\n}\nfunction run(items: number[]) {\n  const box = { items };\n  clear(box);\n  box.items.push(1);\n}\n", []],
+    ["helper-late-field-replaced.ts", "function clear(box: {items: number[]}) {\n  box.items = [];\n}\nfunction run(items: number[]) {\n  const box = { items: [] as number[] };\n  box.items = items;\n  clear(box);\n  box.items.push(1);\n}\n", []],
+    ["uncalled-rebinding.ts", "function run(items: number[]) {\n  let local: number[] = [];\n  const later = () => { local = items; };\n  local.push(1);\n}\n", []],
+    ["false-rebinding.ts", "function run(items: number[]) {\n  let local: number[] = [];\n  if (false) { local = items; }\n  local.push(1);\n}\n", []],
+    ["false-callback-rebinding.ts", "function run(items: number[]) {\n  let local: number[] = [];\n  if (false) { (() => { local = items; })(); }\n  local.push(1);\n}\n", []],
+    ["helper-callback-insertion.ts", "function each(act: () => void) {\n  act();\n}\nfunction run(items: number[]) {\n  const box = { items: [] as number[] };\n  each(() => { box.items = items; });\n  box.items.push(1);\n}\n", [[7, "ImplicitOutput"]]],
+    ["helper-callback-private.ts", "function each(act: () => void) {\n  act();\n}\nfunction run(items: number[]) {\n  const box = { items: [] as number[] };\n  each(() => { box.items = []; });\n  box.items.push(1);\n}\n", []],
+    ["nested-helper-factory-identity.ts", "function make() { return { items: [] as number[] }; }\nfunction wrap() { return make(); }\nfunction run(items: number[]) {\n  const first = wrap();\n  const second = wrap();\n  first.items = items;\n  second.items.push(1);\n}\n", []],
+    ["nested-helper-factory-effect.ts", "function make() { return { items: [] as number[] }; }\nfunction wrap() { return make(); }\nfunction run(items: number[]) {\n  const first = wrap();\n  first.items = items;\n  first.items.push(1);\n}\n", [[6, "ImplicitOutput"]]],
+    ["generator-unforced-insertion.ts", "function run(items: number[]) {\n  const box = { items: [] as number[] };\n  function* later() {\n    box.items = items;\n    yield 1;\n  }\n  later();\n  box.items.push(1);\n}\n", []],
+    ["generator-forced-insertion.ts", "function run(items: number[]) {\n  const box = { items: [] as number[] };\n  function* later() {\n    box.items = items;\n    yield 1;\n  }\n  for (const n of later()) {}\n  box.items.push(1);\n}\n", [[8, "ImplicitOutput"]]],
+    ["hot-async-insertion.ts", "function run(items: number[]) {\n  const box = { items: [] as number[] };\n  async function now() {\n    box.items = items;\n  }\n  now();\n  box.items.push(1);\n}\n", [[7, "ImplicitOutput"]]],
+    ["map-overwrite.ts", "function run(items: number[]) {\n  const box = new Map<string, number[]>();\n  box.set(\"x\", items);\n  box.set(\"x\", []);\n  box.get(\"x\")?.push(1);\n}\n", []],
+    ["map-other-entry.ts", "function run(items: number[]) {\n  const box = new Map<string, number[]>();\n  box.set(\"x\", items);\n  box.set(\"y\", []);\n  box.get(\"y\")?.push(1);\n}\n", []],
+    ["captured-mutated-through-alias.ts", "function run() {\n  const values: number[] = [];\n  const alias = values;\n  function read() { return values.length; }\n  alias.push(1);\n  return read();\n}\n", []],
+    ["module-mutated-alias.ts", "const values: number[] = [];\nconst alias = values;\nfunction change() {\n  alias.push(1);\n}\nfunction run() {\n  return values.length;\n}\n", [[7, "ImplicitInput"]]],
+    ["module-unchanged-alias.ts", "const values: number[] = [];\nconst alias = values;\nfunction run() {\n  return values.length;\n}\n", []],
+    ["literal-false-while.ts", "function run(items: number[]) {\n  while (false) {\n    items.push(1);\n  }\n}\n", []],
+    ["literal-false-for.ts", "function run(items: number[]) {\n  for (; false;) {\n    items.push(1);\n  }\n}\n", []],
+    ["helper-callback-two-level.ts", "function each(act: () => void) {\n  act();\n}\nfunction forward(act: () => void) {\n  each(act);\n}\nfunction run(items: number[]) {\n  const box = { items: [] as number[] };\n  forward(() => { box.items = items; });\n  box.items.push(1);\n}\n", [[10, "ImplicitOutput"]]],
+    ["helper-callback-deferred.ts", "function each(act: () => void) {\n  return act;\n}\nfunction run(items: number[]) {\n  const box = { items: [] as number[] };\n  each(() => { box.items = items; });\n  box.items.push(1);\n}\n", []],
+    ["returned-setter-insertion.ts", "function make(box: {items: number[]}, items: number[]) {\n  return () => { box.items = items; };\n}\nfunction run(items: number[]) {\n  const box = { items: [] as number[] };\n  const set = make(box, items);\n  set();\n  box.items.push(1);\n}\n", [[8, "ImplicitOutput"]]],
+    ["returned-setter-private.ts", "function make(box: {items: number[]}, items: number[]) {\n  return () => { box.items = items; };\n}\nfunction run(items: number[]) {\n  const box = { items: [] as number[] };\n  const set = make(box, []);\n  set();\n  box.items.push(1);\n}\n", []],
+    ["called-rebinding.ts", "function run(items: number[]) {\n let local: number[] = [];\n const now = () => { local = items; };\n now();\n local.push(1);\n}", [[5, "ImplicitOutput"]]],
+    ["called-private-rebinding.ts", "function run(items: number[]) {\n let local = items;\n const now = () => { local = []; };\n now();\n local.push(1);\n}", []],
+    ["callback-argument-cell.ts", "function each(box: {items:number[]}, value:number[], f:(b:{items:number[]},v:number[])=>void) {\n f(box,value);\n}\nfunction run(items:number[]) {\n const box={items:[] as number[]};\n each(box,items,(b,v)=>{b.items=v;});\n box.items.push(1);\n}", [[7, "ImplicitOutput"]]],
+    ["callback-argument-private.ts", "function each(box: {items:number[]}, value:number[], f:(b:{items:number[]},v:number[])=>void) {\n f(box,value);\n}\nfunction run(items:number[]) {\n const box={items};\n each(box,[],(b,v)=>{b.items=v;});\n box.items.push(1);\n}", []],
+    ["initial-map-replaced.ts", "function run(items:number[]) {\n const box=new Map<string,number[]>([[\"a\",items]]);\n box.set(\"a\",[]);\n box.get(\"a\")?.push(1);\n}", []],
+    ["map-initial-sibling.ts", "function run(items:number[]) {\n const box=new Map<string,number[]>([[\"a\",items],[\"b\",[]]]);\n box.get(\"b\")?.push(1);\n}", []],
+    ["private-nested-property.ts", "function run(items:{n:number}) {\n const box={items,own:{n:0}};\n box.own.n++;\n}", []],
+    ["helper-private-property.ts", "function mutate(box:{items:{n:number},own:{n:number}}) {\n box.own.n++;\n}\nfunction run(items:{n:number}) {\n mutate({items,own:{n:0}});\n}", []],
+    ["private-copy-sibling.ts", "function run(items:number[]) {\n const box=[items,[]];\n const copy=box.slice();\n copy[1].push(1);\n}", []],
+    ["private-spread-sibling.ts", "function run(items:number[]) {\n const box=[items,[]];\n const copy=[...box];\n copy[1].push(1);\n}", []],
+  ];
+  for (const [name, source, expected] of cases) {
+    const actual = ownerRecords(name, source);
+    if (expected.length === 0) assert.deepEqual(actual, [], name);
+    else for (const finding of expected) assert.ok(actual.some((item) => item[0] === finding[0] && item[1] === finding[1]), name + ": " + JSON.stringify(actual));
+  }
+});
+
+test("cell replacement follows literal and conditional execution", () => {
+  const cases = [
+    ["false-while-rebinding.ts", "function run(items: number[]) {\n let local:number[]=[];\n while(false) {local=items;}\n local.push(1);\n}", []],
+    ["false-for-rebinding.ts", "function run(items: number[]) {\n let local:number[]=[];\n for(;false;) {local=items;}\n local.push(1);\n}", []],
+    ["false-if-rebinding.ts", "function run(items: number[]) {\n let local:number[]=[];\n if(false) {local=items;}\n local.push(1);\n}", []],
+    ["true-if-replacement.ts", "function run(items: number[]) {\n let local=items;\n if(true) {local=[];}\n local.push(1);\n}", []],
+    ["nested-cell-replacement.ts", "function run(items: number[]) {\n const box={inner:{items}};\n box.inner.items=[];\n box.inner.items.push(1);\n}", []],
+    ["spread-property-replacement.ts", "function run(items: number[]) {\n const initial={items};\n const box={...initial,items:[] as number[]};\n box.items.push(1);\n}", []],
+    ["conditional-callback-replacement.ts", "function each(f:()=>void,flag:boolean) {\n if(flag) f();\n}\nfunction run(items:number[],flag:boolean) {\n const box={items};\n each(()=>{box.items=[];},flag);\n box.items.push(1);\n}", [[7, "ImplicitOutput"]]],
+    ["parameter-helper-shared-cell.ts", "function change(box:{inner:{n:number}}) {\n box.inner.n++;\n}\nfunction run(items:{n:number}) {\n change({inner:items});\n}", [[5, "ImplicitOutput"]]],
+  ];
+  for (const [name, source, expected] of cases) {
+    assert.deepEqual(ownerRecords(name, source), expected, name);
+  }
+});
+
+test("helpers preserve selected parameter cells", () => {
+  const select = "function change(box:{a:number[],b:number[]}) { const selected=box.b; selected.push(1); }\n";
+  assert.deepEqual(ownerRecords("selected-shared.ts", select + "function run(items:number[]) { change({a:[],b:items}); }"), [[2, "ImplicitOutput"]]);
+  assert.deepEqual(ownerRecords("selected-private.ts", select + "function run(items:number[]) { change({a:items,b:[]}); }"), []);
+  const returned = "function select(box:{a:number[],b:number[]}) { return box.b; }\n";
+  assert.deepEqual(ownerRecords("returned-shared.ts", returned + "function run(items:number[]) { select({a:[],b:items}).push(1); }"), [[2, "ImplicitOutput"]]);
+  assert.deepEqual(ownerRecords("returned-private.ts", returned + "function run(items:number[]) { select({a:items,b:[]}).push(1); }"), []);
 });

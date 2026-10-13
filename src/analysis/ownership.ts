@@ -1,25 +1,10 @@
+import * as storage from "./storage";
+import { type StorageFact } from "./storage";
 import ts from "typescript";
 import { unwrapExpression } from "../ast/expressions";
 import type { Binding, ScopeModel } from "../ast/scopes";
 import * as assignments from "./assignments";
 import { ownerParameters, type EffectOwner } from "./owners";
-
-/**
- * Where storage can come from.
- * Private storage is created by the function. External storage outlives it, as a module or captured binding does.
- * Receiver storage belongs to this. A parameter origin names the argument that supplies the storage.
- * Unknown storage has an origin this analysis does not trace.
- */
-export type StorageOrigin = "private" | "unknown" | "external" | "receiver" | `private:${number}` | `private:${number}:${string}` | `param:${number}` | `external:${number}`;
-
-/** The origins of a value's own storage, its direct references, and the storage reachable at the query site. */
-export type StorageFact = {
-  readonly outer: readonly StorageOrigin[];
-  readonly reachable: readonly StorageOrigin[];
-  readonly held?: readonly StorageOrigin[];
-};
-
-export type StoragePath = "outer" | "reachable";
 
 /** Gives the storage a call returns, or undefined when the call is not resolved. */
 export type CallStorageResolver = (
@@ -29,7 +14,7 @@ export type CallStorageResolver = (
   seen: ReadonlySet<Binding>,
 ) => StorageFact | undefined;
 
-export type StorageInsertion = {
+export type StorageInsertion = ({ readonly kind: "cell" } | { readonly kind: "binding"; readonly binding: Binding }) & {
   readonly node: ts.Node;
   readonly origin: ts.Node;
   readonly target: StorageFact;
@@ -72,15 +57,9 @@ const PRIMITIVE_OR_FRESH_KINDS = new Set<number>([
 
 const PRIMITIVE_GLOBALS = new Set(["undefined", "NaN", "Infinity"]);
 
-const SCALAR_TYPE_KINDS = new Set<number>([
-  ts.SyntaxKind.NumberKeyword, ts.SyntaxKind.StringKeyword, ts.SyntaxKind.BooleanKeyword,
-  ts.SyntaxKind.BigIntKeyword, ts.SyntaxKind.SymbolKeyword, ts.SyntaxKind.UndefinedKeyword,
-  ts.SyntaxKind.VoidKeyword, ts.SyntaxKind.NeverKeyword,
-]);
-
 const HANDLERS = new Map<number, Handler>([
-  [ts.SyntaxKind.ArrayLiteralExpression, arrayLiteralFact],
-  [ts.SyntaxKind.ObjectLiteralExpression, objectLiteralFact],
+  [ts.SyntaxKind.ArrayLiteralExpression, (value, context) => storage.arrayLiteralFact(value, (part) => expressionFact(part, context))],
+  [ts.SyntaxKind.ObjectLiteralExpression, (value, context) => storage.objectLiteralFact(value, (part) => expressionFact(part, context))],
   [ts.SyntaxKind.ThisKeyword, thisFact],
   [ts.SyntaxKind.PropertyAccessExpression, memberFact],
   [ts.SyntaxKind.ElementAccessExpression, memberFact],
@@ -104,12 +83,36 @@ export function storageFactAt(
   }
   const context = { model, owner, seen: new Set(seen).add(binding), resolver };
   let fact = initialFact(model, binding, owner);
-  for (const assignment of assignments.assignmentsBeforeSite(binding, owner, site)) {
-    const assigned = assignment.value ? expressionFact(assignment.value, { ...context, site: assignment.node }) : UNKNOWN_FACT;
-    const next = assignment.element ? elementFact(assigned) : assigned;
-    fact = assignment.join ? joinFacts(fact, next) : next;
+  const alias = ambientAlias(binding, owner);
+  if (alias) {
+    fact = expressionFact(alias, { ...context, site });
+  }
+  const events = [
+    ...assignments.assignmentsBeforeSite(binding, owner, site).map((assignment) => ({
+      node: assignment.node, replace: !assignment.join,
+      value: assignment.value ? expressionFact(assignment.value, { ...context, site: assignment.node }) : UNKNOWN_FACT,
+      element: assignment.element,
+    })),
+    ...(resolver?.insertions(owner, site) ?? []).filter((insertion) => insertion.kind === "binding" && insertion.binding === binding)
+      .map((insertion) => ({ node: insertion.node, replace: insertion.replace, value: insertion.value, element: false })),
+  ].sort((left, right) => left.node.end - right.node.end);
+  for (const event of events) {
+    const next = event.element ? storage.elementFact(event.value) : event.value;
+    fact = event.replace ? next : storage.joinFacts(fact, next);
   }
   return insertedFact(fact, { ...context, site });
+}
+
+function ambientAlias(binding: Binding, owner: EffectOwner): ts.Expression | undefined {
+  if (assignments.inside(binding.scope.node, owner)) {
+    return undefined;
+  }
+  const declaration = binding.declarations.find((item) => ts.isVariableDeclaration(item.node))?.node;
+  if (!declaration || !ts.isVariableDeclaration(declaration) || !declaration.initializer) {
+    return undefined;
+  }
+  const value = unwrapExpression(declaration.initializer);
+  return ts.isIdentifier(value) || ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value) ? value : undefined;
 }
 
 /** Gives the storage the expression evaluates to at the site in the owner. */
@@ -123,67 +126,8 @@ export function expressionStorageFact(
   return expressionFact(expression, { model, owner, site, seen: new Set(), resolver });
 }
 
-export function freshStorageFact(value: ts.Expression, reachable: readonly StorageOrigin[] = ["private"]): StorageFact {
-  return { outer: [`private:${value.getStart()}`], reachable: joinOrigins(reachable) };
-}
-
-export function invokedStorageFact(fact: StorageFact, call: ts.CallExpression): StorageFact {
-  const rebase = (origins: readonly StorageOrigin[]) => joinOrigins(origins.map((origin) => invocationOrigin(origin, call.getStart())));
-  return { outer: rebase(fact.outer), reachable: rebase(fact.reachable), held: rebase(fact.held ?? fact.reachable) };
-}
-
-function invocationOrigin(origin: StorageOrigin, site: number): StorageOrigin {
-  if (!origin.startsWith("private:")) {
-    return origin;
-  }
-  const [, allocation, context = ""] = origin.split(":");
-  const calls = new Set(context.split(",").filter((value) => value.length > 0));
-  calls.add(String(site));
-  return `private:${Number(allocation)}:${[...calls].sort().join(",")}`;
-}
-
-/** Gives the storage of an element, member, or iterated item of a value with the fact. */
-export function elementFact(fact: StorageFact): StorageFact {
-  return { outer: fact.reachable, reachable: fact.reachable };
-}
-
-export function originsForPath(fact: StorageFact, path: StoragePath): readonly StorageOrigin[] {
-  return path === "outer" ? fact.outer : fact.reachable;
-}
-
-export function parameterOriginIndexes(origins: readonly StorageOrigin[]): number[] {
-  return origins
-    .filter((origin): origin is `param:${number}` => origin.startsWith("param:"))
-    .map((origin) => Number(origin.slice("param:".length)));
-}
-
-export function hasExternalOrigin(origins: readonly StorageOrigin[]): boolean {
-  return origins.some((origin) => origin === "external" || origin.startsWith("external:"));
-}
-
-export function externalBindingOrigin(binding: Binding): StorageOrigin {
+export function externalBindingOrigin(binding: Binding): `external:${number}` {
   return `external:${binding.declarations[0].identifier.getStart()}`;
-}
-
-export function hasUnknownOrigin(origins: readonly StorageOrigin[]): boolean {
-  return origins.includes("unknown");
-}
-
-export function hasReceiverOrigin(origins: readonly StorageOrigin[]): boolean {
-  return origins.includes("receiver");
-}
-
-export function hasCallerOrigin(origins: readonly StorageOrigin[]): boolean {
-  return origins.some((origin) => origin !== "private" && !origin.startsWith("private:") && origin !== "unknown");
-}
-
-export function joinStorageFacts(facts: readonly StorageFact[]): StorageFact {
-  const [first, ...rest] = facts;
-  return first ? rest.reduce(joinFacts, first) : PRIVATE_FACT;
-}
-
-export function joinStorageOrigins(origins: readonly StorageOrigin[]): readonly StorageOrigin[] {
-  return joinOrigins(origins);
 }
 
 function initialFact(model: ScopeModel, binding: Binding, owner: EffectOwner): StorageFact {
@@ -191,64 +135,14 @@ function initialFact(model: ScopeModel, binding: Binding, owner: EffectOwner): S
     binding.declarations.some((item) => item.kind === "parameter" && item.node === parameter),
   );
   if (index >= 0) {
-    return typedOriginFact(model, `param:${index}`, ownerParameters(owner)[index].type);
+    return storage.typedOriginFact(model, `param:${index}`, ownerParameters(owner)[index].type);
   }
   if (assignments.inside(binding.scope.node, owner)) {
     return PRIVATE_FACT;
   }
   const declaration = binding.declarations.find((item) => ts.isVariableDeclaration(item.node))?.node;
   const type = declaration && ts.isVariableDeclaration(declaration) ? declaration.type : undefined;
-  return typedOriginFact(model, externalBindingOrigin(binding), type);
-}
-
-function typedOriginFact(model: ScopeModel, origin: StorageOrigin, type: ts.TypeNode | undefined): StorageFact {
-  if (scalarType(type)) {
-    return PRIVATE_FACT;
-  }
-  return { outer: [origin], reachable: scalarElements(model, type) ? ["private"] : [origin] };
-}
-
-function scalarType(type: ts.TypeNode | undefined): boolean {
-  if (!type) {
-    return false;
-  }
-  if (ts.isParenthesizedTypeNode(type)) {
-    return scalarType(type.type);
-  }
-  if (ts.isUnionTypeNode(type)) {
-    return type.types.every(scalarType);
-  }
-  return SCALAR_TYPE_KINDS.has(type.kind) || ts.isLiteralTypeNode(type);
-}
-
-function scalarElements(model: ScopeModel, type: ts.TypeNode | undefined, seen: ReadonlySet<ts.TypeNode> = new Set()): boolean {
-  if (!type || seen.has(type)) {
-    return false;
-  }
-  if (ts.isArrayTypeNode(type)) {
-    return scalarType(type.elementType);
-  }
-  if (ts.isTupleTypeNode(type)) {
-    return type.elements.every((element) => scalarType(ts.isNamedTupleMember(element) ? element.type : element));
-  }
-  if (ts.isTypeOperatorNode(type) || ts.isParenthesizedTypeNode(type)) {
-    return scalarElements(model, type.type, new Set(seen).add(type));
-  }
-  if (ts.isUnionTypeNode(type)) {
-    return type.types.every((part) => scalarElements(model, part, new Set(seen).add(type)));
-  }
-  return scalarArrayReference(model, type, new Set(seen).add(type));
-}
-
-function scalarArrayReference(model: ScopeModel, type: ts.TypeNode, seen: ReadonlySet<ts.TypeNode>): boolean {
-  if (!ts.isTypeReferenceNode(type) || !ts.isIdentifier(type.typeName) || model.resolve(type.typeName)) {
-    return false;
-  }
-  const local = model.resolveType(type.typeName);
-  if (local) {
-    return local.kind === "alias" && scalarElements(model, local.type, seen);
-  }
-  return (type.typeName.text === "Array" || type.typeName.text === "ReadonlyArray") && scalarType(type.typeArguments?.[0]);
+  return storage.typedOriginFact(model, externalBindingOrigin(binding), type);
 }
 
 function expressionFact(expression: ts.Expression, context: FactContext): StorageFact {
@@ -273,13 +167,16 @@ function thisFact(value: ts.Expression, context: FactContext): StorageFact {
 }
 
 function memberFact(value: ts.Expression, context: FactContext): StorageFact {
-  return ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)
-    ? elementFact(expressionFact(value.expression, context)) : UNKNOWN_FACT;
+  if (!ts.isPropertyAccessExpression(value) && !ts.isElementAccessExpression(value)) {
+    return UNKNOWN_FACT;
+  }
+  const key = ts.isPropertyAccessExpression(value) ? value.name.text : storage.literalKey(value.argumentExpression);
+  return storage.memberStorageFact(expressionFact(value.expression, context), key === undefined ? undefined : `property:${key}`);
 }
 
 function conditionalFact(value: ts.Expression, context: FactContext): StorageFact {
   return ts.isConditionalExpression(value)
-    ? joinFacts(expressionFact(value.whenTrue, context), expressionFact(value.whenFalse, context)) : UNKNOWN_FACT;
+    ? storage.joinFacts(expressionFact(value.whenTrue, context), expressionFact(value.whenFalse, context)) : UNKNOWN_FACT;
 }
 
 function binaryFact(value: ts.Expression, context: FactContext): StorageFact {
@@ -291,7 +188,7 @@ function binaryFact(value: ts.Expression, context: FactContext): StorageFact {
     return expressionFact(value.right, context);
   }
   if (assignments.isShortCircuit(operator)) {
-    return joinFacts(expressionFact(value.left, context), expressionFact(value.right, context));
+    return storage.joinFacts(expressionFact(value.left, context), expressionFact(value.right, context));
   }
   return PRIVATE_FACT;
 }
@@ -300,76 +197,16 @@ function callFact(value: ts.Expression, context: FactContext): StorageFact {
   return context.resolver?.call(value, context.owner, context.site, context.seen) ?? UNKNOWN_FACT;
 }
 
-function arrayLiteralFact(value: ts.Expression, context: FactContext): StorageFact {
-  return ts.isArrayLiteralExpression(value) ? freshHolding(value, value.elements, context) : UNKNOWN_FACT;
-}
-
-function objectLiteralFact(value: ts.Expression, context: FactContext): StorageFact {
-  if (!ts.isObjectLiteralExpression(value)) {
-    return UNKNOWN_FACT;
-  }
-  const parts = value.properties.flatMap((property) => {
-    if (ts.isSpreadAssignment(property)) {
-      return [property.expression];
-    }
-    if (ts.isShorthandPropertyAssignment(property)) {
-      return [property.name];
-    }
-    return ts.isPropertyAssignment(property) ? [property.initializer] : [];
-  });
-  return freshHolding(value, parts, context);
-}
-
 function newFact(value: ts.Expression, context: FactContext): StorageFact {
-  if (!ts.isNewExpression(value)) {
+  if (!ts.isNewExpression(value) || !knownConstructor(context.model, unwrapExpression(value.expression))) {
     return UNKNOWN_FACT;
   }
-  return knownConstructor(context.model, unwrapExpression(value.expression))
-    ? freshHolding(value, value.arguments ?? [], context)
-    : UNKNOWN_FACT;
-}
-
-function freshHolding(value: ts.Expression, parts: readonly ts.Expression[], context: FactContext): StorageFact {
-  const shared = parts.flatMap((part) => {
-    const fact = expressionFact(ts.isSpreadElement(part) ? part.expression : part, context);
-    return [...fact.outer, ...(fact.held ?? fact.reachable)];
-  });
-  return freshStorageFact(value, shared);
+  return storage.constructorStorageFact(value, (part) => expressionFact(part, context));
 }
 
 function insertedFact(fact: StorageFact, context: FactContext): StorageFact {
-  const insertions = context.resolver?.insertions(context.owner, context.site) ?? [];
-  const held = heldStorageOrigins(insertions);
-  const direct = fact.held ?? fact.reachable;
-  const reachable = new Set(direct);
-  const pending = [...fact.outer, ...direct];
-  for (let index = 0; index < pending.length; index += 1) {
-    for (const origin of held.get(pending[index]) ?? []) {
-      if (!reachable.has(origin)) {
-        reachable.add(origin);
-        pending.push(origin);
-      }
-    }
-  }
-  return { outer: fact.outer, reachable: joinOrigins([...reachable]), held: direct };
-}
-
-function heldStorageOrigins(insertions: readonly StorageInsertion[]): ReadonlyMap<StorageOrigin, readonly StorageOrigin[]> {
-  const held = new Map<StorageOrigin, Map<string, readonly StorageOrigin[]>>();
-  for (const insertion of insertions) {
-    for (const origin of insertion.target.outer) {
-      const slots = held.get(origin) ?? new Map<string, readonly StorageOrigin[]>();
-      held.set(origin, slots);
-      updateStorageSlot(slots, insertion);
-    }
-  }
-  return new Map([...held].map(([origin, slots]) => [origin, [...slots.values()].flat()]));
-}
-
-function updateStorageSlot(slots: Map<string, readonly StorageOrigin[]>, insertion: StorageInsertion): void {
-  const slot = insertion.slot ?? `@${insertion.node.getStart()}`;
-  const previous = insertion.replace && insertion.target.outer.length === 1 ? [] : slots.get(slot) ?? [];
-  slots.set(slot, [...previous, ...insertion.value.outer, ...(insertion.value.held ?? insertion.value.reachable)]);
+  const insertions = (context.resolver?.insertions(context.owner, context.site) ?? []).filter((insertion) => insertion.kind === "cell");
+  return storage.withInsertions(fact, insertions);
 }
 
 function knownConstructor(model: ScopeModel, callee: ts.Expression): boolean {
@@ -403,17 +240,4 @@ function returnsFromConstructor(node: ts.Node): boolean {
     ts.forEachChild(constructor.body, visit);
   }
   return found;
-}
-
-function joinFacts(left: StorageFact, right: StorageFact): StorageFact {
-  return {
-    outer: joinOrigins([...left.outer, ...right.outer]),
-    reachable: joinOrigins([...left.reachable, ...right.reachable]),
-    held: joinOrigins([...(left.held ?? left.reachable), ...(right.held ?? right.reachable)]),
-  };
-}
-
-function joinOrigins(origins: readonly StorageOrigin[]): readonly StorageOrigin[] {
-  const unique = [...new Set(origins)];
-  return unique.length === 0 ? ["private"] : unique.sort();
 }

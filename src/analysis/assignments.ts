@@ -1,7 +1,8 @@
 import ts from "typescript";
 import { isFunctionLike } from "../ast/functions";
-import { outerExpression } from "../ast/expressions";
+import { outerExpression, unwrapExpression } from "../ast/expressions";
 import type { Binding } from "../ast/scopes";
+import { isReachable, reachableChildren } from "./control-flow";
 import type { EffectOwner } from "./owners";
 
 /**
@@ -42,7 +43,10 @@ export function assignmentsBeforeSite(binding: Binding, owner: EffectOwner, site
 }
 
 function reaching(assignment: Assignment, owner: EffectOwner, site: ts.Node): Assignment[] {
-  if (deferred(assignment.node, owner) || repeated(assignment, owner, site)) {
+  if (deferred(assignment.node, owner) || !isReachable(assignment.node, owner)) {
+    return [];
+  }
+  if (repeated(assignment, owner, site)) {
     return [{ ...assignment, join: true }];
   }
   if (assignment.node.end > site.getStart()) {
@@ -146,7 +150,7 @@ export function inside(node: ts.Node, ancestor: ts.Node): boolean {
 /** Tells if the node runs on every path through the owner, with no branch, loop, handler, or nested function around it. */
 export function unconditional(node: ts.Node, owner: EffectOwner): boolean {
   for (let current: ts.Node | undefined = node.parent; current && current !== owner; current = current.parent) {
-    if (isBranch(current)) {
+    if (isBranch(current) && !knownBranch(current)) {
       return false;
     }
   }
@@ -157,4 +161,13 @@ function isBranch(node: ts.Node): boolean {
   return ts.isIfStatement(node) || ts.isIterationStatement(node, false) || ts.isConditionalExpression(node) ||
     ts.isSwitchStatement(node) || ts.isTryStatement(node) || isFunctionLike(node) ||
     (ts.isBinaryExpression(node) && isShortCircuit(node.operatorToken.kind));
+}
+
+function knownBranch(node: ts.Node): boolean {
+  const children = reachableChildren(node);
+  if (!children || children.length === 0) {
+    return false;
+  }
+  const condition = ts.isIfStatement(node) ? unwrapExpression(node.expression) : children[0];
+  return condition.kind === ts.SyntaxKind.TrueKeyword || condition.kind === ts.SyntaxKind.FalseKeyword;
 }
