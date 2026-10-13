@@ -27,8 +27,9 @@ export function protocolExpressions(node: ts.Node, model: ScopeModel): readonly 
 }
 
 function constructorProtocols(node: ts.Node, model: ScopeModel): readonly { expression: ts.Expression; protocol: Protocol }[] {
-  if (ts.isCallExpression(node) && globalName(node.expression, model) === "Array.from" && node.arguments[0]) {
-    return [{ expression: node.arguments[0], protocol: "iterate" }];
+  if (ts.isCallExpression(node)) {
+    const expression = library.iteratedArgument(node, model);
+    return expression ? [{ expression, protocol: "iterate" }] : [];
   }
   if (ts.isNewExpression(node) && ["Map", "Set", "WeakMap", "WeakSet"].includes(globalName(node.expression, model) ?? "") && node.arguments?.[0]) {
     return [{ expression: node.arguments[0], protocol: "iterate" }];

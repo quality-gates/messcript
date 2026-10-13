@@ -5,9 +5,9 @@ import { isFunctionLike, isFunctionLikeWithBody } from "../ast/functions";
 import { methodName, outerExpression, unwrapExpression } from "../ast/expressions";
 import { analyzeScopes } from "../ast/scopes";
 import type { Binding, ScopeModel, Write } from "../ast/scopes";
-import { bindingAssignments, inside } from "./assignments";
+import { bindingAssignments, canReachSite, inside, unconditional } from "./assignments";
 import { callableTargets as resolveTargets, classTargets, memberTargets, type Dispatch, type Targets } from "./dispatch";
-import { ambientFlow, isPureConstructor, libraryCall, libraryCallback, type LibraryCall } from "./library";
+import { ambientFlow, isPureConstructor, iteratedArgument, libraryCall, libraryCallback, type LibraryCall, type LibraryStorage } from "./library";
 import { protocolExpressions, supportsProtocol } from "./protocols";
 import {
   baseClassExpression, collectOwners, enclosingClass, explicitConstructor, instanceInitializers, isConstruction,
@@ -15,19 +15,23 @@ import {
 } from "./owners";
 import {
   expressionStorageFact,
+  elementFact,
   externalBindingOrigin,
   hasExternalOrigin,
   hasReceiverOrigin,
   hasUnknownOrigin,
+  freshStorageFact,
+  invokedStorageFact,
   joinStorageFacts,
   joinStorageOrigins,
   originsForPath,
   parameterOriginIndexes,
   storageFactAt,
-  type CallStorageResolver,
   type StorageFact,
+  type StorageInsertion,
   type StorageOrigin,
   type StoragePath,
+  type StorageResolver,
 } from "./ownership";
 
 export type ImplicitFlowKind = "input" | "output" | "unknown";
@@ -66,9 +70,16 @@ type CallableSummary = {
   readonly flows: readonly ImplicitFlow[];
   readonly parameterWrites: readonly ParameterWrite[];
   readonly parameterCalls: readonly ParameterCall[];
+  readonly storageInsertions: readonly StorageInsertion[];
   readonly returnedAliases: readonly StorageFact[];
   readonly returnedCallables: readonly EffectOwner[];
   readonly opaqueReturn: boolean;
+};
+
+type StorageInvocation = {
+  readonly call: ts.CallExpression;
+  readonly callable: ts.Expression;
+  readonly argumentFact: (index: number) => StorageFact;
 };
 
 type CallEffects = {
@@ -216,8 +227,6 @@ function thisFlow(node: ts.Node, write: Write | undefined): [ImplicitFlowKind, s
   return isThisMethodCall(member) ? undefined : ["input", `reads ${subject}`];
 }
 
-// Receiver state is reported as an input or output under include-this. Otherwise it is unknown,
-// because excluding receiver state from the rules is not evidence that the state is pure.
 function directFlowsFor(state: AnalysisState, node: ts.Node, owner: EffectOwner, includeThis: boolean): ImplicitFlow[] {
   const write = state.model.writeOf(node);
   if (ts.isIdentifier(node) && state.model.isReference(node)) {
@@ -277,9 +286,14 @@ function memberDepth(node: ts.Expression): number {
 function returnStorageResolver(
   state: AnalysisState,
   summaries: ReadonlyMap<EffectOwner, CallableSummary>,
-): CallStorageResolver {
-  return (call, owner, site, seen) =>
-    ts.isCallExpression(call) ? joinedReturnFactForCall(state, summaries, call, owner, seen) : undefined;
+): StorageResolver {
+  return {
+    call: (call, owner, site, seen) =>
+      ts.isCallExpression(call) ? joinedReturnFactForCall(state, summaries, call, owner, seen) : undefined,
+    insertions: (owner, site) => (summaries.get(owner)?.storageInsertions ?? [])
+      .filter((insertion) => canReachSite(insertion.node, owner, site))
+      .map((insertion) => ({ ...insertion, replace: insertion.replace && insertion.node.end <= site.getStart() && unconditional(insertion.node, owner) })),
+  };
 }
 
 function storageFactForExpression(
@@ -358,8 +372,6 @@ function mutationEffectsFromFact(
   return { flows: originFlows(state, origins, node, owner, description, receiverReported), writes, parameterCalls: [] };
 }
 
-// External storage makes a write an output. Receiver storage follows the include-this policy.
-// Unknown storage retains uncertainty even when a known origin is also present.
 function originFlows(
   state: AnalysisState,
   origins: readonly StorageOrigin[],
@@ -499,8 +511,8 @@ function libraryReturnFact(
   receiver: StorageFact,
 ): StorageFact {
   switch (known.result) {
-    case "fresh": return privateFact;
-    case "shallow": return { outer: ["private"], reachable: receiver.reachable };
+    case "fresh": return freshStorageFact(call);
+    case "shallow": return freshStorageFact(call, receiver.reachable);
     case "element": return { outer: receiver.reachable, reachable: receiver.reachable };
     case "receiver": return receiver;
     case "holding": return holdingReturnFact(state, summaries, call, owner, receiver);
@@ -524,8 +536,8 @@ function holdingReturnFact(
   receiver: StorageFact,
 ): StorageFact {
   const facts = call.arguments.map((argument) => storageFactForExpression(state, summaries, argument, owner, call));
-  const held = [receiver, ...facts].flatMap((fact) => [...fact.outer, ...fact.reachable]);
-  return { outer: ["private"], reachable: joinStorageOrigins(held) };
+  const held = [receiver, ...facts].flatMap((fact) => [...fact.outer, ...(fact.held ?? fact.reachable)]);
+  return freshStorageFact(call, held);
 }
 
 function mappedReturnFact(
@@ -542,14 +554,14 @@ function mappedReturnFact(
   }
   const actualFacts = libraryCallbackFacts(state, summaries, call, owner, known);
   const returns = targets.flatMap((target) => (summaries.get(target)?.returnedAliases ?? []).map((fact) =>
-    instantiateStorageFact(fact, (index) => actualFacts[index] ?? unknownFact),
+    instantiateStorageFact(invokedStorageFact(fact, call), (index) => actualFacts[index] ?? unknownFact),
   ));
   const callee = unwrapExpression(call.expression);
   const name = methodName(callee);
   if (name === "reduce" || name === "reduceRight") {
     return joinStorageFacts([call.arguments[1] ? storageFactForExpression(state, summaries, call.arguments[1], owner, call) : unknownFact, ...returns]);
   }
-  return { outer: ["private"], reachable: joinStorageOrigins(returns.flatMap((fact) => [...fact.outer, ...fact.reachable])) };
+  return freshStorageFact(call, returns.flatMap((fact) => [...fact.outer, ...(fact.held ?? fact.reachable)]));
 }
 
 function instantiateReturnFact(
@@ -566,7 +578,7 @@ function instantiateReturnFact(
       ? expressionStorageFact(state.model, actual, owner, call, returnStorageResolver(state, summaries))
       : { outer: ["unknown"], reachable: ["unknown"] } satisfies StorageFact;
   };
-  return instantiateStorageFact(fact, actualFact);
+  return instantiateStorageFact(invokedStorageFact(fact, call), actualFact);
 }
 
 function instantiateStorageFact(
@@ -576,6 +588,10 @@ function instantiateStorageFact(
   return {
     outer: instantiateOrigins(fact.outer, "outer", actualFact),
     reachable: instantiateOrigins(fact.reachable, "reachable", actualFact),
+    held: instantiateOrigins(fact.held ?? fact.reachable, "reachable", (index) => {
+      const actual = actualFact(index);
+      return { ...actual, reachable: actual.held ?? actual.reachable };
+    }),
   };
 }
 
@@ -611,7 +627,7 @@ function returnedStorageFactsForExpression(
 function uniqueFacts(facts: readonly StorageFact[]): readonly StorageFact[] {
   const seen = new Set<string>();
   return facts.filter((fact) => {
-    const key = JSON.stringify({ outer: [...fact.outer].sort(), reachable: [...fact.reachable].sort() });
+    const key = JSON.stringify({ outer: [...fact.outer].sort(), reachable: [...fact.reachable].sort(), held: [...(fact.held ?? fact.reachable)].sort() });
     if (seen.has(key)) {
       return false;
     }
@@ -800,13 +816,24 @@ function libraryCallbackFacts(
   owner: EffectOwner,
   known: Exclude<LibraryCall, { kind: "effect" }>,
 ): StorageFact[] {
+  const global = globalName(call.expression, state.model);
+  if (global === "JSON.parse") {
+    return [privateFact, privateFact];
+  }
+  if (global === "JSON.stringify") {
+    return [privateFact, call.arguments[0] ? storageFactForExpression(state, summaries, call.arguments[0], owner, call) : privateFact];
+  }
   const target = libraryTarget(call, known);
   const receiver = target ? storageFactForExpression(state, summaries, target, owner, call) : privateFact;
-  const element = { outer: receiver.reachable, reachable: receiver.reachable };
   const name = methodName(unwrapExpression(call.expression));
+  const initial = call.arguments[1] ? storageFactForExpression(state, summaries, call.arguments[1], owner, call) : undefined;
+  return elementCallbackFacts(name, receiver, initial);
+}
+
+function elementCallbackFacts(name: string | undefined, receiver: StorageFact, initial: StorageFact | undefined): StorageFact[] {
+  const element = elementFact(receiver);
   if (name === "reduce" || name === "reduceRight") {
-    const initial = call.arguments[1] ? storageFactForExpression(state, summaries, call.arguments[1], owner, call) : element;
-    return [joinStorageFacts([initial, element]), element, privateFact, receiver];
+    return [joinStorageFacts([initial ?? element, element]), element, privateFact, receiver];
   }
   if (name === "sort" || name === "toSorted") {
     return [element, element];
@@ -1243,7 +1270,7 @@ function isIterationParent(parent: ts.Node, expression: ts.Expression): boolean 
 
 function explicitForcingSite(model: ScopeModel, expression: ts.Expression): ts.Node | undefined {
   const parent = expression.parent;
-  if (ts.isCallExpression(parent) && globalName(parent.expression, model) === "Array.from" && parent.arguments[0] === expression) {
+  if (ts.isCallExpression(parent) && iteratedArgument(parent, model) === expression) {
     return parent.expression;
   }
   if ((ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) &&
@@ -1275,6 +1302,7 @@ type SummaryDraft = {
   flows: ImplicitFlow[];
   parameterWrites: ParameterWrite[];
   parameterCalls: ParameterCall[];
+  storageInsertions: StorageInsertion[];
   returnedAliases: StorageFact[];
   returnedCallables: EffectOwner[];
   opaqueReturn: boolean;
@@ -1287,7 +1315,7 @@ function summarizeCallable(
   includeThis: boolean,
 ): CallableSummary {
   const draft: SummaryDraft = {
-    flows: [], parameterWrites: [], parameterCalls: [], returnedAliases: [], returnedCallables: [], opaqueReturn: false,
+    flows: [], parameterWrites: [], parameterCalls: [], storageInsertions: [], returnedAliases: [], returnedCallables: [], opaqueReturn: false,
   };
   function visit(node: ts.Node): void {
     const deferred = deferredChildren(node, owner);
@@ -1306,6 +1334,7 @@ function summarizeCallable(
     } else {
       ts.forEachChild(node, visit);
     }
+    draft.storageInsertions.push(...storageInsertionsForNode(state, summaries, node, owner));
   }
   executionRoots(owner).forEach(visit);
   appendEffects(draft, inheritedConstructorEffects(state, summaries, owner));
@@ -1314,10 +1343,180 @@ function summarizeCallable(
     flows: uniqueFlows(draft.flows),
     parameterWrites: uniqueWrites(draft.parameterWrites),
     parameterCalls: uniqueParameterCalls(draft.parameterCalls),
+    storageInsertions: uniqueInsertions(draft.storageInsertions),
     returnedAliases: uniqueFacts(draft.returnedAliases),
     returnedCallables: uniqueCallables(draft.returnedCallables),
     opaqueReturn: draft.opaqueReturn,
   };
+}
+
+function storageInsertionsForNode(
+  state: AnalysisState,
+  summaries: ReadonlyMap<EffectOwner, CallableSummary>,
+  node: ts.Node,
+  owner: EffectOwner,
+): StorageInsertion[] {
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+    const target = unwrapExpression(node.left);
+    if (ts.isPropertyAccessExpression(target) || ts.isElementAccessExpression(target)) {
+      return [{ node, origin: node, target: storageFactForExpression(state, summaries, target.expression, owner, node),
+        value: storageFactForExpression(state, summaries, node.right, owner, node),
+        slot: storageSlot(target), replace: unconditional(node, owner) }];
+    }
+  }
+  return ts.isCallExpression(node) ? callStorageInsertions(state, summaries, node, owner) : [];
+}
+
+function callStorageInsertions(
+  state: AnalysisState,
+  summaries: ReadonlyMap<EffectOwner, CallableSummary>,
+  call: ts.CallExpression,
+  owner: EffectOwner,
+): StorageInsertion[] {
+  const resolved = resolveTargets(dispatchFor(state, summaries), call.expression);
+  if (resolved.targets.length > 0) {
+    const invocation: StorageInvocation = { call, callable: call.expression,
+      argumentFact: (index) => call.arguments[index] ? storageFactForExpression(state, summaries, call.arguments[index], owner, call) : unknownFact };
+    const sites = resolved.targets.every(isGenerator) ? generatorSites(state, call, owner) : [call];
+    return sites.flatMap((node) => resolved.targets.flatMap((target) =>
+      (summaries.get(target)?.storageInsertions ?? []).map((insertion) => ({
+        node, origin: insertion.origin, target: invocationStorageFact(state, summaries, insertion.target, invocation, owner),
+        value: invocationStorageFact(state, summaries, insertion.value, invocation, owner),
+        slot: insertion.slot, replace: insertion.replace && resolved.targets.length === 1 && resolved.complete && unconditional(node, owner),
+      })),
+    ));
+  }
+  const known = libraryCall(call, state.model);
+  return known && known.kind !== "effect" ? [
+    ...libraryStorageInsertions(state, summaries, call, owner, known),
+    ...callbackStorageInsertions(state, summaries, call, owner, known),
+  ] : [];
+}
+
+function storageSlot(target: ts.PropertyAccessExpression | ts.ElementAccessExpression): string | undefined {
+  if (ts.isPropertyAccessExpression(target)) {
+    return `property:${target.name.text}`;
+  }
+  const key = unwrapExpression(target.argumentExpression);
+  return ts.isStringLiteralLike(key) || ts.isNumericLiteral(key) ? `property:${key.text}` : undefined;
+}
+
+function callbackStorageInsertions(
+  state: AnalysisState,
+  summaries: ReadonlyMap<EffectOwner, CallableSummary>,
+  call: ts.CallExpression,
+  owner: EffectOwner,
+  known: Exclude<LibraryCall, { kind: "effect" }>,
+): StorageInsertion[] {
+  return known.callbacks.flatMap((index) => {
+    const callback = call.arguments[index];
+    if (!callback) {
+      return [];
+    }
+    const facts = libraryCallbackFacts(state, summaries, call, owner, known);
+    const invocation: StorageInvocation = { call, callable: callback, argumentFact: (position) => facts[position] ?? unknownFact };
+    const resolved = resolveTargets(dispatchFor(state, summaries), callback);
+    return resolved.targets.filter((target) => !isGenerator(target)).flatMap((target) =>
+      (summaries.get(target)?.storageInsertions ?? []).map((insertion) => ({
+        node: call, origin: insertion.origin, target: invocationStorageFact(state, summaries, insertion.target, invocation, owner),
+        value: invocationStorageFact(state, summaries, insertion.value, invocation, owner),
+        slot: insertion.slot, replace: false,
+      })),
+    );
+  });
+}
+
+function libraryStorageInsertions(
+  state: AnalysisState,
+  summaries: ReadonlyMap<EffectOwner, CallableSummary>,
+  call: ts.CallExpression,
+  owner: EffectOwner,
+  known: Exclude<LibraryCall, { kind: "effect" }>,
+): StorageInsertion[] {
+  const target = libraryTarget(call, known);
+  if (!target || known.stores === "none") {
+    return [];
+  }
+  const args = known.stores === "sources" ? call.arguments.slice(1)
+    : known.stores === "splice" ? call.arguments.slice(2) : call.arguments;
+  const parts = storedArguments(call, args, known.stores);
+  return parts.map((part) => {
+    const value = storageFactForExpression(state, summaries, part.expression, owner, call);
+    return { node: call, origin: part.expression, target: storageFactForExpression(state, summaries, target, owner, call),
+      value: part.path === "reachable" ? elementFact(value) : value, slot: part.slot,
+      replace: part.slot !== undefined && unconditional(call, owner) };
+  });
+}
+
+type StoredArgument = { readonly expression: ts.Expression; readonly path: StoragePath; readonly slot?: string };
+
+function storedArguments(call: ts.CallExpression, args: readonly ts.Expression[], stores: LibraryStorage): StoredArgument[] {
+  if (stores === "entry") {
+    const key = call.arguments[0] && literalStorageKey(call.arguments[0]);
+    return call.arguments.slice(1).map((expression) => ({ expression, path: "outer", slot: key === undefined ? undefined : `entry:${key}` }));
+  }
+  return args.flatMap<StoredArgument>((expression) => stores === "sources" ? assignedProperties(expression) : [{ expression, path: "outer" }]);
+}
+
+function assignedProperties(expression: ts.Expression): StoredArgument[] {
+  const value = unwrapExpression(expression);
+  if (!ts.isObjectLiteralExpression(value)) {
+    return [{ expression, path: "reachable" }];
+  }
+  return value.properties.flatMap<StoredArgument>((property) => {
+    if (ts.isSpreadAssignment(property)) {
+      return [{ expression: property.expression, path: "reachable" }];
+    }
+    if (ts.isShorthandPropertyAssignment(property)) {
+      return [{ expression: property.name, path: "outer", slot: `property:${property.name.text}` }];
+    }
+    const key = propertyStorageKey(property.name);
+    return ts.isPropertyAssignment(property) ? [{ expression: property.initializer, path: "outer", slot: key === undefined ? undefined : `property:${key}` }] : [];
+  });
+}
+
+function propertyStorageKey(name: ts.PropertyName): string | undefined {
+  if (ts.isComputedPropertyName(name)) {
+    return literalStorageKey(name.expression);
+  }
+  return ts.isPrivateIdentifier(name) ? undefined : name.text;
+}
+
+function literalStorageKey(expression: ts.Expression): string | undefined {
+  const value = unwrapExpression(expression);
+  return ts.isStringLiteralLike(value) || ts.isNumericLiteral(value) ? value.text : undefined;
+}
+
+function invocationStorageFact(
+  state: AnalysisState,
+  summaries: ReadonlyMap<EffectOwner, CallableSummary>,
+  fact: StorageFact,
+  invocation: StorageInvocation,
+  owner: EffectOwner,
+): StorageFact {
+  const substituted = instantiateStorageFact(invokedStorageFact(fact, invocation.call), invocation.argumentFact);
+  const captures = capturesForExpression(state, summaries, invocation.callable, owner, new Set());
+  const replace = (origins: readonly StorageOrigin[], select: (capture: StorageFact) => readonly StorageOrigin[]) => joinStorageOrigins(origins.flatMap((origin) => {
+    const binding = state.bindingOrigins.get(origin);
+    const capture = binding && (captures.get(binding) ?? (inside(binding.scope.node, owner)
+      ? storageFactForBinding(state, summaries, binding, owner, invocation.call) : undefined));
+    return capture ? select(capture) : [origin];
+  }));
+  return { outer: replace(substituted.outer, (capture) => capture.outer),
+    reachable: replace(substituted.reachable, (capture) => capture.reachable),
+    held: replace(substituted.held ?? substituted.reachable, (capture) => capture.held ?? capture.reachable) };
+}
+
+function uniqueInsertions(insertions: readonly StorageInsertion[]): readonly StorageInsertion[] {
+  const seen = new Set<string>();
+  return insertions.filter((insertion) => {
+    const key = JSON.stringify([insertion.node.getStart(), insertion.origin.getStart(), insertion.target, insertion.value, insertion.slot, insertion.replace]);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 function appendEffects(draft: SummaryDraft, effects: CallEffects, defaultParameterIndex?: number): void {
@@ -1530,7 +1729,8 @@ function summaryKey(summary: CallableSummary): string {
     flows: summary.flows.map((flow) => [flow.kind, flow.description, flow.node.getStart(), flow.defaultParameterIndex]).sort(),
     writes: summary.parameterWrites.map((write) => [write.parameterIndex, write.path, write.description, write.node.getStart(), write.defaultParameterIndex]).sort(),
     calls: summary.parameterCalls.map((call) => [call.parameterIndex, call.node.getStart(), call.argumentFacts, call.defaultParameterIndex]).sort(),
-    aliases: summary.returnedAliases.map((fact) => [fact.outer, fact.reachable]).sort(),
+    insertions: summary.storageInsertions.map((insertion) => [insertion.node.getStart(), insertion.origin.getStart(), insertion.target, insertion.value, insertion.slot, insertion.replace]),
+    aliases: summary.returnedAliases.map((fact) => [fact.outer, fact.reachable, fact.held]).sort(),
     opaque: summary.opaqueReturn,
     returns: summary.returnedCallables.map((node) => node.pos).sort((left, right) => left - right),
   });
@@ -1541,7 +1741,7 @@ function analyzeImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): 
   const state = collectCallables(sourceFile, model, includeThis);
   let summaries = new Map<EffectOwner, CallableSummary>(state.callables.map((owner) => [
     owner,
-    { owner, flows: [], parameterWrites: [], parameterCalls: [], returnedAliases: [], returnedCallables: [], opaqueReturn: false },
+    { owner, flows: [], parameterWrites: [], parameterCalls: [], storageInsertions: [], returnedAliases: [], returnedCallables: [], opaqueReturn: false },
   ]));
   let converged = false;
   for (let index = 0; index < state.callables.length + 8; index += 1) {

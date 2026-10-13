@@ -12,6 +12,8 @@ import { standardMethod } from "./standard-receivers";
  */
 export type LibraryResult = "fresh" | "shallow" | "element" | "holding" | "mapped" | "receiver";
 
+export type LibraryStorage = "none" | "arguments" | "sources" | "splice" | "entry";
+
 /**
  * A standard library call this analysis models.
  * An effect call reads or writes ambient state, which the identifier that names it reports.
@@ -20,7 +22,7 @@ export type LibraryResult = "fresh" | "shallow" | "element" | "holding" | "mappe
  */
 export type LibraryCall =
   | { readonly kind: "effect" }
-  | { readonly kind: "pure" | "mutating"; readonly result: LibraryResult; readonly target: "receiver" | "argument"; readonly callbacks: readonly number[] };
+  | { readonly kind: "pure" | "mutating"; readonly result: LibraryResult; readonly target: "receiver" | "argument"; readonly callbacks: readonly number[]; readonly stores: LibraryStorage };
 
 export type AmbientFlow = readonly ["input" | "output", string];
 
@@ -39,10 +41,21 @@ const NONDETERMINISTIC_CALLS = new Set([
 ]);
 
 const FRESH_GLOBAL_CALLS = new Set([
-  "Array.isArray", "Boolean", "JSON.parse", "JSON.stringify", "Number", "Number.isFinite", "Number.isInteger",
+  "Array.isArray", "Boolean", "Number", "Number.isFinite", "Number.isInteger",
   "Number.isNaN", "Number.parseFloat", "Number.parseInt", "Object.keys", "String", "parseFloat", "parseInt",
   "Promise.resolve", "Promise.reject", "Promise.all", "Promise.allSettled", "Promise.race", "structuredClone", "Math.abs", "Math.ceil", "Math.floor", "Math.max", "Math.min", "Math.pow", "Math.round",
   "Math.sign", "Math.sqrt", "Math.trunc",
+]);
+
+const CALLBACK_GLOBAL_CALLS = new Set(["JSON.parse", "JSON.stringify"]);
+
+const ITERATING_GLOBAL_CALLS = new Set([
+  "Array.from", "Object.fromEntries", "Promise.all", "Promise.allSettled", "Promise.race",
+]);
+
+const STORING_METHODS = new Map<string, LibraryStorage>([
+  ["add", "arguments"], ["fill", "arguments"], ["push", "arguments"], ["set", "entry"],
+  ["splice", "splice"], ["unshift", "arguments"],
 ]);
 
 const HOLDING_GLOBAL_CALLS = new Map<string, readonly number[]>([
@@ -76,6 +89,8 @@ const CALLBACK_METHODS = new Set([
   "every", "filter", "find", "findIndex", "findLast", "findLastIndex", "flatMap", "forEach", "map", "reduce",
   "reduceRight", "some", "sort", "toSorted",
 ]);
+
+const OPTIONAL_CALLBACK_CALLS = new Set(["JSON.parse", "JSON.stringify", "replace", "replaceAll"]);
 
 const PURE_CONSTRUCTORS = new Set([
   "Array", "Date", "Error", "Map", "Object", "RangeError", "RegExp", "Set", "TypeError", "URL", "URLSearchParams",
@@ -118,7 +133,7 @@ export function libraryCall(call: ts.CallExpression, model: ScopeModel): Library
   if (name !== undefined) {
     const known = globalCall(name, callee);
     if (known) {
-      return known;
+      return optionalCallbacks(call, model, name, known);
     }
   }
   if (!ts.isPropertyAccessExpression(callee) && !ts.isElementAccessExpression(callee)) {
@@ -126,36 +141,62 @@ export function libraryCall(call: ts.CallExpression, model: ScopeModel): Library
   }
   const method = methodName(callee);
   const known = memberCall(method);
-  return known?.kind === "pure" && !standardMethod(model, callee.expression, method) ? undefined : known;
+  if (known?.kind === "pure" && !standardMethod(model, callee.expression, method)) {
+    return undefined;
+  }
+  return known ? optionalCallbacks(call, model, method, known) : undefined;
 }
 
+function optionalCallbacks(call: ts.CallExpression, model: ScopeModel, name: string | undefined, known: LibraryCall): LibraryCall {
+  if (known.kind === "effect" || !OPTIONAL_CALLBACK_CALLS.has(name ?? "")) {
+    return known;
+  }
+  const callbacks = known.callbacks.filter((index) => {
+    const argument = call.arguments[index];
+    return argument && !nonCallableArgument(argument, model);
+  });
+  return { ...known, callbacks };
+}
+
+function nonCallableArgument(argument: ts.Expression, model: ScopeModel): boolean {
+  const value = unwrapExpression(argument);
+  return [ts.SyntaxKind.NullKeyword, ts.SyntaxKind.VoidExpression, ts.SyntaxKind.ObjectLiteralExpression].includes(value.kind) ||
+    globalName(value, model) === "undefined" || standardMethod(model, value, "toString");
+}
 
 function globalCall(name: string, callee: ts.Expression): LibraryCall | undefined {
-  const root = name.split(".")[0];
-  if (OUTPUT_SINKS.has(root) || NONDETERMINISTIC_CALLS.has(name) || name === "Date" || OUTPUT_SINKS.has(globalObjectMember(callee) ?? "")) {
+  const roots = [name.split(".")[0], globalObjectMember(callee) ?? ""];
+  if (roots.some((root) => OUTPUT_SINKS.has(root)) || NONDETERMINISTIC_CALLS.has(name) || name === "Date") {
     return { kind: "effect" };
   }
   if (name === "Object.assign") {
-    return { kind: "mutating", result: "receiver", target: "argument", callbacks: [] };
+    return { kind: "mutating", result: "receiver", target: "argument", callbacks: [], stores: "sources" };
+  }
+  if (CALLBACK_GLOBAL_CALLS.has(name)) {
+    return { kind: "pure", result: "fresh", target: "argument", callbacks: [1], stores: "none" };
   }
   if (FRESH_GLOBAL_CALLS.has(name)) {
-    return { kind: "pure", result: "fresh", target: "receiver", callbacks: [] };
+    return { kind: "pure", result: "fresh", target: "receiver", callbacks: [], stores: "none" };
   }
   const callbacks = HOLDING_GLOBAL_CALLS.get(name);
-  return callbacks ? { kind: "pure", result: "holding", target: "argument", callbacks } : undefined;
+  return callbacks ? { kind: "pure", result: "holding", target: "argument", callbacks, stores: "none" } : undefined;
 }
 
 function memberCall(name: string | undefined): LibraryCall | undefined {
   if (name === undefined) {
     return undefined;
   }
-  const callbacks = CALLBACK_METHODS.has(name) ? [0] : [];
+  const callbacks = name === "replace" || name === "replaceAll" ? [1] : CALLBACK_METHODS.has(name) ? [0] : [];
   const mutating = MUTATING_METHODS.get(name);
   if (mutating) {
-    return { kind: "mutating", result: mutating, target: "receiver", callbacks };
+    return { kind: "mutating", result: mutating, target: "receiver", callbacks, stores: STORING_METHODS.get(name) ?? "none" };
   }
   const pure = PURE_METHODS.get(name);
-  return pure ? { kind: "pure", result: pure, target: "receiver", callbacks } : undefined;
+  return pure ? { kind: "pure", result: pure, target: "receiver", callbacks, stores: "none" } : undefined;
+}
+
+export function iteratedArgument(call: ts.CallExpression, model: ScopeModel): ts.Expression | undefined {
+  return ITERATING_GLOBAL_CALLS.has(globalName(call.expression, model) ?? "") ? call.arguments[0] : undefined;
 }
 
 function dateCallDescription(expression: ts.Expression): string | undefined {

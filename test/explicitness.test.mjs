@@ -1408,3 +1408,109 @@ async function nativeAssignment(value: Promise<number>) {
     [14, "UnknownEffect", "function assignment()"],
   ]);
 });
+
+function ownerRecords(name, source) {
+  const path = join(workspace, name);
+  writeFileSync(path, source);
+  const stdout = captureOutput();
+  const stderr = captureOutput();
+  runCliInProcess([path, "json", "explicitness", "--strict"], { stdout: stdout.stream, stderr: stderr.stream });
+  assert.equal(stderr.read(), "");
+  const report = JSON.parse(stdout.read());
+  assert.deepEqual(report.errors, []);
+  return report.findings.filter((finding) => finding.context === "function run()")
+    .map((finding) => [finding.line, finding.ruleName]);
+}
+
+test("scalar container storage honors lexical Array and ReadonlyArray bindings", () => {
+  const cases = [
+    ["shadow-array-storage.ts", "interface Array<T> {\n  [index: number]: number[];\n}\nfunction run(items: Array<number>) {\n  items[0].push(1);\n}\nexport {};\n", [[5,"ImplicitOutput"]]],
+    ["shadow-readonlyarray-storage.ts", "interface ReadonlyArray<T> {\n  [index: number]: number[];\n}\nfunction run(items: ReadonlyArray<number>) {\n  items[0].push(1);\n}\nexport {};\n", [[5,"ImplicitOutput"]]],
+    ["native-number-array-copy.ts", "function run(items: Array<number>) {\n  const copy = items.map(item => [item]);\n  copy[0].push(1);\n  return copy;\n}\nexport {};\n", []],
+    ["native-nested-array-write.ts", "function run(items: Array<number[]>) {\n  const copy = items.slice();\n  copy[0].push(1);\n}\n", [[3,"ImplicitOutput"]]]
+  ];
+  for (const [name, source, expected] of cases) {
+    const actual = ownerRecords(name, source);
+    if (expected.length === 0) assert.deepEqual(actual, [], name);
+    else for (const finding of expected) assert.ok(actual.some((item) => item[0] === finding[0] && item[1] === finding[1]), name + ": " + JSON.stringify(actual));
+  }
+});
+
+test("late container insertions preserve reached caller storage", () => {
+  const cases = [
+    ["factory-independent-holders.ts", "function make(): { items: number[] } { return { items: [] }; }\nfunction run(items: number[]) {\n  const shared = make();\n  const privateBox = make();\n  shared.items = items;\n  privateBox.items.push(1);\n}\n", []],
+    ["callback-holder-insertion.ts", "function run(items: number[]) {\n  const box: number[][] = [];\n  [0].forEach(() => box.push(items));\n  box[0].push(1);\n}\n", [[4, "ImplicitOutput"]]],
+    ["record-reference-replaced.ts", "function run(items: number[]) {\n  const box: { items: number[] } = { items: [] };\n  box.items = items;\n  box.items = [];\n  box.items.push(1);\n}\n", []],
+    ["alias-reference-replaced.ts", "function run(items: number[]) {\n  const box: { items: number[] } = { items: [] };\n  box.items = items;\n  const alias = box;\n  alias.items = [];\n  box.items.push(1);\n}\n", []],
+    ["conditional-reference-replaced.ts", "function run(items: number[], flag: boolean) {\n  const box: { items: number[] } = { items: [] };\n  box.items = items;\n  if (flag) { box.items = []; }\n  box.items.push(1);\n}\n", [[5, "ImplicitOutput"]]],
+    ["map-reference-replaced.ts", "function run(items: number[]) {\n  const box = new Map<string, number[]>();\n  box.set(\"key\", items);\n  box.set(\"key\", []);\n  box.get(\"key\")?.push(1);\n}\n", []],
+    ["assign-reference-replaced.ts", "function run(items: number[]) {\n  const box: { items: number[] } = { items: [] };\n  Object.assign(box, { items });\n  Object.assign(box, { items: [] });\n  box.items.push(1);\n}\n", []],
+    ["assign-repeated-source-order.ts", "function run(items: number[]) {\n  const box: { items: number[] } = { items: [] };\n  Object.assign(box, { items }, { items: [] }, { items });\n  box.items.push(1);\n}\n", [[4, "ImplicitOutput"]]],
+    ["uncalled-setter-holder.ts", "function run(items: number[]) {\n  const box: { items: number[] } = { items: [] };\n  const set = () => { box.items = items; };\n  box.items.push(1);\n  return set;\n}\n", []],
+    ["cold-callback-holder.ts", "function run(items: number[]) {\n  const box: number[][] = [[]];\n  [0].forEach(function* () { box.push(items); });\n  box[0].push(1);\n}\n", []],
+    ["callback-private-holder.ts", "function run() {\n  const box: number[][] = [];\n  [0].forEach(() => box.push([]));\n  box[0].push(1);\n}\n", []],
+    ["helper-reference-replaced.ts", "function replace(box: { items: number[] }) { box.items = []; }\nfunction run(items: number[]) {\n  const box: { items: number[] } = { items: [] };\n  box.items = items;\n  replace(box);\n  box.items.push(1);\n}\n", []],
+    ["array-reference-replaced.ts", "function run(items: number[]) {\n  const box: number[][] = [];\n  box[0] = items;\n  box[0] = [];\n  box[0].push(1);\n}\n", []],
+    ["holder-member-snapshot.ts", "function run(items: number[]) {\n  const box: { items: number[] } = { items: [] };\n  box.items = items;\n  const alias = box.items;\n  box.items = [];\n  alias.push(1);\n}\n", [[6, "ImplicitOutput"]]],
+    ["object-holder-late-write.ts", "function run(items: number[]) {\n  const box: { items: number[] } = { items: [] };\n  box.items = items;\n  box.items.push(1);\n}\n", [[4,"ImplicitOutput"]]],
+    ["array-holder-late-write.ts", "function run(items: number[]) {\n  const box: number[][] = [];\n  box.push(items);\n  box[0].push(1);\n}\n", [[4,"ImplicitOutput"]]],
+    ["object-assign-holder.ts", "function run(items: number[]) {\n  const box: { items: number[] } = { items: [] };\n  Object.assign(box, { items });\n  box.items.push(1);\n}\n", [[4,"ImplicitOutput"]]],
+    ["map-holder-late-write.ts", "function run(items: number[]) {\n  const box = new Map<string, number[]>();\n  box.set(\"key\", items);\n  box.get(\"key\")?.push(1);\n}\n", [[4,"ImplicitOutput"]]],
+    ["object-holder-conditional-write.ts", "function run(items: number[], flag: boolean) {\n  const box: { items: number[] } = { items: [] };\n  if (flag) { box.items = items; }\n  box.items.push(1);\n}\n", [[4,"ImplicitOutput"]]],
+    ["object-holder-late-helper.ts", "function change(items: number[]) { items.push(1); }\nfunction run(items: number[]) {\n  const box: { items: number[] } = { items: [] };\n  box.items = items;\n  change(box.items);\n}\n", [[5,"ImplicitOutput"]]],
+    ["object-holder-late-closure.ts", "function run(items: number[]) {\n  const box: { items: number[] } = { items: [] };\n  box.items = items;\n  const later = () => box.items.push(1);\n  later();\n}\n", [[5,"ImplicitOutput"]]],
+    ["object-holder-late-private.ts", "function run() {\n  const box: { items: number[] } = { items: [] };\n  box.items = [];\n  box.items.push(1);\n}\n", []],
+    ["array-holder-late-private.ts", "function run() {\n  const box: number[][] = [];\n  box.push([]);\n  box[0].push(1);\n}\n", []],
+    ["private-insert-no-force.ts", "function run(items: number[]) {\n  const box: { items: number[] } = { items: [] };\n  box.items = items;\n  return box;\n}\n", []],
+    ["holder-alias-insert.ts", "function run(items: number[]) {\n  const box: { items: number[] } = { items: [] };\n  const alias = box;\n  alias.items = items;\n  box.items.push(1);\n}\n", [[5,"ImplicitOutput"]]],
+    ["holder-helper-insert.ts", "function store(box: { items: number[] }, items: number[]) { box.items = items; }\nfunction run(items: number[]) {\n  const box: { items: number[] } = { items: [] };\n  store(box, items);\n  box.items.push(1);\n}\n", [[5,"ImplicitOutput"]]],
+    ["holder-helper-alias-insert.ts", "function identity(box: { items: number[] }) { return box; }\nfunction run(items: number[]) {\n  const box: { items: number[] } = { items: [] };\n  identity(box).items = items;\n  box.items.push(1);\n}\n", [[5,"ImplicitOutput"]]],
+    ["holder-conditional-alias-insert.ts", "function run(items: number[], flag: boolean) {\n  const box: { items: number[] } = { items: [] };\n  const other: { items: number[] } = { items: [] };\n  const alias = flag ? box : other;\n  alias.items = items;\n  box.items.push(1);\n}\n", [[6,"ImplicitOutput"]]],
+    ["holder-rebound-private.ts", "function run(items: number[]) {\n  let box: { items: number[] } = { items: [] };\n  box.items = items;\n  box = { items: [] };\n  box.items.push(1);\n}\n", []]
+  ];
+  for (const [name, source, expected] of cases) {
+    const actual = ownerRecords(name, source);
+    if (expected.length === 0) assert.deepEqual(actual, [], name);
+    else for (const finding of expected) assert.ok(actual.some((item) => item[0] === finding[0] && item[1] === finding[1]), name + ": " + JSON.stringify(actual));
+  }
+});
+
+test("eager replacement and JSON callbacks transfer effects to invocation owners", () => {
+  const cases = [
+    ["string-literal-replacement.ts", "function run(value: string) {\n  return value.replace(\"a\", \"b\");\n}\n", []],
+    ["string-parameter-replacement.ts", "function run(value: string, replacement: string) {\n  return value.replaceAll(\"a\", replacement);\n}\n", []],
+    ["json-array-replacer.ts", "function run() {\n  return JSON.stringify({ value: 1 }, [\"value\"]);\n}\n", []],
+    ["json-null-replacer.ts", "function run() {\n  return JSON.stringify({ value: 1 }, null);\n}\n", []],
+    ["json-undefined-reviver.ts", "function run() {\n  return JSON.parse(\"{\\\"value\\\":1}\", undefined);\n}\n", []],
+    ["shadow-undefined-replacement.ts", "function run(value: string) {\n  const undefined = () => { console.log(value); return value; };\n  return value.replace(\"a\", undefined);\n}\n", [[3,"ImplicitOutput"]]],
+    ["string-replace-output.ts", "function write(value: string) {\n  console.log(value);\n  return value;\n}\nfunction run(value: string) {\n  return value.replace(\"a\", write);\n}\n", [[6,"ImplicitOutput"]]],
+    ["string-replaceall-output.ts", "function write(value: string) {\n  console.log(value);\n  return value;\n}\nfunction run(value: string) {\n  return value.replaceAll(\"a\", write);\n}\n", [[6,"ImplicitOutput"]]],
+    ["json-parse-reviver.ts", "function write(key: string, value: unknown) {\n  console.log(key);\n  return value;\n}\nfunction run() {\n  return JSON.parse(\"{\\\"value\\\":1}\", write);\n}\n", [[6,"ImplicitOutput"]]],
+    ["json-stringify-replacer.ts", "function write(key: string, value: unknown) {\n  console.log(key);\n  return value;\n}\nfunction run() {\n  return JSON.stringify({ value: 1 }, write);\n}\n", [[6,"ImplicitOutput"]]],
+    ["quiet-string-replace.ts", "function replace(value: string) {\n  return value.toUpperCase();\n}\nfunction run(value: string) {\n  return value.replace(\"a\", replace);\n}\n", []],
+    ["json-parse-quiet.ts", "function identity(key: string, value: unknown) {\n  return value;\n}\nfunction run() {\n  return JSON.parse(\"{\\\"value\\\":1}\", identity);\n}\n", []],
+    ["json-stringify-quiet.ts", "function identity(key: string, value: unknown) {\n  return value;\n}\nfunction run() {\n  return JSON.stringify({ value: 1 }, identity);\n}\n", []]
+  ];
+  for (const [name, source, expected] of cases) {
+    const actual = ownerRecords(name, source);
+    if (expected.length === 0) assert.deepEqual(actual, [], name);
+    else for (const finding of expected) assert.ok(actual.some((item) => item[0] === finding[0] && item[1] === finding[1]), name + ": " + JSON.stringify(actual));
+  }
+});
+
+test("eager native iterator consumers force generator summaries", () => {
+  const cases = [
+    ["generator-promise-all.ts", "function* lines() {\n  yield Date.now();\n}\nfunction run() {\n  return Promise.all(lines());\n}\n", [[5,"ImplicitInput"]]],
+    ["generator-promise-all-settled.ts", "function* lines() {\n  yield Date.now();\n}\nfunction run() {\n  return Promise.allSettled(lines());\n}\n", [[5,"ImplicitInput"]]],
+    ["promise-race-generator.ts", "function* lines() {\n  yield Date.now();\n}\nfunction run() {\n  return Promise.race(lines());\n}\n", [[5,"ImplicitInput"]]],
+    ["generator-object-from-entries.ts", "function* lines(): Generator<[string, number]> {\n  yield [\"key\", Date.now()];\n}\nfunction run() {\n  return Object.fromEntries(lines());\n}\n", [[5,"ImplicitInput"]]],
+    ["quiet-promise-all.ts", "function* lines() {\n  yield 1;\n}\nfunction run() {\n  return Promise.all(lines());\n}\n", []],
+    ["quiet-object-from-entries.ts", "function* lines(): Generator<[string, number]> {\n  yield [\"key\", 1];\n}\nfunction run() {\n  return Object.fromEntries(lines());\n}\n", []],
+    ["generator-create-quiet.ts", "function* lines() {\n  yield Date.now();\n}\nfunction run() {\n  return lines();\n}\n", []]
+  ];
+  for (const [name, source, expected] of cases) {
+    const actual = ownerRecords(name, source);
+    if (expected.length === 0) assert.deepEqual(actual, [], name);
+    else for (const finding of expected) assert.ok(actual.some((item) => item[0] === finding[0] && item[1] === finding[1]), name + ": " + JSON.stringify(actual));
+  }
+});

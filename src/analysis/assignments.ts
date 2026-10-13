@@ -51,6 +51,10 @@ function reaching(assignment: Assignment, owner: EffectOwner, site: ts.Node): As
   return [unconditional(assignment.node, owner) ? assignment : { ...assignment, join: true }];
 }
 
+export function canReachSite(node: ts.Node, owner: EffectOwner, site: ts.Node): boolean {
+  return node.end <= site.getStart() || deferred(node, owner) || repeated({ node }, owner, site);
+}
+
 function repeated(assignment: Assignment, owner: EffectOwner, site: ts.Node): boolean {
   for (let current: ts.Node | undefined = site.parent; current && current !== owner; current = current.parent) {
     if (ts.isIterationStatement(current, false) && inside(assignment.node, current)) {
