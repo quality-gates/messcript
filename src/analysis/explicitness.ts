@@ -55,6 +55,8 @@ export type ImplicitFlow = {
   path?: StoragePath;
   receiver?: "read" | "write";
   defaultParameterIndex?: number;
+  /** The write in a deeper callee that this flow forwards; set once a flow passes through a call it does not own. */
+  writeNode?: ts.Node;
 };
 
 type BindingAccess = "read" | "reassign" | "contents";
@@ -97,14 +99,17 @@ type CallEffects = {
   readonly parameterCalls: ParameterCall[];
 };
 
+/** A write at the site that changes the slot of a local origin; a missing slot is every slot. */
+type SharedWrite = { readonly fact: StorageFact; readonly origin: StorageOrigin; readonly site: ts.Node; readonly slot?: string };
+
 type AnalysisState = {
   readonly model: ScopeModel;
   readonly sourceFile: ts.SourceFile;
   readonly callables: readonly EffectOwner[];
   summaries: ReadonlyMap<EffectOwner, CallableSummary>;
   readonly includeThis: boolean;
-  readonly sharedBindings: Set<Binding>;
-  readonly sharedLocalBindings: Map<Binding, Map<string, { fact: StorageFact; origin: StorageOrigin; slot?: string }>>;
+  readonly sharedBindings: Map<Binding, Set<string>>;
+  readonly sharedLocalBindings: Map<Binding, Map<string, SharedWrite>>;
   readonly bindingOrigins: ReadonlyMap<StorageOrigin, Binding>;
   readonly arrayLiterals: ReadonlyMap<number, ts.ArrayLiteralExpression>;
 };
@@ -251,11 +256,14 @@ function identifierFlows(state: AnalysisState, node: ts.Identifier, owner: Effec
 }
 
 function bindingSharesRead(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner): boolean {
-  const preciseWrites = state.sharedLocalBindings.get(binding);
-  const broadShared = state.sharedBindings.has(binding) &&
-    (!preciseWrites || [...preciseWrites.values()].some((write) => write.slot === undefined));
-  return !!(broadShared || capturedReadSharesMutation(state, binding, node, owner) ||
-    directMutationAffectsRead(state, binding, node));
+  return sharedMarkAffectsRead(state, binding, node) || capturedReadSharesMutation(state, binding, node, owner) ||
+    directMutationAffectsRead(state, binding, node);
+}
+
+function sharedMarkAffectsRead(state: AnalysisState, binding: Binding, node: ts.Identifier): boolean {
+  const slots = state.sharedBindings.get(binding);
+  const path = selectedReadSlots(node);
+  return !!slots && [...slots].some((slot) => slot === "*" || mutationSlotOverlaps(path, slot));
 }
 
 function capturedReadSharesMutation(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner): boolean {
@@ -322,8 +330,9 @@ function directMutationAffectsRead(state: AnalysisState, binding: Binding, read:
     if (write.reassign) {
       return true;
     }
-    const path = selectedSlots(reference);
-    return pathsOverlap(readPath, path);
+    const prefix = selectedSlots(reference).slice(0, -1);
+    return pathsOverlap(readPath, prefix) && (readPath.length <= prefix.length ||
+      assignedSlots(reference).some((slot) => slot === undefined || mutationSlotOverlaps(readPath.slice(prefix.length), slot)));
   });
 }
 
@@ -413,7 +422,7 @@ function mutationEffectsFor(
   const path = writePath(node, write);
   const fact = storageFactForBinding(state, summaries, binding, owner, node);
   if (!inside(binding.scope.node, owner)) {
-    shareOrigins(state, originsForPath(fact, path));
+    shareCapturedWrite(state, binding, node, owner, path, fact);
     return { flows: [], writes: [] };
   }
   return mutationEffectsFromFact(state, fact, path, node, owner, isParameterOf(binding, owner)
@@ -491,19 +500,109 @@ function collectCallables(sourceFile: ts.SourceFile, model: ScopeModel, includeT
   collectArrays(sourceFile);
   return {
     model, sourceFile, callables: collectOwners(sourceFile), summaries: new Map(), includeThis,
-    sharedBindings: new Set(), sharedLocalBindings: new Map(),
+    sharedBindings: new Map(), sharedLocalBindings: new Map(),
     bindingOrigins: new Map(model.bindings.map((binding) => [externalBindingOrigin(binding), binding])),
     arrayLiterals,
   };
 }
 
-function shareOrigins(state: AnalysisState, origins: readonly StorageOrigin[]): void {
+/** Marks the slots of each origin's binding that code outside the binding's owner can change. "*" marks every slot. */
+function shareOrigins(state: AnalysisState, origins: readonly StorageOrigin[], slots: readonly string[] = ["*"]): void {
   for (const origin of origins) {
     const binding = state.bindingOrigins.get(origin);
     if (binding) {
-      state.sharedBindings.add(binding);
+      const marks = state.sharedBindings.get(binding) ?? new Set<string>();
+      slots.forEach((slot) => marks.add(slot));
+      state.sharedBindings.set(binding, marks);
     }
   }
+}
+
+function shareCapturedWrite(
+  state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner, path: StoragePath, fact: StorageFact,
+): void {
+  for (const origin of originsForPath(fact, path)) {
+    shareOrigins(state, [origin], capturedWriteSlots(state, binding, node, owner, path, origin));
+  }
+}
+
+/**
+ * Gives the slots a closure write through a captured binding can change.
+ * Only a root write to a never-reassigned array literal keeps a bound: a push lands at or after the literal's length,
+ * because every write that shrinks the array marks the slots from its new length.
+ */
+function capturedWriteSlots(
+  state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner, path: StoragePath, origin: StorageOrigin,
+): readonly string[] {
+  if (invocationsRecorded(state, owner, binding)) {
+    return [];
+  }
+  const length = path === "outer" && origin === externalBindingOrigin(binding) ? literalArrayLength(binding) : undefined;
+  if (length === undefined) {
+    return ["*"];
+  }
+  const write = state.model.writeOf(node);
+  const push = pushCallForMutation(node);
+  const slots = write && !write.contents ? assignedSlots(node)
+    : push ? pushSlots(push, owner, { lowerBound: length, exact: false }) : [undefined];
+  return slots.map((slot) => slot ?? "*");
+}
+
+/**
+ * True when every invocation of the writing function is a direct call in the function that owns the binding.
+ * Each such call records the slots its writes change there, so the call sites bound the write.
+ */
+function invocationsRecorded(state: AnalysisState, owner: EffectOwner, binding: Binding): boolean {
+  const name = ts.isFunctionDeclaration(owner) ? owner.name
+    : ts.isVariableDeclaration(owner.parent) && owner.parent.initializer === owner && ts.isIdentifier(owner.parent.name)
+      ? owner.parent.name : undefined;
+  const callable = name && state.model.bindings.find((candidate) => candidate.declarations.some((declaration) => declaration.identifier === name));
+  const scopeOwner = enclosingFunction(binding.scope.node);
+  return !!callable && !!scopeOwner && !callable.mutated && callable.references.every((reference) =>
+    reference === name || (ts.isCallExpression(reference.parent) && reference.parent.expression === reference &&
+      inside(reference, scopeOwner) && !nestedFunctionBetween(reference, scopeOwner)));
+}
+
+function enclosingFunction(node: ts.Node): EffectOwner | undefined {
+  for (let current: ts.Node | undefined = node; current; current = current.parent) {
+    if (isFunctionLike(current)) {
+      return current as EffectOwner;
+    }
+  }
+  return undefined;
+}
+
+function literalArrayLength(binding: Binding): number | undefined {
+  const assignments = bindingAssignments(binding);
+  const value = assignments.length === 1 && assignments[0].value ? unwrapExpression(assignments[0].value) : undefined;
+  return value && ts.isArrayLiteralExpression(value) && !value.elements.some(ts.isSpreadElement) ? value.elements.length : undefined;
+}
+
+/** Gives the slots a member assignment through the identifier changes in the object it selects; undefined is every slot. */
+function assignedSlots(site: ts.Identifier): readonly (string | undefined)[] {
+  const access = outermostAccess(site);
+  const member = unwrapExpression(access);
+  const slot = ts.isPropertyAccessExpression(member) || ts.isElementAccessExpression(member) ? storageSlot(member) : undefined;
+  if (slot === "property:length") {
+    return [slot, truncatedSlot(access)];
+  }
+  return arrayIndexForSlot(slot) === undefined ? [slot] : [slot, "property:length"];
+}
+
+function outermostAccess(site: ts.Identifier): ts.Expression {
+  let access: ts.Expression = outerExpression(site);
+  while ((ts.isPropertyAccessExpression(access.parent) || ts.isElementAccessExpression(access.parent)) && access.parent.expression === access) {
+    access = outerExpression(access.parent);
+  }
+  return access;
+}
+
+/** Gives the slots from a literal length assignment onward, or undefined for every slot. */
+function truncatedSlot(access: ts.Expression): string | undefined {
+  const assignment = access.parent;
+  const assigned = ts.isBinaryExpression(assignment) && assignment.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+    assignment.left === access ? unwrapExpression(assignment.right) : undefined;
+  return assigned && ts.isNumericLiteral(assigned) ? `append:${Number(assigned.text)}` : undefined;
 }
 
 function shareAliasedLocalBindings(
@@ -527,7 +626,7 @@ function shareAliasedLocalBindings(
       if ([...fact.outer, ...fact.reachable].includes(origin)) {
         const writes = state.sharedLocalBindings.get(binding) ?? new Map();
         for (const slot of slots) {
-          writes.set(`${site.getStart()}/${origin}/${slot ?? "*"}`, { fact, origin, slot });
+          writes.set(`${site.getStart()}/${origin}/${slot ?? "*"}`, { fact, origin, site, slot });
         }
         state.sharedLocalBindings.set(binding, writes);
       }
@@ -539,7 +638,7 @@ function mutatedSlots(state: AnalysisState, site: ts.Node, owner: EffectOwner): 
   if (ts.isIdentifier(site)) {
     const write = state.model.writeOf(site);
     if (write && !write.contents && !write.viaCall && !write.reassign) {
-      return [selectedSlots(site).at(-1)];
+      return assignedSlots(site);
     }
   }
   return pushedArraySlots(state, site, owner) ?? [undefined];
@@ -567,21 +666,116 @@ function pushSlots(call: ts.CallExpression, owner: EffectOwner, start: PushStart
     : Array.from(call.arguments.keys(), (index) => `property:${start.lowerBound + index}`))];
 }
 
+/**
+ * A write a callee performs. A forwarded write comes from a deeper callee; a repeated write is one the callee can
+ * perform more than once per call, such as a callback.
+ */
+type TransferSource = { readonly node: ts.Node; readonly writeNode?: ts.Node; readonly repeated?: boolean };
+
+/**
+ * Gives the slots a callee's push changes in the caller's array, or undefined for every slot.
+ * Exact slots need an exact caller start, a single direct push sequence in the callee, and a call that runs once.
+ * Otherwise a push lands at or after the caller's start, unless the call can also shrink the array.
+ */
 function transferredPushSlots(
-  state: AnalysisState, fact: StorageFact, source: ts.Node, sourceOwner: EffectOwner,
+  state: AnalysisState, fact: StorageFact, source: TransferSource, sourceOwner: EffectOwner,
   site: ts.Node, owner: EffectOwner,
 ): readonly string[] | undefined {
-  const push = pushCallForMutation(source);
-  const invocation = ts.isCallExpression(site) ? site : ts.isCallExpression(site.parent) ? site.parent : undefined;
+  const push = pushCallForMutation(source.writeNode ?? source.node);
+  const invocation = invocationAt(site);
   if (!push || !invocation) {
     return undefined;
   }
-  const initialStart = knownPushStartFromFact(state, fact, owner, invocation);
-  if (!initialStart) {
+  const callerStart = knownPushStartFromFact(state, fact, owner, invocation);
+  const offset = transferOffset(state, source, push, sourceOwner);
+  if (!callerStart || !offset || invocationResets(state, fact, invocation)) {
     return undefined;
   }
-  const start = repeatedCall(invocation, owner) ? { ...initialStart, exact: false } : initialStart;
-  return pushSlots(push, sourceOwner, start);
+  return pushSlots(push, sourceOwner, { lowerBound: callerStart.lowerBound + offset.lowerBound,
+    exact: callerStart.exact && offset.exact && !repeatedCall(invocation, owner) });
+}
+
+function invocationAt(site: ts.Node): ts.CallExpression | undefined {
+  return ts.isCallExpression(site) ? site : ts.isCallExpression(site.parent) ? site.parent : undefined;
+}
+
+function transferOffset(state: AnalysisState, source: TransferSource, push: ts.CallExpression, sourceOwner: EffectOwner): PushStart | undefined {
+  return source.writeNode || source.repeated ? { lowerBound: 0, exact: false } : calleePushOffset(state, push, sourceOwner);
+}
+
+/** True when the call can change an origin of the fact in a way other than appending. */
+function invocationResets(state: AnalysisState, fact: StorageFact, invocation: ts.CallExpression): boolean {
+  return sharedWrites(state).some((write) => write.slot === undefined && fact.outer.includes(write.origin) &&
+    (write.site === invocation || write.site === invocation.expression));
+}
+
+function sharedWrites(state: AnalysisState): SharedWrite[] {
+  return [...state.sharedLocalBindings.values()].flatMap((writes) => [...writes.values()]);
+}
+
+/**
+ * Gives where a direct push in a callee lands relative to the array's length at the call, or undefined when an
+ * earlier effect of the callee can do anything other than append.
+ */
+function calleePushOffset(state: AnalysisState, push: ts.CallExpression, sourceOwner: EffectOwner): PushStart | undefined {
+  const summary = state.summaries.get(sourceOwner);
+  const target = pushReceiverBinding(state, push);
+  if (!summary || !target) {
+    return undefined;
+  }
+  let offset: PushStart | undefined = { lowerBound: 0, exact: true };
+  const counted = new Set<ts.CallExpression>([push]);
+  for (const effect of [...summary.flows.filter(isWritingFlow), ...summary.parameterWrites]) {
+    if (offset && mayRunBefore(effect.node, push, sourceOwner)) {
+      offset = advanceCalleeOffset(state, offset, effect, target, counted, sourceOwner);
+    }
+  }
+  return offset;
+}
+
+/** Counts one earlier write of the callee; a write other than a push leaves the offset unknown. */
+function advanceCalleeOffset(
+  state: AnalysisState, offset: PushStart, effect: ImplicitFlow | ParameterWrite, target: Binding,
+  counted: Set<ts.CallExpression>, sourceOwner: EffectOwner,
+): PushStart | undefined {
+  const forwarded = "writeNode" in effect ? effect.writeNode : undefined;
+  const prior = pushCallForMutation(forwarded ?? effect.node);
+  if (!prior || counted.has(prior)) {
+    return prior ? offset : undefined;
+  }
+  counted.add(prior);
+  const same = !forwarded && pushReceiverBinding(state, prior) === target;
+  return same ? advanceDirectPush(offset, prior, sourceOwner) : { ...offset, exact: false };
+}
+
+function isWritingFlow(flow: ImplicitFlow): boolean {
+  return flow.kind !== "input" && flow.access !== "read" && flow.receiver !== "read";
+}
+
+function pushReceiverBinding(state: AnalysisState, push: ts.CallExpression): Binding | undefined {
+  const callee = unwrapExpression(push.expression);
+  const receiver = ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee) ? unwrapExpression(callee.expression) : undefined;
+  return receiver && ts.isIdentifier(receiver) ? state.model.resolve(receiver) : undefined;
+}
+
+/** True when the node can run before the call: earlier in source, inside its arguments, or in a loop around both. */
+function mayRunBefore(node: ts.Node, call: ts.CallExpression, owner: EffectOwner): boolean {
+  if (call.arguments.some((argument) => inside(node, argument))) {
+    return true;
+  }
+  if (inside(node, call)) {
+    return false;
+  }
+  return node.end <= call.getStart() || sharesLoop(node, call, owner);
+}
+
+function sharesLoop(node: ts.Node, call: ts.CallExpression, owner: EffectOwner): boolean {
+  for (let current: ts.Node | undefined = call.parent; current && current !== owner; current = current.parent) {
+    if (ts.isIterationStatement(current, false) && repeatedPartOfIteration(call, current) && inside(node, current)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function repeatedCall(call: ts.CallExpression, owner: EffectOwner): boolean {
@@ -644,7 +838,7 @@ function priorArrayReferences(state: AnalysisState, owner: EffectOwner, call: ts
     }
     for (const reference of binding.references) {
       if (!inside(reference, call.expression) && inside(reference, owner) && !nestedFunctionBetween(reference, owner) &&
-          reference.getStart() < call.end) {
+          (reference.getStart() < call.end || sharesLoop(reference, call, owner))) {
         references.push({ reference, fact: bindingFact });
       }
     }
@@ -673,7 +867,29 @@ function priorPushStart(
     }
     start = next;
   }
-  return priorResolvedPushes(state, owner, call, origin, start);
+  const resolved = priorResolvedPushes(state, owner, call, origin, start);
+  return priorSharedWrites(state, owner, call, origin, resolved);
+}
+
+/**
+ * Applies the writes calls and callbacks make to the origin before the push: an append keeps only a lower bound,
+ * and any other write leaves the start unknown.
+ */
+function priorSharedWrites(
+  state: AnalysisState, owner: EffectOwner, call: ts.CallExpression, origin: StorageOrigin, initial: PushStart,
+): PushStart | undefined {
+  let start = initial;
+  for (const write of sharedWrites(state)) {
+    if (write.origin !== origin || !inside(write.site, owner) || nestedFunctionBetween(write.site, owner) ||
+        !mayRunBefore(write.site, call, owner)) {
+      continue;
+    }
+    if (write.slot === undefined) {
+      return undefined;
+    }
+    start = write.slot.startsWith("append:") ? { ...start, exact: false } : start;
+  }
+  return start;
 }
 
 function priorResolvedPushes(
@@ -684,7 +900,7 @@ function priorResolvedPushes(
     if (node !== owner && isFunctionLike(node)) {
       return;
     }
-    if (ts.isCallExpression(node) && priorCallRunsBefore(node, call)) {
+    if (ts.isCallExpression(node) && node !== call && mayRunBefore(node, call, owner)) {
       start = advanceResolvedPushes(state, owner, origin, start, node);
     }
     const reachable = reachableChildren(node);
@@ -696,10 +912,6 @@ function priorResolvedPushes(
   };
   visit(owner);
   return start;
-}
-
-function priorCallRunsBefore(prior: ts.CallExpression, call: ts.CallExpression): boolean {
-  return prior !== call && (prior.end <= call.getStart() || call.arguments.some((argument) => inside(prior, argument)));
 }
 
 function advanceResolvedPushes(
@@ -718,7 +930,8 @@ function advanceResolvedPushes(
         continue;
       }
       counted.add(push);
-      start = advanceResolvedPush(start, push, call, owner, resolved.complete && resolved.targets.length === 1);
+      const once = resolved.complete && resolved.targets.length === 1 && insertion.node === push && runsOnEveryCall(push, target);
+      start = advanceResolvedPush(start, push, call, owner, once);
     }
   }
   return start;
@@ -735,10 +948,28 @@ function matchingResolvedPush(
 }
 
 function advanceResolvedPush(
-  start: PushStart, push: ts.CallExpression, call: ts.CallExpression, owner: EffectOwner, unique: boolean,
+  start: PushStart, push: ts.CallExpression, call: ts.CallExpression, owner: EffectOwner, once: boolean,
 ): PushStart {
-  return !unique || !unconditional(call, owner) || repeatedCall(call, owner) || push.arguments.some(ts.isSpreadElement)
+  return !once || !unconditional(call, owner) || repeatedCall(call, owner) || push.arguments.some(ts.isSpreadElement)
     ? { ...start, exact: false } : { ...start, lowerBound: start.lowerBound + push.arguments.length };
+}
+
+/** True when a direct push runs exactly once whenever its owner runs to completion. */
+function runsOnEveryCall(push: ts.CallExpression, owner: EffectOwner): boolean {
+  return unconditional(push, owner) && !repeatedCall(push, owner) && !exitsBefore(owner, push);
+}
+
+function exitsBefore(owner: EffectOwner, node: ts.Node): boolean {
+  const visit = (current: ts.Node): boolean => {
+    if (current !== owner && isFunctionLike(current)) {
+      return false;
+    }
+    if ((ts.isReturnStatement(current) || ts.isThrowStatement(current)) && current.getStart() < node.getStart()) {
+      return true;
+    }
+    return ts.forEachChild(current, visit) ?? false;
+  };
+  return visit(owner);
 }
 
 function advancePushStart(
@@ -814,7 +1045,7 @@ function priorArrayLengthWrite(
 }
 
 function sharedBindingCount(state: AnalysisState): number {
-  return state.sharedBindings.size + [...state.sharedLocalBindings.values()].reduce((count, writes) => count + writes.size, 0);
+  return [...state.sharedBindings.values()].reduce((count, slots) => count + slots.size, 0) + [...state.sharedLocalBindings.values()].reduce((count, writes) => count + writes.size, 0);
 }
 
 function shareExposedReturns(state: AnalysisState, summary: CallableSummary): void {
@@ -1361,7 +1592,7 @@ function reboundFlow(
   if (flow.binding && inside(flow.binding.scope.node, owner)) {
     return ownedBindingFlow(state, summaries, flow, flow.binding, node, owner);
   }
-  return { flows: [{ ...flow, node, owner, defaultParameterIndex: undefined }], writes: [], parameterCalls: [] };
+  return { flows: [{ ...flow, node, owner, defaultParameterIndex: undefined, writeNode: flow.writeNode ?? flow.node }], writes: [], parameterCalls: [] };
 }
 
 function ownedBindingFlow(
@@ -1376,7 +1607,7 @@ function ownedBindingFlow(
     return emptyCallEffects();
   }
   const fact = storageFactForBinding(state, summaries, binding, owner, node);
-  const slots = transferredPushSlots(state, fact, flow.node, flow.owner, node, owner);
+  const slots = transferredPushSlots(state, fact, flow, flow.owner, node, owner);
   return mutationEffectsFromFact(state, fact, flow.path ?? "outer", node, owner,
     isParameterOf(binding, owner) ? `mutates argument ${binding.name}` : `mutates caller-owned value ${binding.name}`,
     false, false, slots);
@@ -1384,7 +1615,7 @@ function ownedBindingFlow(
 
 function capturedFlow(state: AnalysisState, flow: ImplicitFlow, fact: StorageFact, node: ts.Node, owner: EffectOwner): CallEffects {
   if (flow.access === "contents") {
-    const slots = transferredPushSlots(state, fact, flow.node, flow.owner, node, owner);
+    const slots = transferredPushSlots(state, fact, flow, flow.owner, node, owner);
     return mutationEffectsFromFact(state, fact, flow.path ?? "outer", node, owner, flow.description, false, true, slots);
   }
   return flow.access === "read" ? receiverFlow(state, { ...flow, receiver: "read" }, fact, node, owner) : emptyCallEffects();
@@ -1423,7 +1654,7 @@ function instantiateParameterWrites(
       return unknownEffects(node, owner, "calls writable parameter without an argument");
     }
     const fact = actualFact(write.parameterIndex);
-    const slots = transferredPushSlots(state, fact, write.node, sourceOwner, node, owner);
+    const slots = transferredPushSlots(state, fact, write, sourceOwner, node, owner);
     return mutationEffectsFromFact(state, fact, write.path, node, owner,
       `mutates caller-owned value ${actual.getText(state.sourceFile)}`, false, true, slots);
   }));
@@ -1520,10 +1751,14 @@ function instantiateCallableSummaryFromFacts(
   if (seen.has(key)) {
     return emptyCallEffects();
   }
-  const rebound = summary.flows.map((flow) => reboundFlow(state, summaries, flow, node, owner));
+  // A callback can run any number of times, so its pushes keep only a lower bound.
+  const rebound = summary.flows.map((flow) => reboundFlow(state, summaries, { ...flow, writeNode: flow.writeNode ?? flow.node }, node, owner));
   const actualFact = (index: number) => actualFacts[index] ?? unknownFact;
-  const writes = summary.parameterWrites.map((write) => mutationEffectsFromFact(state, actualFact(write.parameterIndex),
-    write.path, node, owner, "mutates caller-owned callback argument", false, true));
+  const writes = summary.parameterWrites.map((write) => {
+    const fact = actualFact(write.parameterIndex);
+    const slots = transferredPushSlots(state, fact, { node: write.node, repeated: true }, summary.owner, node, owner);
+    return mutationEffectsFromFact(state, fact, write.path, node, owner, "mutates caller-owned callback argument", false, true, slots);
+  });
   const unresolved = summary.parameterCalls.length > 0 ? [unknownEffects(node, owner, "calls unresolved callable")] : [];
   return combineEffects([...rebound, ...writes, ...unresolved]);
 }
@@ -1757,7 +1992,7 @@ function summarizeCallable(
   appendEffects(draft, inheritedConstructorEffects(state, summaries, owner));
   return {
     owner,
-    flows: uniqueFlows(draft.flows),
+    flows: uniqueSummaryFlows(draft.flows),
     parameterWrites: uniqueWrites(draft.parameterWrites),
     parameterCalls: uniqueParameterCalls(draft.parameterCalls),
     storageInsertions: uniqueInsertions(draft.storageInsertions),
@@ -1816,7 +2051,7 @@ function callStorageInsertions(
         return targets.targets.filter((callbackTarget) => !isGenerator(callbackTarget)).flatMap((callbackTarget) =>
           (summaries.get(callbackTarget)?.storageInsertions ?? []).map((insertion) => instantiateInsertion(
             state, summaries, insertion, callbackInvocation, callbackTarget, node, owner,
-            targets.complete && targets.targets.length === 1 && unconditional(parameterCall.node, target) && unconditional(node, owner))),
+            targets.complete && targets.targets.length === 1 && unconditional(parameterCall.node, target) && unconditional(node, owner), true)),
         );
       });
       return [...direct, ...callbacks];
@@ -1832,14 +2067,27 @@ function callStorageInsertions(
 function instantiateInsertion(
   state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, insertion: StorageInsertion,
   invocation: StorageInvocation, sourceOwner: EffectOwner, node: ts.Node, owner: EffectOwner, mayReplace: boolean,
+  repeated = false,
 ): StorageInsertion {
   const target = invocationStorageFact(state, summaries, insertion.target, invocation, owner);
-  const slots = insertion.appendCall && transferredPushSlots(state, target, insertion.appendCall.expression,
-    sourceOwner, invocation.call, owner);
-  const argumentIndex = insertion.appendCall?.arguments.findIndex((argument) => argument === insertion.origin) ?? -1;
-  const slot = slots && argumentIndex >= 0 ? slots[argumentIndex + 1] : insertion.slot;
+  const slot = transferredInsertionSlot(state, insertion, target, invocation, sourceOwner, owner, repeated);
   return { ...insertion, node, target, value: invocationStorageFact(state, summaries, insertion.value, invocation, owner), slot,
     replace: mayReplace && (insertion.appendCall ? slot !== undefined && !slot.startsWith("append:") : insertion.replace) };
+}
+
+function transferredInsertionSlot(
+  state: AnalysisState, insertion: StorageInsertion, target: StorageFact, invocation: StorageInvocation,
+  sourceOwner: EffectOwner, owner: EffectOwner, repeated: boolean,
+): string | undefined {
+  const append = insertion.appendCall;
+  if (!append) {
+    return insertion.slot;
+  }
+  const push = append.expression;
+  const source = { node: push, writeNode: insertion.node === append ? undefined : push, repeated };
+  const slots = transferredPushSlots(state, target, source, sourceOwner, invocation.call, owner);
+  const argumentIndex = append.arguments.findIndex((argument) => argument === insertion.origin);
+  return slots && argumentIndex >= 0 ? slots[argumentIndex + 1] : insertion.slot;
 }
 
 function storageSlot(target: ts.PropertyAccessExpression | ts.ElementAccessExpression): string | undefined {
@@ -1867,7 +2115,7 @@ function callbackStorageInsertions(
     const resolved = resolveTargets(dispatchFor(state, summaries), callback);
     return resolved.targets.filter((target) => !isGenerator(target)).flatMap((target) =>
       (summaries.get(target)?.storageInsertions ?? []).map((insertion) => instantiateInsertion(
-        state, summaries, insertion, invocation, target, call, owner, false)),
+        state, summaries, insertion, invocation, target, call, owner, false, true)),
     );
   });
 }
@@ -2151,6 +2399,20 @@ function uniqueFlows(flows: readonly ImplicitFlow[]): readonly ImplicitFlow[] {
   const seen = new Set<string>();
   return flows.filter((flow) => {
     const key = `${ownerKey(flow.owner)}:${flow.kind}:${flow.description}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+/** Keeps every distinct contents write so callers can place each push; other flows keep one per description. */
+function uniqueSummaryFlows(flows: readonly ImplicitFlow[]): readonly ImplicitFlow[] {
+  const seen = new Set<string>();
+  return flows.filter((flow) => {
+    const site = flow.access === "contents" ? `${flow.node.getStart()}:${flow.writeNode?.getStart()}` : "";
+    const key = `${ownerKey(flow.owner)}:${flow.kind}:${flow.description}:${site}`;
     if (seen.has(key)) {
       return false;
     }
