@@ -76,6 +76,42 @@ function read() { const alias = shared; return alias.length; }
 `), []);
 });
 
+test("alias writes make captured reads of local storage implicit", () => {
+  assert.deepEqual(messages("captured-object-alias.ts", `function outer() {
+  const box = { n: 0 };
+  const alias = box;
+  function inner() { return box.n; }
+  alias.n = 1;
+  return inner();
+}
+`), ["4:ImplicitInput: The function inner() reads box, an implicit input."]);
+  assert.deepEqual(messages("captured-array-alias.ts", `function outer() {
+  const values: number[] = [];
+  const alias = values;
+  function inner() { return values.length; }
+  alias.push(1);
+  return inner();
+}
+`), ["4:ImplicitInput: The function inner() reads values, an implicit input."]);
+  assert.deepEqual(messages("captured-helper-write.ts", `function change(value: { n: number }) { value.n = 1; }
+function outer() {
+  const box = { n: 0 };
+  function inner() { return box.n; }
+  change(box);
+  return inner();
+}
+`), [
+    "1:ImplicitOutput: The function change() mutates argument value, an implicit output.",
+    "4:ImplicitInput: The function inner() reads box, an implicit input.",
+  ]);
+  assert.deepEqual(messages("captured-quiet.ts", `function outer() {
+  const values: number[] = [];
+  function inner() { return values.length; }
+  return inner();
+}
+`), []);
+});
+
 test("value exports and exported callable returns expose container storage", () => {
   assert.deepEqual(messages("named-container-export.ts", `const shared: number[] = [];
 export { shared as values };

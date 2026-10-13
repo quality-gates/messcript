@@ -358,6 +358,7 @@ function mutationEffectsFromFact(
   parameterDescription = false,
 ): CallEffects {
   const origins = originsForPath(fact, path);
+  shareAliasedLocalBindings(state, origins, node, owner);
   const writes = origins.flatMap((origin) => {
     const projection = parameterProjection(origin);
     return projection ? [{
@@ -403,6 +404,28 @@ function shareOrigins(state: AnalysisState, origins: readonly StorageOrigin[]): 
   for (const origin of origins) {
     const binding = state.bindingOrigins.get(origin);
     if (binding) {
+      state.sharedBindings.add(binding);
+    }
+  }
+}
+
+function shareAliasedLocalBindings(
+  state: AnalysisState,
+  origins: readonly StorageOrigin[],
+  site: ts.Node,
+  owner: EffectOwner,
+): void {
+  const localOrigins = origins.filter((origin) => origin.startsWith("private:") || origin.startsWith("param:"));
+  if (localOrigins.length === 0) {
+    return;
+  }
+  for (const binding of state.model.bindings) {
+    if (!binding.declarations.some((declaration) =>
+      (declaration.kind === "variable" || declaration.kind === "parameter") && inside(declaration.node, owner))) {
+      continue;
+    }
+    const fact = storageFactForBinding(state, state.summaries, binding, owner, site);
+    if ([...fact.outer, ...fact.reachable].some((origin) => localOrigins.includes(origin))) {
       state.sharedBindings.add(binding);
     }
   }
