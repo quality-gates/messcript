@@ -105,6 +105,7 @@ type AnalysisState = {
   readonly sharedBindings: Set<Binding>;
   readonly sharedLocalBindings: Map<Binding, Map<string, { fact: StorageFact; origin: StorageOrigin; slot?: string }>>;
   readonly bindingOrigins: ReadonlyMap<StorageOrigin, Binding>;
+  readonly arrayLiterals: ReadonlyMap<number, ts.ArrayLiteralExpression>;
 };
 
 const privateFact: StorageFact = { outer: ["private"], reachable: ["private"] };
@@ -254,11 +255,48 @@ function capturedReadSharesMutation(state: AnalysisState, binding: Binding, node
   if (!writes || inside(binding.scope.node, owner)) {
     return false;
   }
-  const path = selectedSlots(node);
+  const path = selectedReadSlots(node);
   return [...writes.values()].some(({ fact, origin, slot }) =>
     Array.from({ length: path.length + 1 }, (_, length) => length)
       .some((length) => originsForPath(fact, length ? path.slice(0, length) : "outer").includes(origin) &&
-        (slot === undefined || pathsOverlap(path.slice(length), [slot]))));
+        (slot === undefined || mutationSlotOverlaps(path.slice(length), slot))));
+}
+
+function selectedReadSlots(node: ts.Identifier): string[] {
+  const slots: string[] = [];
+  let current: ts.Expression = outerExpression(node);
+  while ((ts.isPropertyAccessExpression(current.parent) || ts.isElementAccessExpression(current.parent)) &&
+      current.parent.expression === current) {
+    const access = current.parent;
+    const callee = outerExpression(access);
+    if (ts.isCallExpression(callee.parent) && callee.parent.expression === callee) {
+      break;
+    }
+    slots.push(storageSlot(access) ?? "*");
+    current = outerExpression(access);
+  }
+  return slots;
+}
+
+function mutationSlotOverlaps(path: readonly string[], slot: string): boolean {
+  if (slot.startsWith("append:")) {
+    const selected = path[0];
+    if (selected === undefined || selected === "*") {
+      return true;
+    }
+    const index = arrayIndexForSlot(selected);
+    return index !== undefined && index >= Number(slot.slice(7));
+  }
+  return pathsOverlap(path, [slot]);
+}
+
+function arrayIndexForSlot(slot: string | undefined): number | undefined {
+  if (!slot?.startsWith("property:")) {
+    return undefined;
+  }
+  const text = slot.slice(9);
+  const index = Number(text);
+  return String(index) === text && Number.isInteger(index) && index >= 0 && index < 4294967295 ? index : undefined;
 }
 
 function selectedSlots(node: ts.Identifier): string[] {
@@ -276,17 +314,17 @@ function directMutationAffectsRead(state: AnalysisState, binding: Binding, read:
   if (!binding.mutated) {
     return false;
   }
-  const readPath = selectedSlots(read);
+  const readPath = selectedReadSlots(read);
   return binding.references.some((reference) => {
     const write = state.model.writeOf(reference);
-    if (!write || write.viaCall) {
+    if (!write || write.viaCall || write.contents) {
       return false;
     }
     if (write.reassign) {
       return true;
     }
-    const path = write.contents ? writePath(reference, write) : selectedSlots(reference);
-    return pathsOverlap(readPath, path === "outer" ? [] : path);
+    const path = selectedSlots(reference);
+    return pathsOverlap(readPath, path);
   });
 }
 
@@ -443,10 +481,19 @@ function originFlows(
 }
 
 function collectCallables(sourceFile: ts.SourceFile, model: ScopeModel, includeThis: boolean): AnalysisState {
+  const arrayLiterals = new Map<number, ts.ArrayLiteralExpression>();
+  const collectArrays = (node: ts.Node): void => {
+    if (ts.isArrayLiteralExpression(node)) {
+      arrayLiterals.set(node.getStart(), node);
+    }
+    ts.forEachChild(node, collectArrays);
+  };
+  collectArrays(sourceFile);
   return {
     model, sourceFile, callables: collectOwners(sourceFile), summaries: new Map(), includeThis,
     sharedBindings: new Set(), sharedLocalBindings: new Map(),
     bindingOrigins: new Map(model.bindings.map((binding) => [externalBindingOrigin(binding), binding])),
+    arrayLiterals,
   };
 }
 
@@ -469,7 +516,7 @@ function shareAliasedLocalBindings(
   if (localOrigins.length === 0) {
     return;
   }
-  const slot = mutatedSlot(state, site);
+  const slots = mutatedSlots(state, site, owner);
   for (const binding of state.model.bindings) {
     if (!binding.declarations.some((declaration) =>
       (declaration.kind === "variable" || declaration.kind === "parameter") && inside(declaration.node, owner))) {
@@ -479,19 +526,102 @@ function shareAliasedLocalBindings(
     for (const origin of localOrigins) {
       if ([...fact.outer, ...fact.reachable].includes(origin)) {
         const writes = state.sharedLocalBindings.get(binding) ?? new Map();
-        writes.set(`${site.getStart()}/${origin}`, { fact, origin, slot });
+        for (const slot of slots) {
+          writes.set(`${site.getStart()}/${origin}/${slot ?? "*"}`, { fact, origin, slot });
+        }
         state.sharedLocalBindings.set(binding, writes);
       }
     }
   }
 }
 
-function mutatedSlot(state: AnalysisState, site: ts.Node): string | undefined {
-  if (!ts.isIdentifier(site)) {
+function mutatedSlots(state: AnalysisState, site: ts.Node, owner: EffectOwner): readonly (string | undefined)[] {
+  if (ts.isIdentifier(site)) {
+    const write = state.model.writeOf(site);
+    if (write && !write.contents && !write.viaCall && !write.reassign) {
+      return [selectedSlots(site).at(-1)];
+    }
+  }
+  return pushedArraySlots(state, site, owner) ?? [undefined];
+}
+
+function pushedArraySlots(state: AnalysisState, site: ts.Node, owner: EffectOwner): readonly string[] | undefined {
+  const call = pushCallForMutation(site);
+  if (!call) {
     return undefined;
   }
-  const write = state.model.writeOf(site);
-  return write && !write.contents && !write.viaCall && !write.reassign ? selectedSlots(site).at(-1) : undefined;
+  const callee = unwrapExpression(call.expression);
+  if (!ts.isPropertyAccessExpression(callee) && !ts.isElementAccessExpression(callee)) {
+    return undefined;
+  }
+  const start = knownPushStart(state, callee.expression, owner, call);
+  if (start === undefined) {
+    return undefined;
+  }
+  if (call.arguments.length === 0) {
+    return [];
+  }
+  const spread = call.arguments.some(ts.isSpreadElement);
+  return ["property:length", ...(spread ? [`append:${start}`]
+    : Array.from(call.arguments.keys(), (index) => `property:${start + index}`))];
+}
+
+function pushCallForMutation(site: ts.Node): ts.CallExpression | undefined {
+  const member = ts.isIdentifier(site) ? outerExpression(site).parent : site;
+  if ((!ts.isPropertyAccessExpression(member) && !ts.isElementAccessExpression(member)) || methodName(member) !== "push") {
+    return undefined;
+  }
+  const callee = outerExpression(member);
+  const call = callee.parent;
+  return ts.isCallExpression(call) && call.expression === callee ? call : undefined;
+}
+
+function knownPushStart(state: AnalysisState, receiver: ts.Expression, owner: EffectOwner, call: ts.CallExpression): number | undefined {
+  const fact = storageFactForExpression(state, state.summaries, receiver, owner, call);
+  if (fact.outer.length !== 1) {
+    return undefined;
+  }
+  const origin = fact.outer[0];
+  const position = /^private:(\d+)$/.exec(origin)?.[1];
+  const allocation = position === undefined ? undefined : state.arrayLiterals.get(Number(position));
+  if (!allocation || allocation.elements.some(ts.isSpreadElement)) {
+    return undefined;
+  }
+  for (const binding of state.model.bindings) {
+    const bindingFact = storageFactForBinding(state, state.summaries, binding, owner, call);
+    if (![...bindingFact.outer, ...bindingFact.reachable].includes(origin)) {
+      continue;
+    }
+    if (binding.references.some((reference) => !inside(reference, call.expression) && reference.getStart() < call.end &&
+        priorArrayLengthWrite(state, bindingFact, origin, allocation.elements.length, reference))) {
+      return undefined;
+    }
+  }
+  return allocation.elements.length;
+}
+
+function priorArrayLengthWrite(
+  state: AnalysisState,
+  fact: StorageFact,
+  origin: StorageOrigin,
+  length: number,
+  reference: ts.Identifier,
+): boolean {
+  const write = state.model.writeOf(reference);
+  if (!write) {
+    return false;
+  }
+  if (write.reassign) {
+    return true;
+  }
+  const path = selectedSlots(reference);
+  for (let prefix = 0; prefix <= path.length; prefix += 1) {
+    if (originsForPath(fact, prefix ? path.slice(0, prefix) : "outer").includes(origin)) {
+      const index = arrayIndexForSlot(path[prefix]);
+      return index === undefined || index >= length;
+    }
+  }
+  return false;
 }
 
 function sharedBindingCount(state: AnalysisState): number {

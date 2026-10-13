@@ -168,6 +168,146 @@ test("alias writes leave disjoint captured fields quiet", () => {
 `), ["3:ImplicitInput: The function read() reads box, an implicit input."]);
 });
 
+test("array push changes length and appended elements, not existing indexes", () => {
+  assert.deepEqual(messages("captured-push-direct.ts", `function outer() {
+  const values = [0];
+  function stable() { return values[0]; }
+  function changed() { return values.length; }
+  values.push(1);
+  return [stable(), changed()];
+}
+`), ["4:ImplicitInput: The function changed() reads values, an implicit input."]);
+  assert.deepEqual(messages("captured-push-nested.ts", `function outer() {
+  const box = { items: [0] };
+  function stable() { return box.items[0]; }
+  function changed() { return box.items.length; }
+  box.items.push(1);
+  return [stable(), changed()];
+}
+`), ["4:ImplicitInput: The function changed() reads box, an implicit input."]);
+  assert.deepEqual(messages("captured-push-existing.ts", `function outer() {
+  const values = [0];
+  const alias = values;
+  function read() { return values[0]; }
+  alias.push(1);
+  return read();
+}
+`), []);
+  assert.deepEqual(messages("captured-empty-push.ts", `function outer() {
+  const values = [0];
+  function read() { return values.length; }
+  values.push();
+  return read();
+}
+`), []);
+  assert.deepEqual(messages("captured-push-length.ts", `function outer() {
+  const values = [0];
+  const alias = values;
+  function read() { return values.length; }
+  alias.push(1);
+  return read();
+}
+`), ["4:ImplicitInput: The function read() reads values, an implicit input."]);
+  assert.deepEqual(messages("captured-push-appended.ts", `function outer() {
+  const values = [0];
+  const alias = values;
+  function read() { return values[1]; }
+  alias.push(1);
+  return read();
+}
+`), ["4:ImplicitInput: The function read() reads values, an implicit input."]);
+  assert.deepEqual(messages("captured-push-disjoint-future.ts", `function outer() {
+  const values = [0];
+  const alias = values;
+  function read() { return values[2]; }
+  alias.push(1);
+  return read();
+}
+`), []);
+  assert.deepEqual(messages("captured-push-whole-array-read.ts", `function outer() {
+  const values = [0];
+  const alias = values;
+  function read() { return values.join(","); }
+  alias.push(1);
+  return read();
+}
+`), ["4:ImplicitInput: The function read() reads values, an implicit input."]);
+  assert.deepEqual(messages("captured-push-nested-element.ts", `function outer() {
+  const values = [{ n: 0 }];
+  const alias = values;
+  function read() { return values[0].n; }
+  alias.push({ n: 1 });
+  return read();
+}
+`), []);
+  assert.deepEqual(messages("captured-push-spread.ts", `function outer(items: number[]) {
+  const values = [0];
+  const alias = values;
+  function stable() { return values[0]; }
+  function changed() { return values[1]; }
+  alias.push(...items);
+  return [stable(), changed()];
+}
+`), ["5:ImplicitInput: The function changed() reads values, an implicit input."]);
+  assert.deepEqual(messages("captured-push-non-index-key.ts", `function outer(items: number[]) {
+  const values = [0];
+  const alias = values;
+  function read() { return values["01"]; }
+  alias.push(...items);
+  return read();
+}
+`), []);
+  assert.deepEqual(messages("captured-push-after-length-reset.ts", `function outer() {
+  const values = [0];
+  const alias = values;
+  function read() { return values[0]; }
+  alias.length = 0;
+  alias.push(1);
+  return read();
+}
+`), ["4:ImplicitInput: The function read() reads values, an implicit input."]);
+  assert.deepEqual(messages("captured-push-after-inbounds-write.ts", `function outer() {
+  const values = [0];
+  const alias = values;
+  function read() { return values[2]; }
+  alias[0] = 1;
+  alias.push(2);
+  return read();
+}
+`), []);
+  assert.deepEqual(messages("captured-push-after-sibling-write.ts", `function outer() {
+  const box = { items: [0], other: 0 };
+  function read() { return box.items[0]; }
+  box.other = 1;
+  box.items.push(2);
+  return read();
+}
+`), []);
+  assert.deepEqual(messages("captured-push-argument-reset.ts", `function outer() {
+  const values = [0];
+  const alias = values;
+  function read() { return values[0]; }
+  alias.push((alias.length = 0, 1));
+  return read();
+}
+`), ["4:ImplicitInput: The function read() reads values, an implicit input."]);
+  assert.deepEqual(messages("captured-push-index-write.ts", `function outer() {
+  const values = [0];
+  const alias = values;
+  function read() { return values[0]; }
+  alias[0] = 1;
+  return read();
+}
+`), ["4:ImplicitInput: The function read() reads values, an implicit input."]);
+  assert.deepEqual(messages("captured-reverse-index.ts", `function outer() {
+  const values = [0, 1];
+  function read() { return values[0]; }
+  values.reverse();
+  return read();
+}
+`), ["3:ImplicitInput: The function read() reads values, an implicit input."]);
+});
+
 test("value exports and exported callable returns expose container storage", () => {
   assert.deepEqual(messages("named-container-export.ts", `const shared: number[] = [];
 export { shared as values };
