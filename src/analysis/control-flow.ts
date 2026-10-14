@@ -27,7 +27,7 @@ export function reachableChildren(node: ts.Node): readonly ts.Node[] | undefined
 
 function conditionalChildren(condition: ts.Expression, whenTrue: ts.Node, whenFalse: ts.Node | undefined): readonly ts.Node[] {
   const value = literalBooleanValue(condition);
-  const selected = value === true ? [whenTrue] : value === false ? [] : [whenTrue];
+  const selected = value === false ? [] : [whenTrue];
   return [condition, ...selected, ...(value !== true && whenFalse ? [whenFalse] : [])];
 }
 

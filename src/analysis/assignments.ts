@@ -110,7 +110,8 @@ function isNameOrMember(expression: ts.Expression): boolean {
   return ts.isIdentifier(value) || ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value);
 }
 
-function referenceAssignment(reference: ts.Identifier): Assignment | undefined {
+/** Gives the value that the reference receives when the reference is an assignment target. */
+export function referenceAssignment(reference: ts.Identifier): Assignment | undefined {
   const target = outerExpression(reference);
   const parent = target.parent;
   if (ts.isBinaryExpression(parent) && parent.left === target) {

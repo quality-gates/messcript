@@ -2332,5 +2332,2839 @@
   "findings": [
    "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
   ]
+ },
+ {
+  "name": "mut-reduce-initial-external",
+  "source": "const store: number[] = [];\nfunction total() {\n  const local = [1, 2];\n  return local.reduce((sum, item) => { sum.push(item); return sum; }, store);\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function total(): The function total() mutates caller-owned callback argument, an implicit output.",
+   "4:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() mutates argument sum, an implicit output.",
+   "4:ImplicitInput: function total(): The function total() reads store, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-reduce-right-initial-external",
+  "source": "const store: number[] = [];\nfunction total() {\n  const local = [1, 2];\n  return local.reduceRight((sum, item) => { sum.push(item); return sum; }, store);\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function total(): The function total() mutates caller-owned callback argument, an implicit output.",
+   "4:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() mutates argument sum, an implicit output.",
+   "4:ImplicitInput: function total(): The function total() reads store, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-reduce-initial-private",
+  "source": "const rows: number[][] = [[1]];\nfunction total() {\n  return rows.reduce((sum, row) => sum + row.length, 0);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-foreach-third-argument",
+  "source": "const rows: number[] = [1];\nfunction grow() {\n  rows.forEach((row, index, all) => { all.push(row + index); });\n}\n",
+  "findings": [
+   "3:ImplicitInput: function grow(): The function grow() reads rows, an implicit input.",
+   "3:ImplicitOutput: function grow(): The function grow() mutates caller-owned callback argument, an implicit output.",
+   "3:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() mutates argument all, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-map-index-private",
+  "source": "function grow(rows: number[][]) {\n  return rows.map((row, index) => index + row.length);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-to-sorted-second-element",
+  "source": "const rows: number[][] = [[1], [2]];\nfunction order() {\n  return rows.toSorted((left, right) => { right.push(1); return left.length - right.length; });\n}\n",
+  "findings": [
+   "3:ImplicitInput: function order(): The function order() reads rows, an implicit input.",
+   "3:ImplicitOutput: function order(): The function order() mutates caller-owned callback argument, an implicit output.",
+   "3:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() mutates argument right, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-sort-copy-second-element",
+  "source": "const rows: number[][] = [[1], [2]];\nfunction order() {\n  const copy = [...rows];\n  copy.sort((left, right) => { right.push(1); return left.length - right.length; });\n  return copy;\n}\n",
+  "findings": [
+   "3:ImplicitInput: function order(): The function order() reads rows, an implicit input.",
+   "4:ImplicitOutput: function order(): The function order() mutates caller-owned callback argument, an implicit output.",
+   "4:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() mutates argument right, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-json-parse-reviver",
+  "source": "function load(text: string) {\n  return JSON.parse(text, (key, value) => { if (value && typeof value === \"object\") { value.key = key; } return value; });\n}\n",
+  "findings": [
+   "2:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() mutates argument value, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-json-stringify-replacer",
+  "source": "const state = { count: 0 };\nfunction save() {\n  return JSON.stringify(state, (key, value) => { if (key === \"\") { value.count += 1; } return value; });\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function save(): The function save() mutates caller-owned callback argument, an implicit output.",
+   "3:ImplicitInput: function save(): The function save() reads state, an implicit input.",
+   "3:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() mutates argument value, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-json-stringify-replacer-local",
+  "source": "function save() {\n  const state = { count: 0 };\n  return JSON.stringify(state, (key, value) => { if (key === \"\") { value.count += 1; } return value; });\n}\n",
+  "findings": [
+   "3:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() mutates argument value, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-param-index-captured",
+  "source": "const store: number[] = [];\nfunction add(item: number) {\n  const keep = (value: number) => { store.push(value); };\n  keep(item);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: arrow function keep(): The arrow function keep() writes store, an implicit output.",
+   "4:ImplicitOutput: function add(): The function add() writes store, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-declare-and-var",
+  "source": "declare var store: number[];\nvar store: number[];\nfunction read() {\n  return store.length;\n}\n",
+  "findings": [
+   "4:ImplicitInput: function read(): The function read() reads store, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-declare-const-read",
+  "source": "declare const config: { limit: number };\nfunction limit() {\n  return config.limit;\n}\n",
+  "findings": [
+   "3:ImplicitInput: function limit(): The function limit() reads config, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-declare-class-static",
+  "source": "declare class Registry { static count: number; static reset(): void; }\nfunction count() {\n  return Registry.count;\n}\nfunction reset() {\n  Registry.reset();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function count(): The function count() reads Registry, an implicit input.",
+   "6:ImplicitInput: function reset(): The function reset() reads Registry, an implicit input.",
+   "6:UnknownEffect: function reset(): The function reset() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-namespace-let-read",
+  "source": "namespace config {\n  export let limit = 1;\n}\nfunction read() {\n  return config.limit;\n}\n",
+  "findings": [
+   "5:ImplicitInput: function read(): The function read() reads config, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-namespace-nested-read",
+  "source": "namespace outer.inner {\n  export let limit = 1;\n}\nfunction read() {\n  return outer.inner.limit;\n}\n",
+  "findings": [
+   "5:ImplicitInput: function read(): The function read() reads outer, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-namespace-write",
+  "source": "namespace config {\n  export let limit = 1;\n}\nfunction change() {\n  config.limit = 2;\n}\n",
+  "findings": [
+   "5:ImplicitOutput: function change(): The function change() writes config, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-namespace-constant",
+  "source": "namespace config {\n  export const limit = 1;\n  export const name = \"limit\";\n}\nfunction read() {\n  return config.limit * 2;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-slot-direct-member",
+  "source": "const state = { a: [0], b: [0] };\nfunction setA() { state.a[0] = 1; }\nfunction readB() { return state.b[0]; }\nfunction readA() { return state.a[0]; }\n",
+  "findings": [
+   "2:ImplicitOutput: function setA(): The function setA() writes state, an implicit output.",
+   "4:ImplicitInput: function readA(): The function readA() reads state, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-slot-reassign",
+  "source": "let count = 0;\nfunction bump() { count = 1; }\nfunction read() { return count; }\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "3:ImplicitInput: function read(): The function read() reads count, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-slot-append-direct",
+  "source": "const log: number[] = [1, 2];\nfunction add() { log.push(3); }\nfunction first() { return log[0]; }\nfunction third() { return log[2]; }\nfunction any(index: number) { return log[index]; }\nfunction size() { return log.length; }\n",
+  "findings": [
+   "2:ImplicitOutput: function add(): The function add() writes log, an implicit output.",
+   "4:ImplicitInput: function third(): The function third() reads log, an implicit input.",
+   "5:ImplicitInput: function any(): The function any() reads log, an implicit input.",
+   "6:ImplicitInput: function size(): The function size() reads log, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-slot-append-helper",
+  "source": "const log: number[] = [1, 2];\nfunction add(list: number[]) { list.push(3); }\nfunction run() { add(log); }\nfunction first() { return log[0]; }\nfunction third() { return log[2]; }\n",
+  "findings": [
+   "2:ImplicitOutput: function add(): The function add() mutates argument list, an implicit output.",
+   "3:ImplicitOutput: function run(): The function run() mutates caller-owned value log, an implicit output.",
+   "3:ImplicitInput: function run(): The function run() reads log, an implicit input.",
+   "4:ImplicitInput: function first(): The function first() reads log, an implicit input.",
+   "5:ImplicitInput: function third(): The function third() reads log, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-slot-member-helper",
+  "source": "const state = { a: [0], b: [0] };\nfunction add(list: number[]) { list.push(3); }\nfunction run() { add(state.a); }\nfunction readB() { return state.b[0]; }\nfunction readA() { return state.a[1]; }\n",
+  "findings": [
+   "2:ImplicitOutput: function add(): The function add() mutates argument list, an implicit output.",
+   "3:ImplicitOutput: function run(): The function run() mutates caller-owned value state.a, an implicit output.",
+   "3:ImplicitInput: function run(): The function run() reads state, an implicit input.",
+   "5:ImplicitInput: function readA(): The function readA() reads state, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-slot-nested-write",
+  "source": "const state = { a: { x: 0, y: 0 }, b: 0 };\nfunction setX() { state.a.x = 1; }\nfunction readY() { return state.a.y; }\nfunction readX() { return state.a.x; }\nfunction readA() { return state.a; }\n",
+  "findings": [
+   "2:ImplicitOutput: function setX(): The function setX() writes state, an implicit output.",
+   "3:ImplicitInput: function readY(): The function readY() reads state, an implicit input.",
+   "4:ImplicitInput: function readX(): The function readX() reads state, an implicit input.",
+   "5:ImplicitInput: function readA(): The function readA() reads state, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-compound-write",
+  "source": "let total = 0;\nfunction add(value: number) { total += value; }\n",
+  "findings": [
+   "2:ImplicitInput: function add(): The function add() reads total, an implicit input.",
+   "2:ImplicitOutput: function add(): The function add() writes total, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-compound-member",
+  "source": "const state = { total: 0 };\nfunction add(value: number) { state.total += value; }\n",
+  "findings": [
+   "2:ImplicitInput: function add(): The function add() reads state, an implicit input.",
+   "2:ImplicitOutput: function add(): The function add() writes state, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-captured-push-callback",
+  "source": "function outer() {\n  const values = [0];\n  const add = () => { values.push(1); };\n  [1, 2].forEach(add);\n  const first = () => values[0];\n  const second = () => values[1];\n  return first() + second();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: arrow function add(): The arrow function add() writes values, an implicit output.",
+   "6:ImplicitInput: arrow function second(): The arrow function second() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-captured-push-declared-callback",
+  "source": "function outer() {\n  const values = [0];\n  function add() { values.push(1); }\n  [1, 2].forEach(add);\n  const first = () => values[0];\n  const second = () => values[1];\n  return first() + second();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "6:ImplicitInput: arrow function second(): The arrow function second() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-captured-push-direct",
+  "source": "function outer() {\n  const values = [0];\n  const add = () => { values.push(1); };\n  add();\n  add();\n  const first = () => values[0];\n  const second = () => values[1];\n  return first() + second();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: arrow function add(): The arrow function add() writes values, an implicit output.",
+   "7:ImplicitInput: arrow function second(): The arrow function second() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-captured-push-nested-call",
+  "source": "function outer() {\n  const values = [0];\n  const add = () => { values.push(1); };\n  const twice = () => { add(); add(); };\n  twice();\n  const first = () => values[0];\n  const second = () => values[1];\n  return first() + second();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: arrow function add(): The arrow function add() writes values, an implicit output.",
+   "4:ImplicitOutput: arrow function twice(): The arrow function twice() writes values, an implicit output.",
+   "7:ImplicitInput: arrow function second(): The arrow function second() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-captured-push-reassigned-callable",
+  "source": "function outer() {\n  const values = [0];\n  let add = () => { values.push(1); };\n  add = () => { values.push(2); };\n  add();\n  const first = () => values[0];\n  const second = () => values[1];\n  return first() + second();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: arrow function add(): The arrow function add() writes values, an implicit output.",
+   "4:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes values, an implicit output.",
+   "7:ImplicitInput: arrow function second(): The arrow function second() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-captured-length-index-callback",
+  "source": "function outer() {\n  const values = [0];\n  const add = () => { values[values.length] = 1; };\n  [1, 2].forEach(add);\n  const first = () => values[0];\n  const second = () => values[1];\n  return first() + second();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: arrow function add(): The arrow function add() writes values, an implicit output.",
+   "3:ImplicitInput: arrow function add(): The arrow function add() reads values, an implicit input.",
+   "5:ImplicitInput: arrow function first(): The arrow function first() reads values, an implicit input.",
+   "6:ImplicitInput: arrow function second(): The arrow function second() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-captured-index-zero-callback",
+  "source": "function outer() {\n  const values = [0];\n  const add = () => { values[0] = 5; };\n  [1, 2].forEach(add);\n  const first = () => values[0];\n  const second = () => values[1];\n  return first() + second();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: arrow function add(): The arrow function add() writes values, an implicit output.",
+   "5:ImplicitInput: arrow function first(): The arrow function first() reads values, an implicit input.",
+   "6:ImplicitInput: arrow function second(): The arrow function second() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-captured-truncate-callback",
+  "source": "function outer() {\n  const values = [0];\n  const add = () => { values.length = 0; };\n  [1, 2].forEach(add);\n  const first = () => values[0];\n  const second = () => values[1];\n  return first() + second();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: arrow function add(): The arrow function add() writes values, an implicit output.",
+   "5:ImplicitInput: arrow function first(): The arrow function first() reads values, an implicit input.",
+   "6:ImplicitInput: arrow function second(): The arrow function second() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-captured-truncate-to-one-callback",
+  "source": "function outer() {\n  const values = [0];\n  const add = () => { values.length = 1; };\n  [1, 2].forEach(add);\n  const first = () => values[0];\n  const second = () => values[1];\n  return first() + second();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: arrow function add(): The arrow function add() writes values, an implicit output.",
+   "5:ImplicitInput: arrow function first(): The arrow function first() reads values, an implicit input.",
+   "6:ImplicitInput: arrow function second(): The arrow function second() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-captured-spread-literal",
+  "source": "function outer(seed: number[]) {\n  const values = [...seed];\n  const add = () => { values.push(1); };\n  const first = () => values[0];\n  [1].forEach(add);\n  return first();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: arrow function add(): The arrow function add() writes values, an implicit output.",
+   "4:ImplicitInput: arrow function first(): The arrow function first() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-captured-default-parameter",
+  "source": "function outer(values = [0]) {\n  const add = () => { values[values.length] = 1; };\n  const first = () => values[0];\n  [1].forEach(add);\n  return first();\n}\n",
+  "findings": [
+   "2:ImplicitOutput: arrow function add(): The arrow function add() writes values, an implicit output.",
+   "2:ImplicitInput: arrow function add(): The arrow function add() reads values, an implicit input.",
+   "3:ImplicitInput: arrow function first(): The arrow function first() reads values, an implicit input.",
+   "4:ImplicitOutput: function outer(): The function outer() mutates argument values, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-captured-member-push",
+  "source": "function outer() {\n  const state = { values: [0] };\n  const add = () => { state.values.push(1); };\n  const first = () => state.values[0];\n  [1].forEach(add);\n  return first();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: arrow function add(): The arrow function add() writes state, an implicit output.",
+   "4:ImplicitInput: arrow function first(): The arrow function first() reads state, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e1-destructure-alias",
+  "source": "export const store = { list: [1] };\nexport function read() {\n  const { list } = store;\n  return list[0];\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads store, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e1-object-this-read",
+  "source": "function outer() {\n  const values = [0];\n  const box = {\n    size: 1,\n    add() { const size = this.size; values.push(size); },\n  };\n  function read0() { return values[0]; }\n  function read1() { return values[1]; }\n  function read2() { return values[2]; }\n  box.add();\n  return [read0(), read1(), read2()];\n}\n",
+  "findings": [
+   "5:UnknownEffect: method add(): The method add() reads this.size, an unknown effect.",
+   "5:ImplicitOutput: method add(): The method add() writes values, an implicit output.",
+   "8:ImplicitInput: function read1(): The function read1() reads values, an implicit input.",
+   "9:ImplicitInput: function read2(): The function read2() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e1-callee-other-then-push",
+  "source": "function outer(index: number) {\n  const values = [0];\n  const other = [0];\n  function add() { other.push(1); values.push(2); }\n  function read0() { return values[0]; }\n  function read1() { return values[1]; }\n  function read2() { return values[2]; }\n  function read3() { return values[3]; }\n  add();\n  return [read0(), read1(), read2(), read3()];\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes other, an implicit output.",
+   "6:ImplicitInput: function read1(): The function read1() reads values, an implicit input.",
+   "7:ImplicitInput: function read2(): The function read2() reads values, an implicit input.",
+   "8:ImplicitInput: function read3(): The function read3() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e1-while-other-after",
+  "source": "function outer(index: number) {\n  const values = [0];\n  const other = [0];\n  function add() { let step = 0; while (step < index) { values.push(step); other[0] = step; step += 1; } }\n  function read0() { return values[0]; }\n  function read1() { return values[1]; }\n  function read2() { return values[2]; }\n  function read3() { return values[3]; }\n  add();\n  return [read0(), read1(), read2(), read3()];\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "5:ImplicitInput: function read0(): The function read0() reads values, an implicit input.",
+   "6:ImplicitInput: function read1(): The function read1() reads values, an implicit input.",
+   "7:ImplicitInput: function read2(): The function read2() reads values, an implicit input.",
+   "8:ImplicitInput: function read3(): The function read3() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e1-gen-next-bound",
+  "source": "function outer(index: number) {\n  const values = [0];\n  function* gen() { values.push(1); yield 1; }\n  function read0() { return values[0]; }\n  function read1() { return values[1]; }\n  const it = gen();\n  const step = it.next.bind(it);\n  step();\n  return [read0(), read1()];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function gen(): The function gen() writes values, an implicit output.",
+   "4:ImplicitInput: function read0(): The function read0() reads values, an implicit input.",
+   "5:ImplicitInput: function read1(): The function read1() reads values, an implicit input.",
+   "7:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e1-x3",
+  "source": "export const limit = true;\nexport const none = null;\nexport const neg = -1;\nexport const off = false;\nexport function read() {\n  return limit && off && none === null && neg;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-e1-exp-other",
+  "source": "let count = 0;\nconst other = [1];\nexport { other };\nexport function read() {\n  return count;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-e1-ns-nested",
+  "source": "namespace Outer {\n  export namespace Inner {\n    export let limit = 3;\n  }\n  export function read() {\n    return Inner.limit;\n  }\n}\n",
+  "findings": [
+   "6:ImplicitInput: function read(): The function read() reads Inner, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e1-arr-push-empty",
+  "source": "function outer(index: number) {\n  const values = [0, 1];\n  function change() { values.push(); }\n  function read0() { return values[0]; }\n  function read1() { return values[index]; }\n  function read2() { return values.length; }\n  change();\n  return [read0(), read1(), read2()];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function change(): The function change() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e1-gen-from-entries",
+  "source": "function outer(index: number) {\n  const values = [0];\n  function* gen() { values.push(1); yield 1; }\n  function read0() { return values[0]; }\n  function read1() { return values[1]; }\n  const all = Array.from(gen(), (item) => item);\n  void all;\n  return [read0(), read1()];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function gen(): The function gen() writes values, an implicit output.",
+   "5:ImplicitInput: function read1(): The function read1() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e1-esc-member-dyn-mid",
+  "source": "function outer(index: number) {\n  const state = { a: { a: 1, b: 2 }, b: { a: 1, b: 2 }, length: 1 };\n  function change() { state[index === 0 ? 'a' : 'b'].a = 5; }\n  function read0() { return state; }\n  function read1() { return state.a; }\n  function read2() { return state.b; }\n  function read3() { return state.a.a; }\n  function read4() { return state.a.b; }\n  function read5() { return state[index]; }\n  function read6() { return state.a[index]; }\n  function read7() { return String(state.b); }\n  function read8() { return state.length; }\n  return { change, read0, read1, read2, read3, read4, read5, read6, read7, read8 };\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function change(): The function change() writes state, an implicit output.",
+   "4:ImplicitInput: function read0(): The function read0() reads state, an implicit input.",
+   "5:ImplicitInput: function read1(): The function read1() reads state, an implicit input.",
+   "6:ImplicitInput: function read2(): The function read2() reads state, an implicit input.",
+   "7:ImplicitInput: function read3(): The function read3() reads state, an implicit input.",
+   "8:ImplicitInput: function read4(): The function read4() reads state, an implicit input.",
+   "9:ImplicitInput: function read5(): The function read5() reads state, an implicit input.",
+   "10:ImplicitInput: function read6(): The function read6() reads state, an implicit input.",
+   "11:ImplicitInput: function read7(): The function read7() reads state, an implicit input.",
+   "12:ImplicitInput: function read8(): The function read8() reads state, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e1-overload-helper",
+  "source": "function outer(index: number) {\n  const values = [0];\n  function add(): void;\n  function add() { values.push(1); }\n  function read0() { return values[0]; }\n  function read1() { return values[1]; }\n  function read2() { return values[2]; }\n  function read3() { return values[3]; }\n  add();\n  return [read0(), read1(), read2(), read3()];\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "6:ImplicitInput: function read1(): The function read1() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e1-gen-throw",
+  "source": "function outer() {\n  const values = [0];\n  function* gen() { values.push(1); yield 1; }\n  function read0() { return values[0]; }\n  function read1() { return values[1]; }\n  const it = gen();\n  it.throw(new Error('x'));\n  return [read0(), read1()];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function gen(): The function gen() writes values, an implicit output.",
+   "5:ImplicitInput: function read1(): The function read1() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e1-esc-index",
+  "source": "function outer(index: number) {\n  const values = [0, 1];\n  function change() { values[1] = 5; }\n  function read0() { return values; }\n  function read1() { return values[index]; }\n  function read2() { return values[0]; }\n  function read3() { return values[1]; }\n  function read4() { return values[2]; }\n  function read5() { return values.length; }\n  function read6() { return values.at(0); }\n  function read7() { return String(values[0]); }\n  function read8() { return values[0].toFixed(); }\n  return { change, read0, read1, read2, read3, read4, read5, read6, read7, read8 };\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
+   "4:ImplicitInput: function read0(): The function read0() reads values, an implicit input.",
+   "5:ImplicitInput: function read1(): The function read1() reads values, an implicit input.",
+   "6:ImplicitInput: function read2(): The function read2() reads values, an implicit input.",
+   "7:ImplicitInput: function read3(): The function read3() reads values, an implicit input.",
+   "9:ImplicitInput: function read5(): The function read5() reads values, an implicit input.",
+   "10:ImplicitInput: function read6(): The function read6() reads values, an implicit input.",
+   "11:ImplicitInput: function read7(): The function read7() reads values, an implicit input.",
+   "12:ImplicitInput: function read8(): The function read8() reads values, an implicit input.",
+   "12:UnknownEffect: function read8(): The function read8() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e1-deep3",
+  "source": "function outer() {\n  const state = { a: { b: { x: 1 }, c: 2 }, d: 3 };\n  function change() { state.a.b.x = 5; }\n  function read0() { return state.a.c; }\n  function read1() { return state.a.b.x; }\n  function read2() { return state.d; }\n  function read3() { return state.a.b; }\n  change();\n  return [read0(), read1(), read2(), read3()];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function change(): The function change() writes state, an implicit output.",
+   "5:ImplicitInput: function read1(): The function read1() reads state, an implicit input.",
+   "7:ImplicitInput: function read3(): The function read3() reads state, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e1-esc-member-delete",
+  "source": "function outer(index: number) {\n  const state: { a: { a?: number; b: number }; b: number; length: number } = { a: { a: 1, b: 2 }, b: 3, length: 1 };\n  function change() { delete state.a.a; }\n  function read0() { return state; }\n  function read1() { return state.a; }\n  function read2() { return state.b; }\n  function read3() { return state.a.a; }\n  function read4() { return state.a.b; }\n  function read5() { return state[index]; }\n  function read6() { return state.a[index]; }\n  function read7() { return String(state.b); }\n  function read8() { return state.length; }\n  return { change, read0, read1, read2, read3, read4, read5, read6, read7, read8 };\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function change(): The function change() writes state, an implicit output.",
+   "4:ImplicitInput: function read0(): The function read0() reads state, an implicit input.",
+   "5:ImplicitInput: function read1(): The function read1() reads state, an implicit input.",
+   "7:ImplicitInput: function read3(): The function read3() reads state, an implicit input.",
+   "8:ImplicitInput: function read4(): The function read4() reads state, an implicit input.",
+   "9:ImplicitInput: function read5(): The function read5() reads state, an implicit input.",
+   "10:ImplicitInput: function read6(): The function read6() reads state, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e1-esc-append",
+  "source": "function outer(index: number) {\n  const values = [0];\n  function change() { values[values.length] = 1; }\n  function read0() { return values; }\n  function read1() { return values[index]; }\n  function read2() { return values[0]; }\n  function read3() { return values[1]; }\n  function read4() { return values[2]; }\n  function read5() { return values.length; }\n  function read6() { return values.at(0); }\n  function read7() { return String(values[0]); }\n  function read8() { return values[0].toFixed(); }\n  return { change, read0, read1, read2, read3, read4, read5, read6, read7, read8 };\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
+   "3:ImplicitInput: function change(): The function change() reads values, an implicit input.",
+   "4:ImplicitInput: function read0(): The function read0() reads values, an implicit input.",
+   "5:ImplicitInput: function read1(): The function read1() reads values, an implicit input.",
+   "6:ImplicitInput: function read2(): The function read2() reads values, an implicit input.",
+   "7:ImplicitInput: function read3(): The function read3() reads values, an implicit input.",
+   "8:ImplicitInput: function read4(): The function read4() reads values, an implicit input.",
+   "9:ImplicitInput: function read5(): The function read5() reads values, an implicit input.",
+   "10:ImplicitInput: function read6(): The function read6() reads values, an implicit input.",
+   "11:ImplicitInput: function read7(): The function read7() reads values, an implicit input.",
+   "12:ImplicitInput: function read8(): The function read8() reads values, an implicit input.",
+   "12:UnknownEffect: function read8(): The function read8() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e1-mixed-spread",
+  "source": "function outer(index: number) {\n  const values = [0];\n  const more = [2];\n  function add() { values.push(1, ...more); }\n  function read0() { return values[0]; }\n  function read1() { return values[1]; }\n  function read2() { return values[2]; }\n  function read3() { return values[3]; }\n  add();\n  return [read0(), read1(), read2(), read3()];\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "6:ImplicitInput: function read1(): The function read1() reads values, an implicit input.",
+   "7:ImplicitInput: function read2(): The function read2() reads values, an implicit input.",
+   "8:ImplicitInput: function read3(): The function read3() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e1-a2",
+  "source": "declare class Store { static count: number; static bump(): void; }\nexport function make() {\n  return new Store();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-e1-module-read-arg",
+  "source": "let limit = 1;\nexport function setLimit(next: number) { limit = next; }\nfunction outer(index: number) {\n  const values = [0];\n  function add() { values.push(limit); }\n  function read0() { return values[0]; }\n  function read1() { return values[1]; }\n  function read2() { return values[2]; }\n  function read3() { return values[3]; }\n  add();\n  return [read0(), read1(), read2(), read3()];\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function setLimit(): The function setLimit() writes limit, an implicit output.",
+   "5:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "5:ImplicitInput: function add(): The function add() reads limit, an implicit input.",
+   "7:ImplicitInput: function read1(): The function read1() reads values, an implicit input.",
+   "10:ImplicitInput: function outer(): The function outer() reads limit, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e1-gen-return",
+  "source": "function outer() {\n  const values = [0];\n  function* gen() { values.push(1); yield 1; }\n  function read0() { return values[0]; }\n  function read1() { return values[1]; }\n  const it = gen();\n  it.return(5);\n  return [read0(), read1()];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function gen(): The function gen() writes values, an implicit output.",
+   "5:ImplicitInput: function read1(): The function read1() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e1-exp-two",
+  "source": "let count = 0;\nconst other = 1;\nexport { other, count };\nexport function read() {\n  return count;\n}\n",
+  "findings": [
+   "5:ImplicitInput: function read(): The function read() reads count, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e1-a1",
+  "source": "declare class Store { static count: number; static bump(): void; }\nexport function read() {\n  return Store.count;\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads Store, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e1-ns-toplevel-write",
+  "source": "namespace Config {\n  export let limit = 3;\n  limit = 4;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: <module>: The module writes limit, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e2-push-argument-push-low",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[3] ?? -1; }\n  function add(x: number) { values.push(x); return x; }\n  values.push(add(1));\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e2-labeled-loop-init",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[2] ?? -1; }\n  lbl: for (let i = values.push(1); i < 0; i++) { continue lbl; }\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-e2-for-of-expression-push",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[2] ?? -1; }\n  for (const x of [values.push(1)]) { void x; }\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-e2-conditional-source",
+  "source": "function outer(flag: boolean) {\n  const a = [0];\n  const b = [0, 0, 0];\n  const values = flag ? a : b;\n  function read() { return values[2] ?? -1; }\n  values.push(1);\n  return read();\n}\n",
+  "findings": [
+   "5:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e2-made-array",
+  "source": "function outer() {\n  const values = make();\n  function read() { return values[2] ?? -1; }\n  values.push(1);\n  return read();\n}\nfunction make() { return [0]; }\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e2-index-write-at-2",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[4] ?? -1; }\n  values.push(1);\n  values[2] = 2;\n  values.push(3);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e2-cond-push",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[3] ?? -1; }\n  if (values.length > 9) { values.push(1); }\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e2-helper-early-return",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[3] ?? -1; }\n  function add(f: boolean) { if (f) { return; } values.push(1); }\n  add(true);\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "4:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e2-helper-nested-return",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[3] ?? -1; }\n  function add() { const f = () => { return 1; }; values.push(f()); }\n  add();\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e2-cond-empty-push",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[2] ?? -1; }\n  if (values.length > 9) values.push();\n  values.push(2);\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-e2-cond-receiver-alias",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[3] ?? -1; }\n  const other = values;\n  (Math.random() > 2 ? values : other).push(1);\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "5:ImplicitInput: function outer(): The function outer() calls Math.random(), an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e2-holder-assign",
+  "source": "function outer() {\n  const values = [0];\n  const state = { values };\n  function read() { return values[0] ?? -1; }\n  read();\n  state.values = values;\n  values.push(1);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e2-paren-length-index",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[0] ?? -1; }\n  (values[values.length]) = 1;\n  values.push(2);\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-e2-other-length-index-0",
+  "source": "function outer() {\n  const values = [0];\n  const other = [0, 0];\n  function read() { return values[0] ?? -1; }\n  values[other.length] = 1;\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e2-named-prop",
+  "source": "function outer() {\n  const values: number[] & { foo?: number } = [0];\n  function read() { return values[2] ?? -1; }\n  values.foo = 3;\n  values.push(4);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e2-nonnull-length-index",
+  "source": "function outer() {\n  const values: number[] & { n?: number } = [0];\n  function read() { return values[0] ?? -1; }\n  values[values.n!] = 1;\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e2-cond-grow-trunc",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[2] ?? -1; }\n  if (values.length > 9) values.length = 3;\n  values.push(4);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e2-msg-arg-holder",
+  "source": "export function change(items: number[]) {\n  const local = [items];\n  const add = () => { local[0].push(1); };\n  add();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: arrow function add(): The arrow function add() writes local, an implicit output.",
+   "4:ImplicitOutput: function change(): The function change() mutates caller-owned value local, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e2-fwd-destructure",
+  "source": "export function change(items: number[]) {\n  const holder = { items };\n  function add() { const { items: list } = holder; list.push(1); }\n  add();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function add(): The function add() reads holder, an implicit input.",
+   "3:ImplicitOutput: function add(): The function add() mutates caller-owned value list, an implicit output.",
+   "4:ImplicitOutput: function change(): The function change() mutates caller-owned value holder, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e2-iter-return",
+  "source": "function* gen() { yield 1; }\nexport function stop() {\n  const it = gen();\n  return it.return(undefined).done;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-e2-iter-throw",
+  "source": "function* gen() { try { yield 1; } catch { yield 2; } }\nexport function fail() {\n  const it = gen();\n  it.next();\n  return it.throw(new Error(\"x\")).value;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-e2-gen-mix",
+  "source": "let count = 0;\nfunction* gen() { count += 1; yield count; }\nfunction plain() { count += 1; return count; }\nexport function call(flag: boolean) {\n  const f = flag ? gen : plain;\n  f();\n}\n",
+  "findings": [
+   "2:ImplicitInput: function gen(): The function gen() reads count, an implicit input.",
+   "2:ImplicitOutput: function gen(): The function gen() writes count, an implicit output.",
+   "3:ImplicitInput: function plain(): The function plain() reads count, an implicit input.",
+   "3:ImplicitOutput: function plain(): The function plain() writes count, an implicit output.",
+   "6:ImplicitInput: function call(): The function call() reads count, an implicit input.",
+   "6:ImplicitOutput: function call(): The function call() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e2-default-after-spread",
+  "source": "let count = 0;\nfunction bump() { count += 1; return count; }\nfunction f(a?: number, b: number = bump()) { return (a ?? 0) + b; }\nexport function call(xs: [number?]) {\n  return f(...xs, 1);\n}\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "3:ImplicitInput: function f(): The function f() reads count, an implicit input.",
+   "3:ImplicitOutput: function f(): The function f() writes count, an implicit output.",
+   "5:ImplicitInput: function call(): The function call() reads count, an implicit input.",
+   "5:ImplicitOutput: function call(): The function call() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e2-default-before-spread",
+  "source": "let count = 0;\nfunction bump() { count += 1; return count; }\nfunction f(a: number = bump(), ...rest: number[]) { return a + rest.length; }\nexport function call(xs: number[]) {\n  return f(1, ...xs);\n}\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "3:ImplicitInput: function f(): The function f() reads count, an implicit input.",
+   "3:ImplicitOutput: function f(): The function f() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e2-default-global",
+  "source": "let count = 0;\nfunction bump() { count += 1; return count; }\nfunction f(a: number = bump()) { return a; }\nexport function call() {\n  return f(NaN);\n}\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "3:ImplicitInput: function f(): The function f() reads count, an implicit input.",
+   "3:ImplicitOutput: function f(): The function f() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e2-at-index",
+  "source": "export function change(items: number[]) {\n  const list = [[0], items];\n  list.at(1)?.push(1);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function change(): The function change() mutates argument items, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e2-reduce-right-initial",
+  "source": "export function change(items: number[][], target: number[]) {\n  const result = items.reduceRight((acc) => acc, target);\n  result.push(1);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function change(): The function change() mutates caller-owned value result, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e2-concat-element",
+  "source": "export function change(items: number[][], other: number[][]) {\n  const all = items.concat(other);\n  all[0].push(1);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function change(): The function change() mutates caller-owned value all, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e2-sort-alias",
+  "source": "export function change(items: number[]) {\n  const sorted = items.sort();\n  sorted.push(1);\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function change(): The function change() mutates argument items, an implicit output.",
+   "3:ImplicitOutput: function change(): The function change() mutates caller-owned value sorted, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e2-returned-call-outer",
+  "source": "function get(make: () => number[]) { return make(); }\nexport function change(make: () => number[]) {\n  get(make).push(1);\n}\n",
+  "findings": [
+   "1:UnknownEffect: function get(): The function get() calls unresolved callable, an unknown effect.",
+   "3:UnknownEffect: function change(): The function change() mutates value with unknown ownership, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e2-returned-call-inner",
+  "source": "function get(make: () => number[][]) { return make(); }\nexport function change(make: () => number[][]) {\n  get(make)[0].push(1);\n}\n",
+  "findings": [
+   "1:UnknownEffect: function get(): The function get() calls unresolved callable, an unknown effect.",
+   "3:UnknownEffect: function change(): The function change() mutates value with unknown ownership, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e2-two-returns",
+  "source": "function pick(flag: boolean, a: number[], b: number[]) {\n  if (flag) { return a; }\n  return b;\n}\nexport function change(a: number[], b: number[]) {\n  pick(false, a, b).push(1);\n}\n",
+  "findings": [
+   "6:ImplicitOutput: function change(): The function change() mutates receiver of push, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e2-exposed-export-list",
+  "source": "const limits = [1, 2];\nfunction all() { return limits; }\nfunction first() { return limits[0]; }\nexport { all, first };\n",
+  "findings": [
+   "2:ImplicitInput: function all(): The function all() reads limits, an implicit input.",
+   "3:ImplicitInput: function first(): The function first() reads limits, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e2-exposed-scalar",
+  "source": "const limit = 1;\nexport function all() { return limit; }\nexport function first() { return limit + 1; }\n",
+  "findings": []
+ },
+ {
+  "name": "mut-e2-opaque-factory",
+  "source": "let count = 0;\nfunction make(fn: () => void) {\n  if (Math.random() > 2) { return fn; }\n  return () => { count += 1; };\n}\nexport function call() {\n  make(() => undefined)();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function make(): The function make() calls Math.random(), an implicit input.",
+   "4:ImplicitInput: arrow function anonymous(): The arrow function anonymous() reads count, an implicit input.",
+   "4:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes count, an implicit output.",
+   "7:ImplicitInput: function call(): The function call() reads count, an implicit input.",
+   "7:ImplicitOutput: function call(): The function call() writes count, an implicit output.",
+   "7:UnknownEffect: function call(): The function call() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e2-no-return-push",
+  "source": "function none(): number[] { throw new Error(\"none\"); }\nexport function change() {\n  none().push(1);\n}\n",
+  "findings": [
+   "3:UnknownEffect: function change(): The function change() mutates value with unknown ownership, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-self-captured-push",
+  "source": "class Box {\n  items: number[] = [];\n  add() {\n    const self = this;\n    const put = () => { self.items.push(1); };\n    put();\n  }\n}\n",
+  "findings": [
+   "4:UnknownEffect: method Box.add(): The method Box.add() reads this, an unknown effect.",
+   "5:ImplicitOutput: arrow function put(): The arrow function put() writes self, an implicit output.",
+   "6:UnknownEffect: method Box.add(): The method Box.add() mutates receiver state, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-alias-param-captured",
+  "source": "const store: number[] = [];\nfunction outer(list: number[]) {\n  const alias = list;\n  const add = () => { alias.push(1); };\n  add();\n}\nfunction caller() {\n  outer(store);\n}\n",
+  "findings": [
+   "4:ImplicitOutput: arrow function add(): The arrow function add() writes alias, an implicit output.",
+   "5:ImplicitOutput: function outer(): The function outer() mutates caller-owned value alias, an implicit output.",
+   "8:ImplicitOutput: function caller(): The function caller() mutates caller-owned value store, an implicit output.",
+   "8:ImplicitInput: function caller(): The function caller() reads store, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e3-receiver-helper",
+  "source": "function push(values: number[]) {\n  values.push(1);\n}\nclass Box {\n  items: number[] = [];\n  add() {\n    push(this.items);\n  }\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function push(): The function push() mutates argument values, an implicit output.",
+   "7:UnknownEffect: method Box.add(): The method Box.add() mutates receiver state, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-callback-param-write",
+  "source": "const store: number[] = [];\nfunction run(callback: (values: number[]) => void) {\n  callback(store);\n}\nfunction caller() {\n  run((values) => { values.push(1); });\n}\n",
+  "findings": [
+   "3:UnknownEffect: function run(): The function run() calls unresolved callable, an unknown effect.",
+   "6:ImplicitInput: function caller(): The function caller() reads store, an implicit input.",
+   "6:ImplicitOutput: function caller(): The function caller() mutates caller-owned callback argument, an implicit output.",
+   "6:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() mutates argument values, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-getter-read",
+  "source": "let seed = 0;\nconst log: number[] = [];\nclass Counter {\n  get value(): number {\n    return log.length;\n  }\n  set value(next: number) {\n    log.push(next);\n  }\n}\nfunction run() {\n  const c = new Counter();\n  return c.value;\n}\n",
+  "findings": [
+   "5:ImplicitInput: accessor Counter.value(): The accessor Counter.value() reads log, an implicit input.",
+   "8:ImplicitOutput: accessor Counter.value(): The accessor Counter.value() writes log, an implicit output.",
+   "13:ImplicitInput: function run(): The function run() reads log, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e3-setter-write",
+  "source": "let seed = 0;\nconst log: number[] = [];\nclass Counter {\n  get value(): number {\n    return log.length;\n  }\n  set value(next: number) {\n    log.push(next);\n  }\n}\nfunction run() {\n  const c = new Counter();\n  c.value = 2;\n}\n",
+  "findings": [
+   "5:ImplicitInput: accessor Counter.value(): The accessor Counter.value() reads log, an implicit input.",
+   "8:ImplicitOutput: accessor Counter.value(): The accessor Counter.value() writes log, an implicit output.",
+   "13:ImplicitOutput: function run(): The function run() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-compound-accessor",
+  "source": "let seed = 0;\nconst log: number[] = [];\nclass Counter {\n  get value(): number {\n    return log.length;\n  }\n  set value(next: number) {\n    log.push(next);\n  }\n}\nfunction run() {\n  const c = new Counter();\n  c.value += 2;\n}\n",
+  "findings": [
+   "5:ImplicitInput: accessor Counter.value(): The accessor Counter.value() reads log, an implicit input.",
+   "8:ImplicitOutput: accessor Counter.value(): The accessor Counter.value() writes log, an implicit output.",
+   "13:ImplicitInput: function run(): The function run() reads log, an implicit input.",
+   "13:ImplicitOutput: function run(): The function run() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-increment-accessor",
+  "source": "let seed = 0;\nconst log: number[] = [];\nclass Counter {\n  get value(): number {\n    return log.length;\n  }\n  set value(next: number) {\n    log.push(next);\n  }\n}\nfunction run() {\n  const c = new Counter();\n  c.value++;\n}\n",
+  "findings": [
+   "5:ImplicitInput: accessor Counter.value(): The accessor Counter.value() reads log, an implicit input.",
+   "8:ImplicitOutput: accessor Counter.value(): The accessor Counter.value() writes log, an implicit output.",
+   "13:ImplicitInput: function run(): The function run() reads log, an implicit input.",
+   "13:ImplicitOutput: function run(): The function run() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-decrement-accessor",
+  "source": "let seed = 0;\nconst log: number[] = [];\nclass Counter {\n  get value(): number {\n    return log.length;\n  }\n  set value(next: number) {\n    log.push(next);\n  }\n}\nfunction run() {\n  const c = new Counter();\n  --c.value;\n}\n",
+  "findings": [
+   "5:ImplicitInput: accessor Counter.value(): The accessor Counter.value() reads log, an implicit input.",
+   "8:ImplicitOutput: accessor Counter.value(): The accessor Counter.value() writes log, an implicit output.",
+   "13:ImplicitInput: function run(): The function run() reads log, an implicit input.",
+   "13:ImplicitOutput: function run(): The function run() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-not-increment",
+  "source": "let seed = 0;\nconst log: number[] = [];\nclass Counter {\n  get value(): number {\n    return log.length;\n  }\n  set value(next: number) {\n    log.push(next);\n  }\n}\nfunction run() {\n  const c = new Counter();\n  return -c.value;\n}\n",
+  "findings": [
+   "5:ImplicitInput: accessor Counter.value(): The accessor Counter.value() reads log, an implicit input.",
+   "8:ImplicitOutput: accessor Counter.value(): The accessor Counter.value() writes log, an implicit output.",
+   "13:ImplicitInput: function run(): The function run() reads log, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e3-not-prefix",
+  "source": "let seed = 0;\nconst log: number[] = [];\nclass Counter {\n  get value(): number {\n    return log.length;\n  }\n  set value(next: number) {\n    log.push(next);\n  }\n}\nfunction run() {\n  const c = new Counter();\n  return !c.value;\n}\n",
+  "findings": [
+   "5:ImplicitInput: accessor Counter.value(): The accessor Counter.value() reads log, an implicit input.",
+   "8:ImplicitOutput: accessor Counter.value(): The accessor Counter.value() writes log, an implicit output.",
+   "13:ImplicitInput: function run(): The function run() reads log, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e3-logical-assign-accessor",
+  "source": "let seed = 0;\nconst log: number[] = [];\nclass Counter {\n  get value(): number {\n    return log.length;\n  }\n  set value(next: number) {\n    log.push(next);\n  }\n}\nfunction run() {\n  const c = new Counter();\n  c.value ||= 3;\n}\n",
+  "findings": [
+   "5:ImplicitInput: accessor Counter.value(): The accessor Counter.value() reads log, an implicit input.",
+   "8:ImplicitOutput: accessor Counter.value(): The accessor Counter.value() writes log, an implicit output.",
+   "13:ImplicitInput: function run(): The function run() reads log, an implicit input.",
+   "13:ImplicitOutput: function run(): The function run() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-comparison-accessor",
+  "source": "let seed = 0;\nconst log: number[] = [];\nclass Counter {\n  get value(): number {\n    return log.length;\n  }\n  set value(next: number) {\n    log.push(next);\n  }\n}\nfunction run() {\n  const c = new Counter();\n  return c.value < 3;\n}\n",
+  "findings": [
+   "5:ImplicitInput: accessor Counter.value(): The accessor Counter.value() reads log, an implicit input.",
+   "8:ImplicitOutput: accessor Counter.value(): The accessor Counter.value() writes log, an implicit output.",
+   "13:ImplicitInput: function run(): The function run() reads log, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e3-right-side-accessor",
+  "source": "let seed = 0;\nconst log: number[] = [];\nclass Counter {\n  get value(): number {\n    return log.length;\n  }\n  set value(next: number) {\n    log.push(next);\n  }\n}\nfunction run() {\n  const c = new Counter();\n  let x = 0;\n  x = c.value;\n  return x;\n}\n",
+  "findings": [
+   "5:ImplicitInput: accessor Counter.value(): The accessor Counter.value() reads log, an implicit input.",
+   "8:ImplicitOutput: accessor Counter.value(): The accessor Counter.value() writes log, an implicit output.",
+   "14:ImplicitInput: function run(): The function run() reads log, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e3-param-accessor-set",
+  "source": "let seed = 0;\nconst log: number[] = [];\nclass Counter {\n  get value(): number {\n    return log.length;\n  }\n  set value(next: number) {\n    log.push(next);\n  }\n}\nfunction run(c: Counter) {\n  c.value = 1;\n}\n",
+  "findings": [
+   "5:ImplicitInput: accessor Counter.value(): The accessor Counter.value() reads log, an implicit input.",
+   "8:ImplicitOutput: accessor Counter.value(): The accessor Counter.value() writes log, an implicit output.",
+   "12:ImplicitOutput: function run(): The function run() writes log, an implicit output.",
+   "12:UnknownEffect: function run(): The function run() accesses unresolved accessor, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-setter-only",
+  "source": "class Sink {\n  set value(next: number[]) {\n    next.push(1);\n  }\n}\nfunction write() {\n  const sink = new Sink();\n  const local: number[] = [];\n  sink.value = local;\n  return local;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: accessor Sink.value(): The accessor Sink.value() mutates argument next, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-setter-arg-global",
+  "source": "const store: number[] = [];\nclass Sink {\n  set value(next: number[]) {\n    next.push(1);\n  }\n}\nfunction write() {\n  const sink = new Sink();\n  sink.value = store;\n}\n",
+  "findings": [
+   "4:ImplicitOutput: accessor Sink.value(): The accessor Sink.value() mutates argument next, an implicit output.",
+   "9:ImplicitOutput: function write(): The function write() mutates caller-owned value store, an implicit output.",
+   "9:ImplicitInput: function write(): The function write() reads store, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e3-getter-returns-callable",
+  "source": "const log: number[] = [];\nclass Counter {\n  get fn() {\n    const size = log.length;\n    return () => size;\n  }\n}\nfunction add(value: number) {\n  log.push(value);\n}\nfunction run() {\n  const c = new Counter();\n  return c.fn();\n}\n",
+  "findings": [
+   "4:ImplicitInput: accessor Counter.fn(): The accessor Counter.fn() reads log, an implicit input.",
+   "9:ImplicitOutput: function add(): The function add() writes log, an implicit output.",
+   "13:UnknownEffect: function run(): The function run() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-getter-as-argument",
+  "source": "const log: number[] = [];\nclass Counter {\n  get value() {\n    return log.length;\n  }\n}\nfunction add(value: number) {\n  log.push(value);\n}\nfunction run() {\n  const c = new Counter();\n  return Math.abs(c.value);\n}\n",
+  "findings": [
+   "4:ImplicitInput: accessor Counter.value(): The accessor Counter.value() reads log, an implicit input.",
+   "8:ImplicitOutput: function add(): The function add() writes log, an implicit output.",
+   "12:ImplicitInput: function run(): The function run() reads log, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e3-global-this-push",
+  "source": "function run() {\n  globalThis.process.argv.push(\"x\");\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function run(): The function run() writes globalThis, an implicit output.",
+   "2:UnknownEffect: function run(): The function run() mutates value with unknown ownership, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-global-this-sort",
+  "source": "function run() {\n  return globalThis.process.argv.sort();\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function run(): The function run() writes globalThis, an implicit output.",
+   "2:UnknownEffect: function run(): The function run() mutates value with unknown ownership, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-gen-var-cycle",
+  "source": "const log: number[] = [];\nfunction* gen() {\n  log.push(1);\n  yield 1;\n}\nexport function run() {\n  var a = gen();\n  var b = a;\n  var a = b;\n  for (const x of a) {\n    void x;\n  }\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
+   "10:ImplicitOutput: function run(): The function run() writes log, an implicit output.",
+   "10:UnknownEffect: function run(): The function run() uses unresolved iterate protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-gen-yield-plain",
+  "source": "const log: number[] = [];\nfunction* gen() {\n  log.push(1);\n  yield 1;\n}\nfunction* outer() {\n  yield gen();\n}\nexport function run() {\n  for (const x of outer()) {\n    void x;\n  }\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
+   "7:ImplicitOutput: function outer(): The function outer() writes log, an implicit output.",
+   "10:ImplicitOutput: function run(): The function run() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-gen-passed-local",
+  "source": "const log: number[] = [];\nfunction* gen() {\n  log.push(1);\n  yield 1;\n}\nfunction keep(value: unknown) {\n  return value === undefined;\n}\nexport function run() {\n  return keep(gen());\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
+   "10:ImplicitOutput: function run(): The function run() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-gen-consumed-param",
+  "source": "const log: number[] = [];\nfunction* gen() {\n  log.push(1);\n  yield 1;\n}\nfunction consume(items: Iterable<number>) {\n  for (const x of items) {\n    void x;\n  }\n}\nexport function run() {\n  consume(gen());\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
+   "7:UnknownEffect: function consume(): The function consume() uses unresolved iterate protocol, an unknown effect.",
+   "12:UnknownEffect: function run(): The function run() uses unresolved iterate protocol, an unknown effect.",
+   "12:ImplicitOutput: function run(): The function run() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-gen-return",
+  "source": "const log: number[] = [];\nfunction* gen() {\n  log.push(1);\n  yield 1;\n}\nexport function run() {\n  const g = gen();\n  return g.return(undefined);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
+   "8:ImplicitOutput: function run(): The function run() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-iter-unknown-call",
+  "source": "export function run(make: () => number[]) {\n  for (const x of make()) {\n    void x;\n  }\n}\n",
+  "findings": [
+   "2:UnknownEffect: function run(): The function run() uses unresolved iterate protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-iter-mixed-call",
+  "source": "const log: number[] = [];\nfunction* gen() {\n  log.push(1);\n  yield 1;\n}\nfunction plain() {\n  return [1];\n}\nexport function run(flag: boolean) {\n  const f = flag ? gen : plain;\n  for (const x of f()) {\n    void x;\n  }\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
+   "11:UnknownEffect: function run(): The function run() uses unresolved iterate protocol, an unknown effect.",
+   "11:ImplicitOutput: function run(): The function run() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-iter-member",
+  "source": "export function run(box: { items: number[] }) {\n  for (const x of box.items) {\n    void x;\n  }\n}\n",
+  "findings": [
+   "2:UnknownEffect: function run(): The function run() uses unresolved iterate protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-iter-reassigned",
+  "source": "const log: number[] = [];\nfunction* gen() {\n  log.push(1);\n  yield 1;\n}\nexport function run(other: Iterable<number>) {\n  let it: Iterable<number> = gen();\n  it = other;\n  for (const x of it) {\n    void x;\n  }\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
+   "9:ImplicitOutput: function run(): The function run() writes log, an implicit output.",
+   "9:UnknownEffect: function run(): The function run() uses unresolved iterate protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-await-unknown-call",
+  "source": "export async function run(make: () => Promise<number>) {\n  return await make();\n}\n",
+  "findings": [
+   "2:UnknownEffect: function run(): The function run() uses unresolved await protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-await-plain-call",
+  "source": "function plain() {\n  return 1;\n}\nexport async function run() {\n  return await plain();\n}\n",
+  "findings": [
+   "5:UnknownEffect: function run(): The function run() uses unresolved await protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-await-exported-plain",
+  "source": "export function plain() {\n  return 1;\n}\nexport async function run() {\n  return await plain();\n}\n",
+  "findings": [
+   "5:UnknownEffect: function run(): The function run() uses unresolved await protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-await-mixed",
+  "source": "async function hot() {\n  return 1;\n}\nfunction plain() {\n  return 1;\n}\nexport async function run(flag: boolean) {\n  const f = flag ? hot : plain;\n  return await f();\n}\n",
+  "findings": [
+   "9:UnknownEffect: function run(): The function run() uses unresolved await protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-computed-method-name",
+  "source": "const log: string[] = [];\nfunction key() {\n  log.push(\"k\");\n  return \"m\";\n}\nexport function run() {\n  class A {\n    [key()]() {\n      return 1;\n    }\n  }\n  return A;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function key(): The function key() writes log, an implicit output.",
+   "8:ImplicitOutput: function run(): The function run() writes log, an implicit output.",
+   "8:ImplicitOutput: method A.[key()](): The method A.[key()]() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-dec-factory",
+  "source": "const log: string[] = [];\nfunction factory() {\n  log.push(\"f\");\n  return (target: unknown, context: ClassMethodDecoratorContext) => undefined;\n}\nexport function run() {\n  class A {\n    @factory()\n    go() {\n      return 1;\n    }\n  }\n  return A;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function factory(): The function factory() writes log, an implicit output.",
+   "8:ImplicitOutput: function run(): The function run() writes log, an implicit output.",
+   "8:ImplicitOutput: method A.go(): The method A.go() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-gen-for-of-target",
+  "source": "const log: number[] = [];\nfunction* gen() {\n  log.push(1);\n  yield 1;\n}\nexport function run(items: Iterable<number>[]) {\n  let g: Iterable<number> = gen();\n  for (g of items) {\n    void g;\n  }\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-gen-double-alias",
+  "source": "const log: number[] = [];\nfunction* gen() {\n  log.push(1);\n  yield 1;\n}\nexport function run() {\n  var g = gen();\n  var h = g;\n  var h = g;\n  for (const x of h) {\n    void x;\n  }\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
+   "10:ImplicitOutput: function run(): The function run() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-gen-throw",
+  "source": "const log: number[] = [];\nfunction* gen() {\n  log.push(1);\n  yield 1;\n}\nexport function run() {\n  const g = gen();\n  return g.throw(new Error(\"stop\"));\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
+   "8:ImplicitOutput: function run(): The function run() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-await-generator",
+  "source": "const log: number[] = [];\nfunction* gen() {\n  log.push(1);\n  yield 1;\n}\nexport async function run() {\n  return await gen();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
+   "7:UnknownEffect: function run(): The function run() uses unresolved await protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-iterate-async-call",
+  "source": "async function hot() {\n  return [1];\n}\nexport function run() {\n  for (const x of hot() as any) {\n    void x;\n  }\n}\n",
+  "findings": [
+   "5:UnknownEffect: function run(): The function run() uses unresolved iterate protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-await-static-async",
+  "source": "class Store {\n  static async load() {\n    return 1;\n  }\n}\nexport async function run() {\n  return await Store.load();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-e3-captured-this-read",
+  "source": "class Box {\n  items: number[] = [];\n  total() {\n    const items = this.items;\n    const read = () => items.length;\n    return read();\n  }\n}\nconst shared = new Box();\nexport function touch() {\n  shared.items.push(1);\n}\nexport function run() {\n  return shared.total();\n}\n",
+  "findings": [
+   "4:UnknownEffect: method Box.total(): The method Box.total() reads this.items, an unknown effect.",
+   "11:ImplicitOutput: function touch(): The function touch() writes shared, an implicit output.",
+   "14:ImplicitInput: function run(): The function run() reads this.items, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e3-method-receiver-param",
+  "source": "const store: number[] = [];\nclass Box {\n  items: number[] = [];\n  add() {\n    this.items.push(1);\n  }\n}\nfunction fill(box: Box) {\n  box.add();\n}\nexport function main() {\n  const box = new Box();\n  fill(box);\n  return store;\n}\n",
+  "findings": [
+   "5:UnknownEffect: method Box.add(): The method Box.add() writes this.items, an unknown effect.",
+   "9:ImplicitOutput: function fill(): The function fill() mutates argument box, an implicit output.",
+   "9:UnknownEffect: function fill(): The function fill() calls overridable method, an unknown effect.",
+   "13:UnknownEffect: function main(): The function main() calls overridable method, an unknown effect.",
+   "14:ImplicitInput: function main(): The function main() reads store, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e3-method-self-alias",
+  "source": "class Box {\n  items: number[] = [];\n  add() {\n    this.items.push(1);\n  }\n  twice() {\n    const self = this;\n    self.add();\n  }\n}\nexport function run() {\n  return new Box();\n}\n",
+  "findings": [
+   "4:UnknownEffect: method Box.add(): The method Box.add() writes this.items, an unknown effect.",
+   "7:UnknownEffect: method Box.twice(): The method Box.twice() reads this, an unknown effect.",
+   "8:UnknownEffect: method Box.twice(): The method Box.twice() mutates receiver state, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-default-write-passed",
+  "source": "const store: number[] = [];\nfunction fill(list: number[], extra = list.push(1)) {\n  return extra;\n}\nexport function run() {\n  return fill(store, 2);\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function fill(): The function fill() mutates argument list, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-default-first-literal",
+  "source": "const log: number[] = [];\nexport function touch() {\n  log.push(1);\n}\nfunction first(value: number = (touch(), 0)) {\n  return value;\n}\nexport function run() {\n  return first(1);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function touch(): The function touch() writes log, an implicit output.",
+   "5:ImplicitOutput: function first(): The function first() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-default-call-literal",
+  "source": "const log: number[] = [];\nexport function touch() {\n  log.push(1);\n}\nfunction apply(cb: () => void, extra: number = (cb(), 0)) {\n  return extra;\n}\nexport function run() {\n  return apply(touch, 1);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function touch(): The function touch() writes log, an implicit output.",
+   "5:UnknownEffect: function apply(): The function apply() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-foreach-apply",
+  "source": "const log: number[] = [];\nexport function touch() {\n  log.push(1);\n}\nexport function run() {\n  [touch].forEach((f) => f());\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function touch(): The function touch() writes log, an implicit output.",
+   "6:UnknownEffect: function run(): The function run() calls unresolved callable, an unknown effect.",
+   "6:UnknownEffect: arrow function anonymous(): The arrow function anonymous() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-e3-library-callback-console",
+  "source": "function each(f: (x: number) => void) {\n  f(1);\n}\nexport function run() {\n  each(console.log);\n}\n",
+  "findings": [
+   "2:UnknownEffect: function each(): The function each() calls unresolved callable, an unknown effect.",
+   "5:ImplicitOutput: function run(): The function run() uses console, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-e3-passed-read-other-line",
+  "source": "const log: number[] = [];\nexport function touch() {\n  log.push(1);\n}\nfunction keep(value: unknown) {\n  return value === undefined;\n}\nexport function run(make: (value: unknown) => void) {\n  make(\n    log,\n  );\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function touch(): The function touch() writes log, an implicit output.",
+   "9:UnknownEffect: function run(): The function run() calls unresolved callable, an unknown effect.",
+   "10:ImplicitInput: function run(): The function run() reads log, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e3-passed-read-global",
+  "source": "export function run(make: (value: unknown) => void) {\n  make(process);\n}\n",
+  "findings": [
+   "2:UnknownEffect: function run(): The function run() calls unresolved callable, an unknown effect.",
+   "2:ImplicitInput: function run(): The function run() reads process, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e3-passed-read-reassigned",
+  "source": "let current: number[] = [];\nexport function reset() {\n  current = [];\n}\nexport function run(make: (value: unknown) => void) {\n  make(current);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function reset(): The function reset() writes current, an implicit output.",
+   "6:UnknownEffect: function run(): The function run() calls unresolved callable, an unknown effect.",
+   "6:ImplicitInput: function run(): The function run() reads current, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-e3-passed-read-local-call",
+  "source": "const log: number[] = [];\nexport function touch() {\n  log.push(1);\n}\nfunction keep(value: unknown) {\n  return value === undefined;\n}\nexport function run(make: () => void) {\n  return keep(log) && make();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function touch(): The function touch() writes log, an implicit output.",
+   "9:ImplicitInput: function run(): The function run() reads log, an implicit input.",
+   "9:UnknownEffect: function run(): The function run() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s1-scalar-param",
+  "source": "export function change(n: number): unknown {\n  const value: any = n;\n  value.x = 1;\n  return value;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-scalar-param-paren",
+  "source": "export function change(n: (number)): unknown {\n  const value: any = n;\n  value.x = 1;\n  return value;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-scalar-param-union",
+  "source": "export function change(n: number | undefined): unknown {\n  const value: any = n;\n  value.x = 1;\n  return value;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-typed-tuple",
+  "source": "export function change(xs: [number, string]): void {\n  const value: any = xs[1];\n  value.x = 1;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-typed-tuple-object",
+  "source": "export function change(xs: [number, { x: number }]): void {\n  const value: any = xs[1];\n  value.x = 1;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function change(): The function change() mutates caller-owned value value, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-typed-named-tuple",
+  "source": "export function change(xs: [a: number, b: string]): void {\n  const value: any = xs[1];\n  value.x = 1;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-typed-readonly",
+  "source": "export function change(xs: readonly number[]): void {\n  const value: any = xs[0];\n  value.x = 1;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-typed-paren-array",
+  "source": "export function change(xs: (number[])): void {\n  const value: any = xs[0];\n  value.x = 1;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-typed-union-arrays",
+  "source": "export function change(xs: number[] | string[]): void {\n  const value: any = xs[0];\n  value.x = 1;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-typed-union-object-array",
+  "source": "export function change(xs: number[] | { x: number }[]): void {\n  const value: any = xs[0];\n  value.x = 1;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function change(): The function change() mutates caller-owned value value, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-typed-alias",
+  "source": "type Values = number[];\nexport function change(xs: Values): void {\n  const value: any = xs[0];\n  value.x = 1;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-typed-generic-array",
+  "source": "export function change(xs: Array<number>): void {\n  const value: any = xs[0];\n  value.x = 1;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-typed-generic-readonly",
+  "source": "export function change(xs: ReadonlyArray<number>): void {\n  const value: any = xs[0];\n  value.x = 1;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-map-entry-iterate-external",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const entries = new Map([[\"a\", store]]);\n  for (const [, value] of entries) {\n    value.push(1);\n  }\n}\n",
+  "findings": [
+   "3:ImplicitInput: function change(): The function change() reads store, an implicit input.",
+   "5:ImplicitOutput: function change(): The function change() mutates caller-owned value value, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-map-entry-get-external",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const entries = new Map([[\"a\", store]]);\n  entries.get(\"a\")?.push(1);\n}\n",
+  "findings": [
+   "3:ImplicitInput: function change(): The function change() reads store, an implicit input.",
+   "4:ImplicitOutput: function change(): The function change() mutates receiver of push, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-map-entry-dynamic-key",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const key = String(Math.PI);\n  const entries = new Map([[key, store]]);\n  for (const [, value] of entries) {\n    value.push(1);\n  }\n}\n",
+  "findings": [
+   "4:ImplicitInput: function change(): The function change() reads store, an implicit input.",
+   "6:ImplicitOutput: function change(): The function change() mutates caller-owned value value, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-weakmap-entry-get-external",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const key = {};\n  const entries = new WeakMap([[key, store]]);\n  entries.get(key)?.push(1);\n}\n",
+  "findings": [
+   "4:ImplicitInput: function change(): The function change() reads store, an implicit input.",
+   "5:ImplicitOutput: function change(): The function change() mutates receiver of push, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-set-pairs-iterate",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const pairs = new Set([[[0], store]]);\n  for (const [first] of pairs) {\n    first.push(1);\n  }\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-map-for-of-values",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const entries = new Map([[\"a\", store]]);\n  for (const value of entries.values()) {\n    value.push(1);\n  }\n}\n",
+  "findings": [
+   "3:ImplicitInput: function change(): The function change() reads store, an implicit input.",
+   "5:ImplicitOutput: function change(): The function change() mutates caller-owned value value, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-object-rest-external",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const holder = { a: [0], b: store };\n  const { a, ...rest } = holder;\n  rest.b.push(a.length);\n}\n",
+  "findings": [
+   "3:ImplicitInput: function change(): The function change() reads store, an implicit input.",
+   "5:ImplicitOutput: function change(): The function change() mutates caller-owned value rest, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-object-pattern-private",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const holder = { a: [0], b: store };\n  const { a } = holder;\n  a.push(1);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-object-pattern-computed",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const holder = { a: [0], b: store };\n  const { [\"a\"]: first } = holder;\n  first.push(1);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-object-pattern-string-key",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const holder = { a: [0], b: store };\n  const { \"a\": first } = holder;\n  first.push(1);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-object-pattern-numeric-key",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const holder = { 0: [0], 1: store };\n  const { 0: first } = holder;\n  first.push(1);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-object-pattern-dynamic-key",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const key = String(Math.PI) as \"a\";\n  const holder = { a: [0], b: store };\n  const { [key]: first } = holder;\n  first.push(1);\n}\n",
+  "findings": [
+   "4:ImplicitInput: function change(): The function change() reads store, an implicit input.",
+   "6:ImplicitOutput: function change(): The function change() mutates caller-owned value first, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-array-pattern-private",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const pair = [[0], store];\n  const [first] = pair;\n  first.push(1);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-array-pattern-external",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const pair = [[0], store];\n  const [, second] = pair;\n  second.push(1);\n}\n",
+  "findings": [
+   "3:ImplicitInput: function change(): The function change() reads store, an implicit input.",
+   "5:ImplicitOutput: function change(): The function change() mutates caller-owned value second, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-array-pattern-rest",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const pair = [[0], store];\n  const [, ...others] = pair;\n  others[0].push(1);\n}\n",
+  "findings": [
+   "3:ImplicitInput: function change(): The function change() reads store, an implicit input.",
+   "5:ImplicitOutput: function change(): The function change() mutates caller-owned value others, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-array-pattern-rest-private",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const pair = [store, [0]];\n  const [first, ...others] = pair;\n  others.push(first);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-nested-pattern",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const holder = { inner: { a: [0], b: store } };\n  const { inner: { a } } = holder;\n  a.push(1);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-for-of-pattern",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const rows = [{ a: [0], b: store }];\n  for (const { a } of rows) {\n    a.push(1);\n  }\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-nested-factory-distinct",
+  "source": "const store: number[] = [];\nfunction make(): number[][] {\n  return [[0]];\n}\nfunction pair() {\n  return { x: make(), y: make() };\n}\nexport function change(): void {\n  const both = pair();\n  both.x.push(store);\n  both.y[0].push(1);\n}\n",
+  "findings": [
+   "10:ImplicitInput: function change(): The function change() reads store, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-factory-members-distinct",
+  "source": "const store: number[] = [];\nfunction make() {\n  return { x: [[0]], y: [[0]] };\n}\nexport function change(): void {\n  const both = make();\n  both.x.push(store);\n  both.y[0].push(1);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-param-element-caller",
+  "source": "const store: number[] = [];\nfunction change(rows: number[][]): void {\n  for (const row of rows) {\n    row.push(1);\n  }\n}\nexport function outer(): void {\n  const local = [store];\n  change(local);\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function change(): The function change() mutates caller-owned value row, an implicit output.",
+   "8:ImplicitInput: function outer(): The function outer() reads store, an implicit input.",
+   "9:ImplicitOutput: function outer(): The function outer() mutates caller-owned value local, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-huge-index",
+  "source": "const log: number[] = [1, 2];\nexport function setHuge(): void {\n  log[4294967295] = 3;\n}\nexport function size(): number {\n  return log.length;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function setHuge(): The function setHuge() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-factory-private-member",
+  "source": "const store: number[] = [];\nfunction make() {\n  return { a: [0], b: store };\n}\nexport function change(): void {\n  const both = make();\n  both.a.push(1);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-spread-merge",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const all = [...[store], ...[[0]]];\n  all[0].push(1);\n}\n",
+  "findings": [
+   "3:ImplicitInput: function change(): The function change() reads store, an implicit input.",
+   "4:ImplicitOutput: function change(): The function change() mutates caller-owned value all, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-assign-variable-source",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const source = { a: store };\n  const target: { a?: number[] } = {};\n  Object.assign(target, source);\n  target.a?.push(1);\n}\n",
+  "findings": [
+   "3:ImplicitInput: function change(): The function change() reads store, an implicit input.",
+   "6:ImplicitOutput: function change(): The function change() mutates caller-owned value target, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-new-set-argument",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const items = new Set([store]);\n  for (const item of items) {\n    item.push(1);\n  }\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-object-computed-dynamic",
+  "source": "const store: number[] = [];\nexport function change(key: string): void {\n  const holder = { [key]: store, b: [0] };\n  holder.b.push(1);\n}\n",
+  "findings": [
+   "3:ImplicitInput: function change(): The function change() reads store, an implicit input.",
+   "4:ImplicitOutput: function change(): The function change() mutates caller-owned value holder, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-set-add-stores",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const items = new Set<number[]>();\n  items.add(store);\n  for (const item of items) {\n    item.push(1);\n  }\n}\n",
+  "findings": [
+   "4:ImplicitInput: function change(): The function change() reads store, an implicit input.",
+   "6:ImplicitOutput: function change(): The function change() mutates caller-owned value item, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-fill-stores",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const rows = [[0]];\n  rows.fill(store);\n  rows[0].push(1);\n}\n",
+  "findings": [
+   "4:ImplicitInput: function change(): The function change() reads store, an implicit input.",
+   "5:ImplicitOutput: function change(): The function change() mutates caller-owned value rows, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-unshift-stores",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  const rows: number[][] = [];\n  rows.unshift(store);\n  rows[0].push(1);\n}\n",
+  "findings": [
+   "4:ImplicitInput: function change(): The function change() reads store, an implicit input.",
+   "5:ImplicitOutput: function change(): The function change() mutates caller-owned value rows, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-array-from-callback",
+  "source": "const store: number[] = [];\nexport function change(): number[] {\n  return Array.from([1], (value) => {\n    store.push(value);\n    return value;\n  });\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function change(): The function change() writes store, an implicit output.",
+   "4:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes store, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-replace-undefined",
+  "source": "export function change(text: string): string {\n  return text.replace(\"a\", undefined as unknown as string);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-callback-console-direct",
+  "source": "function apply(callback: (value: number) => unknown): void {\n  callback(1);\n}\nexport function run(): void {\n  apply(console.log);\n}\n",
+  "findings": [
+   "2:UnknownEffect: function apply(): The function apply() calls unresolved callable, an unknown effect.",
+   "5:ImplicitOutput: function run(): The function run() uses console, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-callback-date-now",
+  "source": "function apply(callback: (value: number) => unknown): void {\n  callback(1);\n}\nexport function run(): void {\n  apply(Date.now);\n}\n",
+  "findings": [
+   "2:UnknownEffect: function apply(): The function apply() calls unresolved callable, an unknown effect.",
+   "5:ImplicitInput: function run(): The function run() calls Date.now, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-callback-set-timeout",
+  "source": "function apply(callback: (value: number) => unknown): void {\n  callback(1);\n}\nexport function run(): void {\n  apply(setTimeout as unknown as (value: number) => unknown);\n}\n",
+  "findings": [
+   "2:UnknownEffect: function apply(): The function apply() calls unresolved callable, an unknown effect.",
+   "5:ImplicitOutput: function run(): The function run() uses setTimeout, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-callback-alert",
+  "source": "function apply(callback: (value: number) => unknown): void {\n  callback(1);\n}\nexport function run(): void {\n  apply(alert);\n}\n",
+  "findings": [
+   "2:UnknownEffect: function apply(): The function apply() calls unresolved callable, an unknown effect.",
+   "5:ImplicitOutput: function run(): The function run() uses alert, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-date-argument",
+  "source": "function keep(value: unknown): unknown {\n  return value;\n}\nexport function run(): unknown {\n  return keep(Date);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-date-call",
+  "source": "export function run(): string {\n  return Date();\n}\n",
+  "findings": [
+   "2:ImplicitInput: function run(): The function run() calls Date(), an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-if-false-else",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  if (false) {\n    return;\n  } else {\n    store.push(1);\n  }\n}\n",
+  "findings": [
+   "6:ImplicitOutput: function change(): The function change() writes store, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-ternary-true",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  true ? store.push(1) : 0;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function change(): The function change() writes store, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-ternary-false",
+  "source": "const store: number[] = [];\nexport function change(): void {\n  false ? 0 : store.push(1);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function change(): The function change() writes store, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-namespace-shadow",
+  "source": "const store: number[] = [];\nnamespace Inner {\n  const store: number[] = [];\n  export function change(): void {\n    store.push(1);\n  }\n}\nexport function size(): number {\n  return store.length;\n}\n",
+  "findings": [
+   "5:ImplicitOutput: function change(): The function change() writes store, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-type-parameter-shadow",
+  "source": "type Values = number[];\nexport function change<Values>(xs: Values): void {\n  const value: any = xs[0];\n  value.x = 1;\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function change(): The function change() mutates caller-owned value value, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-type-parameter-other",
+  "source": "type Values = number[];\nexport function change<Other>(xs: Values): void {\n  const value: any = xs[0];\n  value.x = 1;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-alias-parameter-shadow",
+  "source": "type Values = number[];\ntype Rows<Values> = Values;\nexport function change(xs: Rows<{ x: number }[]>): void {\n  const value: any = xs[0];\n  value.x = 1;\n}\n",
+  "findings": [
+   "5:ImplicitOutput: function change(): The function change() mutates caller-owned value value, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-class-parameter-shadow",
+  "source": "type Values = number[];\nexport class Holder<Values> {\n  change(xs: Values): void {\n    const value: any = xs[0];\n    value.x = 1;\n  }\n}\n",
+  "findings": [
+   "5:ImplicitOutput: method Holder.change(): The method Holder.change() mutates caller-owned value value, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-imported-console",
+  "source": "import { console } from \"./sink\";\nexport function change(): void {\n  console.log(1);\n}\n",
+  "findings": [
+   "3:ImplicitInput: function change(): The function change() reads console, an implicit input.",
+   "3:UnknownEffect: function change(): The function change() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s1-imported-math",
+  "source": "import * as Math from \"./numbers\";\nexport function change(): number {\n  return Math.random();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function change(): The function change() reads Math, an implicit input.",
+   "3:UnknownEffect: function change(): The function change() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s1-else-assignment",
+  "source": "let counter = 0;\nexport function bump(flag: boolean): void {\n  if (flag) {\n    return;\n  } else {\n    counter = 1;\n  }\n}\nexport function read(): number {\n  return counter;\n}\n",
+  "findings": [
+   "6:ImplicitOutput: function bump(): The function bump() writes counter, an implicit output.",
+   "10:ImplicitInput: function read(): The function read() reads counter, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-if-true-dead-assignment",
+  "source": "let counter = 0;\nexport function bump(): void {\n  if (true) {\n    return;\n  } else {\n    counter = 1;\n  }\n}\nexport function read(): number {\n  return counter;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-ternary-dead-assignment",
+  "source": "let counter = 0;\nexport function bump(): void {\n  true ? 0 : (counter = 1);\n}\nexport function read(): number {\n  return counter;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-ternary-false-dead-assignment",
+  "source": "let counter = 0;\nexport function bump(): void {\n  false ? (counter = 1) : 0;\n}\nexport function read(): number {\n  return counter;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-export-declare-class",
+  "source": "export declare class Registry {\n  static count: number;\n}\nexport function read(): number {\n  return Registry.count;\n}\n",
+  "findings": [
+   "5:ImplicitInput: function read(): The function read() reads Registry, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-export-declare-namespace",
+  "source": "export declare namespace Config {\n  const level = 1;\n}\nexport function read(): number {\n  return Config.level;\n}\n",
+  "findings": [
+   "5:ImplicitInput: function read(): The function read() reads Config, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-redeclared-trim",
+  "source": "export function change(input: string): string {\n  var text: string = input;\n  var text: typeof text;\n  text = text.trim();\n  return text.toLowerCase();\n}\n",
+  "findings": [
+   "4:UnknownEffect: function change(): The function change() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s1-overload-result",
+  "source": "function make(flag: boolean): string;\nfunction make(flag: boolean) {\n  return flag ? \"a\" : \"b\";\n}\nexport function change(): string {\n  return make(true).toLowerCase();\n}\n",
+  "findings": [
+   "6:UnknownEffect: function change(): The function change() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s1-split-join",
+  "source": "export function change(text: string): string {\n  return text.split(\",\").join(\"-\");\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-mixed-property",
+  "source": "export function change(input: string, flag: boolean): string {\n  let text = input;\n  if (flag) {\n    text = JSON.parse(input);\n  }\n  return text.toLowerCase();\n}\n",
+  "findings": [
+   "6:UnknownEffect: function change(): The function change() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-conditional-callee",
+  "source": "let count = 0;\nfunction bump() { count += 1; }\nfunction pure() { return 1; }\nexport function run(flag: boolean) {\n  const action = flag ? bump : pure;\n  action();\n}\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "6:ImplicitInput: function run(): The function run() reads count, an implicit input.",
+   "6:ImplicitOutput: function run(): The function run() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-comma-callee",
+  "source": "let count = 0;\nfunction bump() { count += 1; }\nexport function run() {\n  const action = (0, bump);\n  action();\n}\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "5:ImplicitInput: function run(): The function run() reads count, an implicit input.",
+   "5:ImplicitOutput: function run(): The function run() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-assign-callee",
+  "source": "let count = 0;\nfunction bump() { count += 1; }\nexport function run() {\n  let other: () => void;\n  const action = (other = bump);\n  action();\n}\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "6:ImplicitInput: function run(): The function run() reads count, an implicit input.",
+   "6:ImplicitOutput: function run(): The function run() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-coalesce-callee",
+  "source": "let count = 0;\nfunction bump() { count += 1; }\nexport function run(fallback: (() => void) | null) {\n  const action = fallback ?? bump;\n  action();\n}\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "5:ImplicitInput: function run(): The function run() reads count, an implicit input.",
+   "5:ImplicitOutput: function run(): The function run() writes count, an implicit output.",
+   "5:UnknownEffect: function run(): The function run() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-false-callee",
+  "source": "let count = 0;\nfunction bump() { count += 1; }\nexport function run(flag: boolean) {\n  const action = flag ? bump : false;\n  if (action) action();\n}\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "5:ImplicitInput: function run(): The function run() reads count, an implicit input.",
+   "5:ImplicitOutput: function run(): The function run() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-true-callee",
+  "source": "let count = 0;\nfunction bump() { count += 1; }\nexport function run(flag: boolean) {\n  const action: any = flag ? bump : true;\n  if (action !== true) action();\n}\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "5:ImplicitInput: function run(): The function run() reads count, an implicit input.",
+   "5:ImplicitOutput: function run(): The function run() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-zero-callee",
+  "source": "let count = 0;\nfunction bump() { count += 1; }\nexport function run(flag: boolean) {\n  const action = flag ? bump : 0;\n  if (action) action();\n}\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "5:ImplicitInput: function run(): The function run() reads count, an implicit input.",
+   "5:ImplicitOutput: function run(): The function run() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-object-callee",
+  "source": "let count = 0;\nfunction bump() { count += 1; }\nexport function run(flag: boolean) {\n  const action: any = flag ? bump : {};\n  if (typeof action === \"function\") action();\n}\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "5:ImplicitInput: function run(): The function run() reads count, an implicit input.",
+   "5:ImplicitOutput: function run(): The function run() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-array-callee",
+  "source": "let count = 0;\nfunction bump() { count += 1; }\nexport function run(flag: boolean) {\n  const action: any = flag ? bump : [];\n  if (typeof action === \"function\") action();\n}\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "5:ImplicitInput: function run(): The function run() reads count, an implicit input.",
+   "5:ImplicitOutput: function run(): The function run() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-cyclic-callee",
+  "source": "export function run() {\n  let first = () => 1;\n  let second = first;\n  first = second;\n  return first();\n}\n",
+  "findings": [
+   "5:UnknownEffect: function run(): The function run() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-nested-pattern-callee",
+  "source": "let count = 0;\nconst api = { add() { return 1; }, inner: { add() { count += 1; return 2; } } };\nexport function run() {\n  const { inner: { add } } = api;\n  return add();\n}\n",
+  "findings": [
+   "2:ImplicitInput: method add(): The method add() reads count, an implicit input.",
+   "2:ImplicitOutput: method add(): The method add() writes count, an implicit output.",
+   "5:UnknownEffect: function run(): The function run() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-null-branch-callee",
+  "source": "let count = 0;\nfunction bump() { count += 1; }\nexport function run(flag: boolean) {\n  const action = flag ? bump : null;\n  if (action) action();\n}\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "5:ImplicitInput: function run(): The function run() reads count, an implicit input.",
+   "5:ImplicitOutput: function run(): The function run() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-new-branch-callee",
+  "source": "class Factory { make() { return 1; } }\nfunction pure() { return 1; }\nexport function run(flag: boolean) {\n  const action: any = flag ? pure : new Factory();\n  return action();\n}\n",
+  "findings": [
+   "5:UnknownEffect: function run(): The function run() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-sum-branch-callee",
+  "source": "let count = 0;\nfunction bump() { count += 1; }\nfunction pure() { return 1; }\nexport function run(flag: boolean) {\n  const action: any = flag ? pure : \"x\" + bump;\n  return action();\n}\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-declared-branch-callee",
+  "source": "declare function external(): number;\nfunction pure() { return 1; }\nexport function run(flag: boolean) {\n  const action = flag ? external : pure;\n  return action();\n}\n",
+  "findings": [
+   "5:UnknownEffect: function run(): The function run() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-parameter-branch-callee",
+  "source": "function pure() { return 1; }\nexport function run(flag: boolean, action = () => 1) {\n  const chosen = flag ? action : pure;\n  return chosen();\n}\n",
+  "findings": [
+   "4:UnknownEffect: function run(): The function run() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-super-call",
+  "source": "let count = 0;\nclass Base {\n  step() { return 1; }\n}\nclass Child extends Base {\n  step() { count += 1; return 2; }\n  run() { return super.step(); }\n}\nexport function make() { return new Child().run(); }\n",
+  "findings": [
+   "6:ImplicitInput: method Child.step(): The method Child.step() reads count, an implicit input.",
+   "6:ImplicitOutput: method Child.step(): The method Child.step() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-patched-method",
+  "source": "export function run(replacement: () => number) {\n  const api = { read() { return 1; } };\n  api.read = replacement;\n  return api.read();\n}\n",
+  "findings": [
+   "4:UnknownEffect: function run(): The function run() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-exported-this-call",
+  "source": "export class Store {\n  read() { return 1; }\n  run() { return this.read(); }\n}\n",
+  "findings": [
+   "3:UnknownEffect: method Store.run(): The method Store.run() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-cyclic-classes",
+  "source": "class Store {\n  read() { return 1; }\n  run() { return this.read(); }\n}\n// @ts-ignore\nclass First extends Second {}\n// @ts-ignore\nclass Second extends First {}\nexport function make() { return new Store().run() + new First().read(); }\n",
+  "findings": [
+   "9:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-sibling-member",
+  "source": "let count = 0;\nexport function run() {\n  const api = { helper: () => { count += 1; }, read() { return 1; } };\n  return api.read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: arrow function anonymous(): The arrow function anonymous() reads count, an implicit input.",
+   "3:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-member-read-not-call",
+  "source": "let count = 0;\nexport function run() {\n  const api = { handler: () => { count += 1; } };\n  const value = api.handler;\n  return typeof value;\n}\n",
+  "findings": [
+   "3:ImplicitInput: arrow function anonymous(): The arrow function anonymous() reads count, an implicit input.",
+   "3:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-arrow-in-class-field",
+  "source": "let count = 0;\nclass Store {\n  handler = () => { count += 1; };\n}\nexport function make() { return new Store(); }\n",
+  "findings": [
+   "3:ImplicitInput: arrow function anonymous(): The arrow function anonymous() reads count, an implicit input.",
+   "3:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-static-readonly-initializer",
+  "source": "let count = 0;\nexport function bump() { count += 1; }\nclass Store {\n  static readonly total = count;\n  read() { return 1; }\n}\nexport function make() { return new Store().read(); }\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "4:ImplicitInput: <module>: The module reads count, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s2-constructor-overloads",
+  "source": "let count = 0;\nexport function bump() { count += 1; }\nclass Store {\n  total = count;\n  constructor(value: number);\n  constructor(value: string);\n  constructor(value: number | string) { void value; }\n}\nexport function make() { return new Store(1); }\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "4:ImplicitInput: constructor: The constructor reads count, an implicit input.",
+   "9:ImplicitInput: function make(): The function make() reads count, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s2-implements-only",
+  "source": "interface Named { name(): string }\nclass Store implements Named {\n  name() { return \"store\"; }\n}\nexport function make() { return new Store().toString(); }\n",
+  "findings": [
+   "5:UnknownEffect: function make(): The function make() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-for-false-initializer",
+  "source": "let count = 0;\nexport function run() {\n  for (count = 1; false;) {\n    return 1;\n  }\n  return 0;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function run(): The function run() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-define-property-patch",
+  "source": "class Store {\n  read() { return 1; }\n  run() { return this.read(); }\n}\nObject.defineProperty(Store.prototype, \"read\", { value: () => 2 });\nexport function make() { return new Store().run(); }\n",
+  "findings": [
+   "3:UnknownEffect: method Store.run(): The method Store.run() calls overridable method, an unknown effect.",
+   "5:UnknownEffect: <module>: The module calls unresolved callable, an unknown effect.",
+   "6:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-reflect-define-patch",
+  "source": "class Store {\n  read() { return 1; }\n  run() { return this.read(); }\n}\nReflect.defineProperty(Store.prototype, \"read\", { value: () => 2 });\nexport function make() { return new Store().run(); }\n",
+  "findings": [
+   "3:UnknownEffect: method Store.run(): The method Store.run() calls overridable method, an unknown effect.",
+   "5:UnknownEffect: <module>: The module calls unresolved callable, an unknown effect.",
+   "6:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-reflect-set-patch",
+  "source": "class Store {\n  read() { return 1; }\n  run() { return this.read(); }\n}\nReflect.set(Store.prototype, \"read\", () => 2);\nexport function make() { return new Store().run(); }\n",
+  "findings": [
+   "3:UnknownEffect: method Store.run(): The method Store.run() calls overridable method, an unknown effect.",
+   "6:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-object-assign-patch",
+  "source": "class Store {\n  read() { return 1; }\n  run() { return this.read(); }\n}\nObject.assign(Store.prototype, { read() { return 2; } });\nexport function make() { return new Store().run(); }\n",
+  "findings": [
+   "3:UnknownEffect: method Store.run(): The method Store.run() calls overridable method, an unknown effect.",
+   "5:ImplicitOutput: <module>: The module writes Store, an implicit output.",
+   "6:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-other-call-literal",
+  "source": "function configure(level: number, options: { read: number }) { return level + options.read; }\nclass Store {\n  read() { return 1; }\n  run() { return this.read(); }\n}\nexport const level = configure(1, { read: 2 });\nexport function make() { return new Store().run(); }\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s2-object-assign-target-literal",
+  "source": "class Store {\n  read() { return 1; }\n  run() { return this.read(); }\n}\nexport const merged = Object.assign({ read() { return 2; } }, {});\nexport function make() { return new Store().run(); }\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s2-class-expression-binding",
+  "source": "const Store = class {\n  run() { return 1; }\n};\nexport function make() { return new Store().run(); }\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s2-static-call",
+  "source": "class Util {\n  static run() { return 1; }\n}\nexport function make() { return Util.run(); }\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s2-reassigned-parameter-object",
+  "source": "let count = 0;\nexport function bump() { count += 1; }\nclass Other { run() { count += 1; } }\nexport function make(api: { run(): unknown }) {\n  api = { run() { return 1; } };\n  return api.run();\n}\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "3:ImplicitInput: method Other.run(): The method Other.run() reads count, an implicit input.",
+   "3:ImplicitOutput: method Other.run(): The method Other.run() writes count, an implicit output.",
+   "6:ImplicitInput: function make(): The function make() reads count, an implicit input.",
+   "6:ImplicitOutput: function make(): The function make() writes count, an implicit output.",
+   "6:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-unassigned-binding",
+  "source": "let count = 0;\nclass Other { run() { count += 1; } }\nlet api: any;\nexport function make() { return api.run(); }\n",
+  "findings": [
+   "2:ImplicitInput: method Other.run(): The method Other.run() reads count, an implicit input.",
+   "2:ImplicitOutput: method Other.run(): The method Other.run() writes count, an implicit output.",
+   "4:ImplicitInput: function make(): The function make() reads count, an implicit input.",
+   "4:ImplicitOutput: function make(): The function make() writes count, an implicit output.",
+   "4:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-escaped-object",
+  "source": "function register(value: object) { return value; }\nexport function make() {\n  const api = { run() { return 1; } };\n  register(api);\n  return api.run();\n}\n",
+  "findings": [
+   "5:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-alias-cycle",
+  "source": "export function make() {\n  var api = { run() { return 1; } };\n  var alias = api;\n  var api = alias;\n  return api.run();\n}\n",
+  "findings": [
+   "5:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-exported-object",
+  "source": "export const api = { run() { return 1; } };\nexport function make() { return api.run(); }\n",
+  "findings": [
+   "2:ImplicitInput: function make(): The function make() reads api, an implicit input.",
+   "2:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-sealed-alias",
+  "source": "export function make() {\n  const api = { run() { return 1; } };\n  const same = api;\n  same.run();\n  return api.run();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s2-escaped-alias",
+  "source": "function register(value: object) { return value; }\nexport function make() {\n  const api = { run() { return 1; } };\n  const same = api;\n  register(same);\n  return api.run();\n}\n",
+  "findings": [
+   "6:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-destructured-object",
+  "source": "export function make() {\n  const api = { run() { return 1; }, size: 2 };\n  const { size } = api;\n  return api.run() + size;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s2-reassigned-object",
+  "source": "export function make() {\n  let api = { run() { return 1; } };\n  api = { run() { return 2; } };\n  return api.run();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s2-held-object",
+  "source": "let holder: object = {};\nexport function make() {\n  const api = { run() { return 1; } };\n  holder = api;\n  return api.run();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function make(): The function make() writes holder, an implicit output.",
+   "5:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-logical-assigned-object",
+  "source": "export function make() {\n  let api = { run() { return 1; } };\n  api ||= { run() { return 2; } };\n  return api.run();\n}\n",
+  "findings": [
+   "4:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-object-as-key",
+  "source": "export function make() {\n  const api = { run() { return 1; } };\n  const table: any = {};\n  table[api as any] = 1;\n  return api.run();\n}\n",
+  "findings": [
+   "5:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-computed-member-write",
+  "source": "export function make(name: string) {\n  const api: any = { run() { return 1; } };\n  api[name] = () => 2;\n  return api.run();\n}\n",
+  "findings": [
+   "4:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-computed-member-read",
+  "source": "export function make(name: string) {\n  const api: any = { run() { return 1; } };\n  const value = api[name];\n  return api.run() + value;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s2-two-class-base",
+  "source": "let count = 0;\nclass First { run() { return this.step(); } step() { return 1; } }\nclass Second { step() { return 2; } }\nlet Base = First;\nexport function choose() { Base = Second; }\nclass Child extends Base { step() { count += 1; return 3; } }\nexport function make() { return new First().run() + new Child().step(); }\n",
+  "findings": [
+   "2:ImplicitInput: method First.run(): The method First.run() reads count, an implicit input.",
+   "2:ImplicitOutput: method First.run(): The method First.run() writes count, an implicit output.",
+   "5:ImplicitOutput: function choose(): The function choose() writes Base, an implicit output.",
+   "6:ImplicitInput: method Child.step(): The method Child.step() reads count, an implicit input.",
+   "6:ImplicitOutput: method Child.step(): The method Child.step() writes count, an implicit output.",
+   "7:ImplicitInput: function make(): The function make() reads count, an implicit input.",
+   "7:ImplicitOutput: function make(): The function make() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-unrelated-same-method",
+  "source": "let count = 0;\nexport function bump() { count += 1; }\nclass First { run() { return this.step(); } step() { return 1; } }\nclass Other { step() { return count; } }\nexport function make() { return new First().run() + new Other().step(); }\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "4:ImplicitInput: method Other.step(): The method Other.step() reads count, an implicit input.",
+   "5:ImplicitInput: function make(): The function make() reads count, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s2-default-export-class",
+  "source": "export default class Store {\n  read() { return 1; }\n  run() { return this.read(); }\n}\n",
+  "findings": [
+   "3:UnknownEffect: method Store.run(): The method Store.run() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-abstract-class",
+  "source": "abstract class Store {\n  read() { return 1; }\n  run() { return this.read(); }\n}\nclass Real extends Store {}\nexport function make() { return new Real().run(); }\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s2-exported-private-member",
+  "source": "export class Store {\n  private read() { return 1; }\n  run() { return this.read(); }\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s2-exported-private-async",
+  "source": "export class Store {\n  private async read() { return 1; }\n  run() { return this.read(); }\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s2-exported-public-member",
+  "source": "export class Store {\n  public read() { return 1; }\n  run() { return this.read(); }\n}\n",
+  "findings": [
+   "3:UnknownEffect: method Store.run(): The method Store.run() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-shorthand-member",
+  "source": "let count = 0;\nexport function make() {\n  const run = () => { count += 1; };\n  const api = { run };\n  api.run();\n}\n",
+  "findings": [
+   "3:ImplicitInput: arrow function run(): The arrow function run() reads count, an implicit input.",
+   "3:ImplicitOutput: arrow function run(): The arrow function run() writes count, an implicit output.",
+   "5:ImplicitInput: function make(): The function make() reads count, an implicit input.",
+   "5:ImplicitOutput: function make(): The function make() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-static-readonly-field",
+  "source": "let count = 0;\nexport function bump() { count += 1; }\nclass Store { static readonly limit = count; }\nexport function make() { return new Store(); }\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "3:ImplicitInput: <module>: The module reads count, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s2-escaping-this-split",
+  "source": "const seen: object[] = [];\nclass Store {\n  read() { return 1; }\n  keep() { seen.push(this); }\n  run() {\n    return this.read();\n  }\n}\nexport function make() { return new Store().run(); }\n",
+  "findings": [
+   "4:ImplicitOutput: method Store.keep(): The method Store.keep() writes seen, an implicit output.",
+   "4:UnknownEffect: method Store.keep(): The method Store.keep() reads this, an unknown effect.",
+   "6:UnknownEffect: method Store.run(): The method Store.run() calls overridable method, an unknown effect.",
+   "9:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-cyclic-super",
+  "source": "// @ts-ignore\nclass First extends Second { run() { return super.read(); } }\n// @ts-ignore\nclass Second extends First {}\nexport function make() { return new First().run(); }\n",
+  "findings": [
+   "2:UnknownEffect: method First.run(): The method First.run() calls unresolved callable, an unknown effect.",
+   "5:UnknownEffect: function make(): The function make() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-reassigned-parameter-callee",
+  "source": "function pure() { return 1; }\nexport function make(action: () => number) {\n  action = pure;\n  return action();\n}\n",
+  "findings": [
+   "4:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-if-true-else-call",
+  "source": "let count = 0;\nfunction bump() { count += 1; }\nexport function make() {\n  if (true) {\n    return 1;\n  } else {\n    bump();\n  }\n  return 0;\n}\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-private-field-initializer",
+  "source": "let count = 0;\nexport function bump() { count += 1; }\nclass Store { private total = count; read() { return this.total; } }\nexport function make() { return new Store(); }\n",
+  "findings": [
+   "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
+   "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
+   "3:ImplicitInput: constructor: The constructor reads count, an implicit input.",
+   "3:UnknownEffect: method Store.read(): The method Store.read() reads this.total, an unknown effect.",
+   "4:ImplicitInput: function make(): The function make() reads count, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s2-redeclared-parameter-object",
+  "source": "export function make(api: { run(): number }) {\n  // @ts-ignore\n  var api = { run() { return 1; } };\n  return api.run();\n}\n",
+  "findings": [
+   "4:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-redeclared-parameter-callee",
+  "source": "function pure() { return 1; }\nexport function make(action: () => number) {\n  var action = pure;\n  return action();\n}\n",
+  "findings": [
+   "4:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-two-class-binding-other",
+  "source": "let count = 0;\nconst seen: object[] = [];\nclass First { keep() { seen.push(this); } run() { return 1; } }\nclass Second { run() { return 2; } }\nclass Third { run() { count += 1; return 3; } }\nlet Kind = First;\nexport function choose() { Kind = Second; }\nexport function make() {\n  return new Kind().run();\n}\nexport function other() { return new Third().run(); }\n",
+  "findings": [
+   "3:ImplicitOutput: method First.keep(): The method First.keep() writes seen, an implicit output.",
+   "3:UnknownEffect: method First.keep(): The method First.keep() reads this, an unknown effect.",
+   "5:ImplicitInput: method Third.run(): The method Third.run() reads count, an implicit input.",
+   "5:ImplicitOutput: method Third.run(): The method Third.run() writes count, an implicit output.",
+   "7:ImplicitOutput: function choose(): The function choose() writes Kind, an implicit output.",
+   "9:ImplicitInput: function make(): The function make() reads count, an implicit input.",
+   "9:ImplicitOutput: function make(): The function make() writes count, an implicit output.",
+   "9:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect.",
+   "11:ImplicitInput: function other(): The function other() reads count, an implicit input.",
+   "11:ImplicitOutput: function other(): The function other() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-mixed-export-object",
+  "source": "// @ts-ignore\nexport var api = { run() { return 1; } };\n// @ts-ignore\nvar api = { run() { return 2; } };\nexport function make() { return api.run(); }\n",
+  "findings": [
+   "5:ImplicitInput: function make(): The function make() reads api, an implicit input.",
+   "5:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-redeclared-alias",
+  "source": "export function make() {\n  const api = { run() { return 1; } };\n  var same = api;\n  var same = api;\n  same.run();\n  return api.run();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s2-escaped-alias-first-binding",
+  "source": "const first = 0;\nfunction register(value: object) { return value; }\nexport function make() {\n  const api = { run() { return 1; } };\n  const same = api;\n  register(same);\n  return api.run();\n}\n",
+  "findings": [
+   "7:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-object-as-index",
+  "source": "export function make() {\n  const api = { run() { return 1; } };\n  const table: any = {};\n  // @ts-ignore\n  const value = table[api];\n  return api.run() + value;\n}\n",
+  "findings": [
+   "6:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-exported-private-helper",
+  "source": "export class Store {\n  private helper() { return 1; }\n  read() { return 1; }\n  run() { return this.read(); }\n}\n",
+  "findings": [
+   "4:UnknownEffect: method Store.run(): The method Store.run() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s2-redeclared-pattern-callee",
+  "source": "let count = 0;\nconst api = { run() { return 1; } };\nconst other = { run() { count += 1; return 2; } };\nexport function make() {\n  var { run } = api;\n  var { run } = other;\n  return run();\n}\n",
+  "findings": [
+   "3:ImplicitInput: method run(): The method run() reads count, an implicit input.",
+   "3:ImplicitOutput: method run(): The method run() writes count, an implicit output.",
+   "7:ImplicitInput: function make(): The function make() reads count, an implicit input.",
+   "7:ImplicitOutput: function make(): The function make() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s2-field-subclass",
+  "source": "let count = 0;\nfunction helper() { count += 1; return 2; }\nclass Base { run() { return this.step(); } step() { return 1; } }\nclass Child extends Base {\n  // @ts-ignore\n  step = helper;\n}\nexport function make() { return new Child().run(); }\n",
+  "findings": [
+   "2:ImplicitInput: function helper(): The function helper() reads count, an implicit input.",
+   "2:ImplicitOutput: function helper(): The function helper() writes count, an implicit output.",
+   "3:ImplicitInput: method Base.run(): The method Base.run() reads count, an implicit input.",
+   "3:ImplicitOutput: method Base.run(): The method Base.run() writes count, an implicit output.",
+   "8:ImplicitInput: function make(): The function make() reads count, an implicit input.",
+   "8:ImplicitOutput: function make(): The function make() writes count, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s3-loop-earlier-unconditional-reassign",
+  "source": "const store: number[] = [];\nexport function fill() {\n  let target: number[] = store;\n  for (let i = 0; i < 2; i++) {\n    target = [];\n    target.push(i);\n  }\n  return 0;\n}\n",
+  "findings": [
+   "3:ImplicitInput: function fill(): The function fill() reads store, an implicit input.",
+   "6:ImplicitOutput: function fill(): The function fill() mutates caller-owned value target, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s3-catch-write",
+  "source": "export function fill() {\n  try {\n    return 1;\n  } catch (error) {\n    (error as { seen?: boolean }).seen = true;\n    return 0;\n  }\n}\n",
+  "findings": [
+   "5:UnknownEffect: function fill(): The function fill() mutates value with unknown ownership, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-nullish-assign",
+  "source": "const store: number[] = [];\nexport function fill() {\n  let target: number[] | undefined;\n  target ??= store;\n  target.push(1);\n  return 0;\n}\n",
+  "findings": [
+   "4:ImplicitInput: function fill(): The function fill() reads store, an implicit input.",
+   "5:ImplicitOutput: function fill(): The function fill() mutates caller-owned value target, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s3-or-assign",
+  "source": "const store: number[] = [];\nexport function fill(start: number[] | undefined) {\n  let target = start;\n  target ||= store;\n  target.push(1);\n  return 0;\n}\n",
+  "findings": [
+   "4:ImplicitInput: function fill(): The function fill() reads store, an implicit input.",
+   "5:ImplicitOutput: function fill(): The function fill() mutates caller-owned value target, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s3-and-assign",
+  "source": "const store: number[] = [];\nexport function fill(start: number[] | undefined) {\n  let target: number[] | undefined = [];\n  target &&= store;\n  target.push(1);\n  return 0;\n}\n",
+  "findings": [
+   "4:ImplicitInput: function fill(): The function fill() reads store, an implicit input.",
+   "5:ImplicitOutput: function fill(): The function fill() mutates caller-owned value target, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s3-object-pattern-rename-assign",
+  "source": "const store: number[] = [];\nexport function fill() {\n  let target: number[] = [];\n  ({ value: target } = { value: store });\n  target.push(1);\n  return 0;\n}\n",
+  "findings": [
+   "5:UnknownEffect: function fill(): The function fill() mutates value with unknown ownership, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-spread-pattern-assign",
+  "source": "const store: number[] = [];\nexport function fill() {\n  let target: number[][] = [];\n  [...target] = [store];\n  target[0].push(1);\n  return 0;\n}\n",
+  "findings": [
+   "4:UnknownEffect: function fill(): The function fill() uses unresolved iterate protocol, an unknown effect.",
+   "5:UnknownEffect: function fill(): The function fill() mutates value with unknown ownership, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-for-of-expression-target",
+  "source": "const store: number[] = [];\nexport function fill() {\n  let target: number[] = [];\n  for (target of [store]) {\n    target.push(1);\n  }\n  return 0;\n}\n",
+  "findings": [
+   "5:UnknownEffect: function fill(): The function fill() mutates value with unknown ownership, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-if-false-else-replace",
+  "source": "const store: number[] = [];\nexport function fill() {\n  let target: number[] = store;\n  if (false) {\n    target = store;\n  } else {\n    target = [];\n  }\n  target.push(1);\n  return target.length;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-function-inside-loop-later-reassign",
+  "source": "const store: number[] = [];\nfor (let i = 0; i < 2; i++) {\n  const fill = () => {\n    let target: number[] = [];\n    target.push(i);\n    target = store;\n    return target.length;\n  };\n  fill();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-and-replace-keeps-store",
+  "source": "const store: number[] = [];\nexport function fill(flag: boolean) {\n  let target: number[] = store;\n  flag && (target = []);\n  target.push(1);\n  return 0;\n}\n",
+  "findings": [
+   "3:ImplicitInput: function fill(): The function fill() reads store, an implicit input.",
+   "5:ImplicitOutput: function fill(): The function fill() mutates caller-owned value target, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s3-pattern-assign-after-store",
+  "source": "const store: number[] = [];\nexport function fill() {\n  let target: number[] = store;\n  [target] = [[0]];\n  target.push(1);\n  return 0;\n}\n",
+  "findings": [
+   "3:ImplicitInput: function fill(): The function fill() reads store, an implicit input.",
+   "5:ImplicitOutput: function fill(): The function fill() mutates caller-owned value target, an implicit output.",
+   "5:UnknownEffect: function fill(): The function fill() mutates value with unknown ownership, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-array-literal-compare",
+  "source": "const store: number[] = [];\nexport function fill(other: unknown) {\n  let target: number[] = [];\n  const same = [target] === other;\n  target.push(1);\n  return same;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-for-of-map-entry-store",
+  "source": "const store: number[] = [];\nexport function fill() {\n  const map = new Map([[\"a\", store]]);\n  for (const [, value] of map) {\n    value.push(1);\n  }\n  return map.size;\n}\n",
+  "findings": [
+   "3:ImplicitInput: function fill(): The function fill() reads store, an implicit input.",
+   "5:ImplicitOutput: function fill(): The function fill() mutates caller-owned value value, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s3-for-of-pattern-member-store",
+  "source": "const store: number[] = [];\nexport function fill() {\n  const rows = [{ items: store }];\n  for (const { items } of rows) {\n    items.push(1);\n  }\n  return rows.length;\n}\n",
+  "findings": [
+   "3:ImplicitInput: function fill(): The function fill() reads store, an implicit input.",
+   "5:ImplicitOutput: function fill(): The function fill() mutates caller-owned value items, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s3-escape-later-in-loop",
+  "source": "declare function share(value: object): void;\nexport function use() {\n  const api = { run() { return 1; } };\n  let total = 0;\n  for (let i = 0; i < 2; i++) {\n    total += api.run();\n    share(api);\n  }\n  return total;\n}\n",
+  "findings": [
+   "6:UnknownEffect: function use(): The function use() calls overridable method, an unknown effect.",
+   "7:UnknownEffect: function use(): The function use() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-fresh-error",
+  "source": "export function make() {\n  const value = new Error(\"a\");\n  value.message = \"b\";\n  return value;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-fresh-object",
+  "source": "export function make() {\n  const value = new Object() as { a?: number };\n  value.a = 1;\n  return value;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-fresh-range-error",
+  "source": "export function make() {\n  const value = new RangeError(\"a\");\n  value.message = \"b\";\n  return value;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-fresh-regexp",
+  "source": "export function make() {\n  const value = new RegExp(\"a\", \"g\");\n  value.lastIndex = 1;\n  return value;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-fresh-set",
+  "source": "export function make() {\n  const value = new Set<number>();\n  value.add(1);\n  return value;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-fresh-type-error",
+  "source": "export function make() {\n  const value = new TypeError(\"a\");\n  value.message = \"b\";\n  return value;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-fresh-weak-map",
+  "source": "export function make() {\n  const value = new WeakMap<object, number>();\n  value.set({}, 1);\n  return value;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-fresh-weak-set",
+  "source": "export function make() {\n  const value = new WeakSet<object>();\n  value.add({});\n  return value;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-global-undefined",
+  "source": "export function make(flag: boolean) {\n  const value = flag ? [1] : undefined;\n  value?.push(2);\n  return value;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-global-nan",
+  "source": "export function make(flag: boolean) {\n  const value = flag ? [1] : NaN;\n  if (Array.isArray(value)) {\n    value.push(2);\n  }\n  return value;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-global-infinity",
+  "source": "export function make(flag: boolean) {\n  const value = flag ? [1] : Infinity;\n  if (Array.isArray(value)) {\n    value.push(2);\n  }\n  return value;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-alias-cycle",
+  "source": "export function make(flag: boolean) {\n  let left = [1];\n  let right = [2];\n  while (flag) {\n    left = right;\n    right = left;\n  }\n  left.push(3);\n  return left;\n}\n",
+  "findings": [
+   "8:UnknownEffect: function make(): The function make() mutates value with unknown ownership, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-var-redeclares-parameter",
+  "source": "export function make(items: number[]) {\n  var items: number[];\n  items.push(1);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function make(): The function make() mutates argument items, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s3-this-alias-constructor",
+  "source": "export class Box {\n  items: number[] = [];\n  constructor() {\n    const self = this;\n    self.items.push(1);\n  }\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-this-alias-method",
+  "source": "export class Box {\n  items: number[] = [];\n  count = 0;\n  add() {\n    const self = this;\n    self.items.push(1);\n  }\n  bump() {\n    const self = this;\n    self.count = 1;\n  }\n}\n",
+  "findings": [
+   "5:UnknownEffect: method Box.add(): The method Box.add() reads this, an unknown effect.",
+   "6:UnknownEffect: method Box.add(): The method Box.add() mutates receiver state, an unknown effect.",
+   "9:UnknownEffect: method Box.bump(): The method Box.bump() reads this, an unknown effect.",
+   "10:UnknownEffect: method Box.bump(): The method Box.bump() mutates receiver state, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-comma-value",
+  "source": "const store: number[] = [];\nexport function make() {\n  const value = (0, store);\n  value.push(1);\n}\n",
+  "findings": [
+   "3:ImplicitInput: function make(): The function make() reads store, an implicit input.",
+   "4:ImplicitOutput: function make(): The function make() mutates caller-owned value value, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s3-construct-extends",
+  "source": "class Base {\n  items: number[] = [];\n}\nclass Box extends Base {}\nexport function make() {\n  const value = new Box();\n  value.items.push(1);\n  return value;\n}\n",
+  "findings": [
+   "7:UnknownEffect: function make(): The function make() mutates value with unknown ownership, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-construct-implements",
+  "source": "interface Holder {\n  items: number[];\n}\nclass Box implements Holder {\n  items: number[] = [];\n}\nexport function make() {\n  const value = new Box();\n  value.items.push(1);\n  return value;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-construct-extends-implements",
+  "source": "interface Holder {\n  items: number[];\n}\nclass Base {\n  items: number[] = [];\n}\nclass Box extends Base implements Holder {}\nexport function make() {\n  const value = new Box();\n  value.items.push(1);\n  return value;\n}\n",
+  "findings": [
+   "10:UnknownEffect: function make(): The function make() mutates value with unknown ownership, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-construct-nested-return",
+  "source": "const shared = { items: [] as number[] };\nclass Box {\n  items: number[] = [];\n  constructor(flag: boolean) {\n    if (flag) {\n      return shared;\n    }\n  }\n}\nexport function make() {\n  const value = new Box(true);\n  value.items.push(1);\n  return value;\n}\n",
+  "findings": [
+   "12:UnknownEffect: function make(): The function make() mutates value with unknown ownership, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-construct-inner-function-return",
+  "source": "class Box {\n  items: number[] = [];\n  constructor() {\n    const read = () => {\n      return 1;\n    };\n    this.items.push(read());\n  }\n}\nexport function make() {\n  const value = new Box();\n  value.items.push(1);\n  return value;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-iterate-readonly-array",
+  "source": "export function count(items: ReadonlyArray<number>) {\n  return [...items].length;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-iterate-readonly-map",
+  "source": "export function count(items: ReadonlyMap<string, number>) {\n  return [...items].length;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-iterate-readonly-set",
+  "source": "export function count(items: ReadonlySet<number>) {\n  return [...items].length;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-iterate-string-object",
+  "source": "export function count(items: String) {\n  return [...items].length;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-iterate-optional-string",
+  "source": "export function count(items: string | undefined) {\n  return [...(items ?? \"\")].length;\n}\n",
+  "findings": [
+   "2:UnknownEffect: function count(): The function count() uses unresolved iterate protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-iterate-shadowed-set",
+  "source": "export function count(items: Set<number>) {\n  return [...items].length + Set;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-iterate-new-array",
+  "source": "export function count() {\n  return [...new Array<number>(2)].length;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-yield-star",
+  "source": "export function* repeat(items: Iterable<number>) {\n  yield* items;\n}\n",
+  "findings": [
+   "2:UnknownEffect: function repeat(): The function repeat() uses unresolved iterate protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-array-from",
+  "source": "export function copy(items: Iterable<number>) {\n  return Array.from(items);\n}\n",
+  "findings": [
+   "2:UnknownEffect: function copy(): The function copy() uses unresolved iterate protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-array-pattern",
+  "source": "export function first(items: Iterable<number>) {\n  const [head] = items;\n  return head;\n}\n",
+  "findings": [
+   "2:UnknownEffect: function first(): The function first() uses unresolved iterate protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-iterate-concat",
+  "source": "export function letters(left: string, right: string) {\n  return [...(left + right)].length;\n}\n",
+  "findings": [
+   "2:UnknownEffect: function letters(): The function letters() uses unresolved iterate protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-convert-array-literal",
+  "source": "export function label(value: number) {\n  return `${[value, 1]}`;\n}\n",
+  "findings": [
+   "2:UnknownEffect: function label(): The function label() uses unresolved convert protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-convert-number-literal",
+  "source": "export function label(value: number) {\n  return `${1}`;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-convert-array-type",
+  "source": "export function label(value: number[]) {\n  return `${value}`;\n}\n",
+  "findings": [
+   "2:UnknownEffect: function label(): The function label() uses unresolved convert protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-convert-promise-type",
+  "source": "export function label(value: Promise<number>) {\n  return `${value}`;\n}\n",
+  "findings": [
+   "2:UnknownEffect: function label(): The function label() uses unresolved convert protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-convert-promise-call",
+  "source": "export function label(value: number) {\n  return `${Promise.resolve(value)}`;\n}\n",
+  "findings": [
+   "2:UnknownEffect: function label(): The function label() uses unresolved convert protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-convert-string-call",
+  "source": "export function label(value: number) {\n  return `${String(value)}`;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-convert-alias-cycle",
+  "source": "export function label(flag: boolean) {\n  let left = \"x\";\n  let right = left;\n  if (flag) {\n    left = right;\n  }\n  return `${left}`;\n}\n",
+  "findings": [
+   "7:UnknownEffect: function label(): The function label() uses unresolved convert protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-convert-declared",
+  "source": "declare const name: string;\nexport function label() {\n  return `${name}`;\n}\n",
+  "findings": [
+   "3:UnknownEffect: function label(): The function label() uses unresolved convert protocol, an unknown effect.",
+   "3:ImplicitInput: function label(): The function label() reads name, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s3-convert-arrow-call",
+  "source": "const text = (): string => \"a\";\nexport function label() {\n  return `${text()}`;\n}\n",
+  "findings": [
+   "3:UnknownEffect: function label(): The function label() uses unresolved convert protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-convert-overloads",
+  "source": "function text(value: number): string;\nfunction text(value: string): string;\nfunction text(value: number | string): any {\n  return String(value);\n}\nexport function label() {\n  return `${text(1)}`;\n}\n",
+  "findings": [
+   "7:UnknownEffect: function label(): The function label() uses unresolved convert protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-await-exported-async",
+  "source": "export async function load() {\n  return 1;\n}\nexport async function run() {\n  const pending = load();\n  return await pending;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s3-await-exported-plain",
+  "source": "export function load() {\n  return 1;\n}\nexport async function run() {\n  const pending = load();\n  return await pending;\n}\n",
+  "findings": [
+   "6:UnknownEffect: function run(): The function run() uses unresolved await protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-convert-async-call",
+  "source": "async function load() {\n  return 1;\n}\nexport function label() {\n  return `${load()}`;\n}\n",
+  "findings": [
+   "5:UnknownEffect: function label(): The function label() uses unresolved convert protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-callee-reset-then-join-alias",
+  "source": "let held: number[] = [];\nconst other: number[] = [];\nfunction reset() {\n  held = [];\n}\nexport function make() {\n  reset();\n  held ??= other;\n  const local = held;\n  local.push(1);\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function reset(): The function reset() writes held, an implicit output.",
+   "7:ImplicitOutput: function make(): The function make() writes held, an implicit output.",
+   "8:ImplicitInput: function make(): The function make() reads held, an implicit input.",
+   "10:ImplicitOutput: function make(): The function make() mutates caller-owned value local, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s3-new-weak-set-entries",
+  "source": "export function index(entries: Iterable<object>) {\n  return new WeakSet(entries);\n}\n",
+  "findings": [
+   "2:UnknownEffect: function index(): The function index() uses unresolved iterate protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-s3-iterate-imported-set",
+  "source": "import { Set } from \"./collections\";\nexport function count(items: Set<number>) {\n  return [...items].length;\n}\n",
+  "findings": [
+   "3:UnknownEffect: function count(): The function count() uses unresolved iterate protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "nested-push-helper-inner-argument",
+  "source": "function outer() {\n  const values = [0];\n  function add() { values.push(values.push(1)); }\n  add();\n  const read1 = () => values[1];\n  const read2 = () => values[2];\n  return read1() + read2();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "5:ImplicitInput: arrow function read1(): The arrow function read1() reads values, an implicit input.",
+   "6:ImplicitInput: arrow function read2(): The arrow function read2() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "nested-push-helper-length-argument",
+  "source": "function outer() {\n  const values = [0];\n  function add() { values.push(values.length, values.push(1)); }\n  add();\n  const read1 = () => values[1];\n  return read1();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "3:ImplicitInput: function add(): The function add() reads values, an implicit input.",
+   "5:ImplicitInput: arrow function read1(): The arrow function read1() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "generator-escape-new-set",
+  "source": "function outer() {\n  const values = [0];\n  function* gen() { values.push(1); yield 1; }\n  const s = new Set(gen());\n  const read1 = () => values[1];\n  return read1() + s.size;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function gen(): The function gen() writes values, an implicit output.",
+   "5:ImplicitInput: arrow function read1(): The arrow function read1() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "generator-escape-binding-argument",
+  "source": "function outer() {\n  const values = [0];\n  function* gen() { values.push(1); yield 1; }\n  const it = gen();\n  const s = new Set(it);\n  const read1 = () => values[1];\n  return read1() + s.size;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function gen(): The function gen() writes values, an implicit output.",
+   "6:ImplicitInput: arrow function read1(): The arrow function read1() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "generator-escape-alias-argument",
+  "source": "function outer() {\n  const values = [0];\n  function* gen() { values.push(1); yield 1; }\n  const it = gen();\n  const other = it;\n  const s = new Set(other);\n  const read1 = () => values[1];\n  return read1() + s.size;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function gen(): The function gen() writes values, an implicit output.",
+   "7:ImplicitInput: arrow function read1(): The arrow function read1() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "generator-bare-statement-not-run",
+  "source": "function outer() {\n  const values = [0];\n  function* gen() { values.push(1); yield 1; }\n  gen();\n  const read1 = () => values[1];\n  return read1();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function gen(): The function gen() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "generator-yielded-then-iterated",
+  "source": "const log: number[] = [];\nfunction* gen() { log.push(1); yield 1; }\nfunction* outer() {\n  yield gen();\n}\nexport function run() {\n  for (const x of outer()) for (const y of x) void y;\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
+   "4:ImplicitOutput: function outer(): The function outer() writes log, an implicit output.",
+   "7:ImplicitOutput: function run(): The function run() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "generator-returned-then-iterated",
+  "source": "const log: number[] = [];\nfunction* gen() { log.push(1); yield 1; }\nfunction make() {\n  return gen();\n}\nexport function run() {\n  for (const x of make()) void x;\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
+   "7:UnknownEffect: function run(): The function run() uses unresolved iterate protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "generator-typeof-not-site",
+  "source": "const log: number[] = [];\nfunction* gen() { log.push(1); yield 1; }\nexport function run() {\n  const it = gen();\n  return typeof it;\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function gen(): The function gen() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "generator-void-not-site",
+  "source": "const log: number[] = [];\nfunction* gen() { log.push(1); yield 1; }\nexport function run() {\n  const it = gen();\n  void it;\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function gen(): The function gen() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "generator-arrow-returned-then-spread",
+  "source": "const log: number[] = [];\nfunction* gen() { log.push(1); yield 1; }\nconst make = () => gen();\nexport function run() {\n  return [...make()];\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
+   "5:UnknownEffect: function run(): The function run() uses unresolved iterate protocol, an unknown effect."
+  ]
+ },
+ {
+  "name": "generator-binding-returned",
+  "source": "const log: number[] = [];\nfunction* gen() { log.push(1); yield 1; }\nexport function make() {\n  const it = gen();\n  return it;\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function gen(): The function gen() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "generator-awaited-call-argument",
+  "source": "const log: number[] = [];\nfunction* gen() { log.push(1); yield 1; }\nexport async function run() {\n  return new Set(await gen()).size;\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
+   "4:UnknownEffect: function run(): The function run() uses unresolved iterate protocol, an unknown effect.",
+   "4:ImplicitOutput: function run(): The function run() writes log, an implicit output."
+  ]
  }
 ]

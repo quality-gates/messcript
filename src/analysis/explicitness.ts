@@ -6,7 +6,7 @@ import { methodName, outerExpression, unwrapExpression } from "../ast/expression
 import { analyzeScopes, isAmbient, writeTargets } from "../ast/scopes";
 import type { Binding, ScopeModel, Write } from "../ast/scopes";
 import { reachableChildren } from "./control-flow";
-import { bindingAssignments, canReachSite, inside, unconditional } from "./assignments";
+import { bindingAssignments, canReachSite, inside, referenceAssignment, unconditional } from "./assignments";
 import { callableTargets as resolveTargets, memberTargets, type Dispatch, type Targets } from "./dispatch";
 import { classTargets } from "./shapes";
 import { ambientFlow, isPureConstructor, iteratedArgument, libraryCall, libraryCallback, type LibraryCall, type LibraryStorage } from "./library";
@@ -935,11 +935,20 @@ function calleePushOffset(state: AnalysisState, push: ts.CallExpression, sourceO
   let offset: PushStart | undefined = { lowerBound: 0, exact: true };
   const counted = new Set<ts.CallExpression>([push]);
   for (const effect of [...summary.flows.filter(isWritingFlow), ...summary.parameterWrites]) {
-    if (offset && mayRunBefore(effect.node, push, sourceOwner)) {
+    if (offset && mayRunBefore(writeEnd(effect), push, sourceOwner)) {
       offset = advanceCalleeOffset(state, offset, effect, target, counted, sourceOwner);
     }
   }
   return offset;
+}
+
+/**
+ * Gives the node at whose end the write occurs. A push appends after it evaluates its arguments, so the write occurs at
+ * the end of the push call and not at its receiver.
+ */
+function writeEnd(effect: ImplicitFlow | ParameterWrite): ts.Node {
+  const direct = "writeNode" in effect && effect.writeNode ? undefined : pushCallForMutation(effect.node);
+  return direct ?? effect.node;
 }
 
 /** Counts one earlier write of the callee; a write other than a push leaves the offset unknown. */
@@ -1700,14 +1709,14 @@ function resolvedCallEffects(
   call: ts.CallExpression,
   owner: EffectOwner,
 ): CallEffects {
-  const sites = resolved.targets.every(isGenerator) ? generatorSites(state, call, owner) : [call.expression];
+  const sites = (resolved.targets.every(isGenerator) ? generatorSites(state, call, owner) : undefined) ?? [call.expression];
   const callee = unwrapExpression(call.expression);
   const receiver = ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)
     ? storageFactForExpression(state, summaries, callee.expression, owner, call) : undefined;
   const captures = capturesForExpression(state, summaries, call.expression, owner, new Set());
   const groups = sites.flatMap((site) => resolved.targets.map((target) => {
     const summary = summaries.get(target);
-    return summary ? instantiateCallableSummary(state, summaries, summary, call.arguments, site, owner, new Set(), receiver, captures)
+    return summary ? instantiateCallableSummary(state, summaries, summary, call.arguments, site, owner, receiver, captures)
       : unknownEffects(site, owner, "calls unresolved callable");
   }));
   if (!resolved.complete) {
@@ -1842,7 +1851,7 @@ function callbackEffects(
   owner: EffectOwner,
 ): CallEffects {
   const resolved = resolveTargets(dispatchFor(state, summaries), callback);
-  const effects = instantiateCallbackTargets(state, summaries, resolved.targets, facts, node, owner, new Set());
+  const effects = instantiateCallbackTargets(state, summaries, resolved.targets, facts, node, owner);
   if (resolved.complete) {
     return effects;
   }
@@ -1862,15 +1871,9 @@ function instantiateCallableSummary(
   actuals: readonly ts.Expression[],
   node: ts.Node,
   owner: EffectOwner,
-  seen = new Set<string>(),
   receiver?: StorageFact,
   captures: ReadonlyMap<Binding, StorageFact> = new Map(),
 ): CallEffects {
-  const key = `${ownerKey(summary.owner)}:${actuals.map((actual) => actual.getStart()).join(",")}`;
-  if (seen.has(key)) {
-    return emptyCallEffects();
-  }
-  const nextSeen = new Set(seen).add(key);
   const active = <T extends { readonly defaultParameterIndex?: number }>(effects: readonly T[]) =>
     effects.filter((effect) => defaultMayRun(effect.defaultParameterIndex, actuals, state.model));
   const rebound = active(summary.flows).map((flow) => reboundFlow(state, summaries, flow, node, owner, receiver, captures));
@@ -1898,7 +1901,6 @@ function instantiateCallableSummary(
     actualFact,
     node,
     owner,
-    nextSeen,
   );
   flows.push(...callbackEffects.flows);
   writes.push(...callbackEffects.writes);
@@ -2055,7 +2057,6 @@ function instantiateParameterCalls(
   actualFact: (index: number) => StorageFact,
   node: ts.Node,
   owner: EffectOwner,
-  seen: Set<string>,
 ): CallEffects {
   const flows: ImplicitFlow[] = [];
   const writes: ParameterWrite[] = [];
@@ -2086,7 +2087,7 @@ function instantiateParameterCalls(
       }
       continue;
     }
-    const effects = instantiateCallbackTargets(state, summaries, callbackTargets, argumentFacts, node, owner, seen);
+    const effects = instantiateCallbackTargets(state, summaries, callbackTargets, argumentFacts, node, owner);
     flows.push(...effects.flows);
     writes.push(...effects.writes);
     forwardedCalls.push(...effects.parameterCalls);
@@ -2101,7 +2102,6 @@ function instantiateCallbackTargets(
   argumentFacts: readonly StorageFact[],
   node: ts.Node,
   owner: EffectOwner,
-  seen: Set<string>,
 ): CallEffects {
   const flows: ImplicitFlow[] = [];
   const writes: ParameterWrite[] = [];
@@ -2111,15 +2111,7 @@ function instantiateCallbackTargets(
     if (!callbackSummary) {
       continue;
     }
-    const effects = instantiateCallableSummaryFromFacts(
-      state,
-      summaries,
-      callbackSummary,
-      argumentFacts,
-      node,
-      owner,
-      seen,
-    );
+    const effects = instantiateCallableSummaryFromFacts(state, summaries, callbackSummary, argumentFacts, node, owner);
     flows.push(...effects.flows);
     writes.push(...effects.writes);
     parameterCalls.push(...effects.parameterCalls);
@@ -2134,12 +2126,7 @@ function instantiateCallableSummaryFromFacts(
   actualFacts: readonly StorageFact[],
   node: ts.Node,
   owner: EffectOwner,
-  seen: Set<string>,
 ): CallEffects {
-  const key = `${ownerKey(summary.owner)}:${JSON.stringify(actualFacts)}`;
-  if (seen.has(key)) {
-    return emptyCallEffects();
-  }
   // A callback can run any number of times, so its pushes keep only a lower bound.
   const rebound = summary.flows.map((flow) => reboundFlow(state, summaries, { ...flow, writeNode: flow.writeNode ?? flow.node }, node, owner));
   const actualFact = (index: number) => actualFacts[index] ?? unknownFact;
@@ -2228,7 +2215,7 @@ function constructorEffects(
   }
   return combineEffects(classes.map((created) => {
     const summary = summaries.get(explicitConstructor(created) ?? created);
-    return summary ? instantiateCallableSummary(state, summaries, summary, actuals, node, owner, new Set(), privateFact)
+    return summary ? instantiateCallableSummary(state, summaries, summary, actuals, node, owner, privateFact)
       : unknownEffects(node, owner, "constructs unresolved class");
   }));
 }
@@ -2290,7 +2277,7 @@ function accessorKindEffects(
   const actuals = kind === "set" && ts.isBinaryExpression(parent) ? [parent.right] : [];
   const groups = resolved.targets.flatMap((target) => {
     const summary = summaries.get(target);
-    return summary ? [instantiateCallableSummary(state, summaries, summary, actuals, node, owner, new Set(), receiver)] : [];
+    return summary ? [instantiateCallableSummary(state, summaries, summary, actuals, node, owner, receiver)] : [];
   });
   if (!resolved.complete) {
     groups.push(unknownEffects(node, owner, "accesses unresolved accessor"));
@@ -2298,17 +2285,24 @@ function accessorKindEffects(
   return combineEffects(groups);
 }
 
-function generatorSites(state: AnalysisState, call: ts.CallExpression, owner: EffectOwner): ts.Node[] {
+/**
+ * Gives the sites where the generator body runs. A bare call statement does not run the body. If the generator object
+ * goes to code that this function does not follow, the result is undefined and the caller must use the call site.
+ */
+function generatorSites(state: AnalysisState, call: ts.CallExpression, owner: EffectOwner): ts.Node[] | undefined {
   const direct = forcingSite(state.model, outerExpression(call));
   if (direct) {
     return [direct];
   }
   const parent = outerExpression(call).parent;
+  if (isDiscarded(parent) || isReturnedValue(call)) {
+    return [];
+  }
   if (ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {
     const binding = state.model.bindings.find((item) => item.declarations.some((declaration) => declaration.node === parent));
-    return binding ? bindingForcingSites(state, binding, owner, new Set()) : [];
+    return binding ? bindingForcingSites(state, binding, owner, new Set()) : undefined;
   }
-  return [];
+  return undefined;
 }
 
 function bindingForcingSites(state: AnalysisState, binding: Binding, owner: EffectOwner, seen: ReadonlySet<Binding>): ts.Node[] {
@@ -2321,19 +2315,44 @@ function bindingForcingSites(state: AnalysisState, binding: Binding, owner: Effe
     if (!inside(reference, owner)) {
       continue;
     }
-    const site = forcingSite(state.model, outerExpression(reference));
-    if (site) {
-      sites.push(site);
-    }
-    const parent = outerExpression(reference).parent;
-    if (ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {
-      const alias = state.model.bindings.find((item) => item.declarations.some((declaration) => declaration.node === parent));
-      if (alias) {
-        sites.push(...bindingForcingSites(state, alias, owner, next));
-      }
-    }
+    sites.push(...referenceForcingSites(state, reference, owner, next));
   }
   return sites;
+}
+
+/**
+ * Gives the sites where one reference to a generator object can run the generator body. An assignment target, a
+ * discarded value, and a returned value are not sites. If the reference is not a known forcing site and not a known alias, the object can go
+ * to other code. Then the reference itself is a site.
+ */
+function referenceForcingSites(state: AnalysisState, reference: ts.Identifier, owner: EffectOwner, seen: ReadonlySet<Binding>): ts.Node[] {
+  const expression = outerExpression(reference);
+  const site = forcingSite(state.model, expression);
+  if (site) {
+    return [site];
+  }
+  const parent = expression.parent;
+  if (referenceAssignment(reference) || isDiscarded(parent) || isReturnedValue(reference)) {
+    return [];
+  }
+  const alias = ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)
+    ? state.model.bindings.find((item) => item.declarations.some((declaration) => declaration.node === parent)) : undefined;
+  return alias ? bindingForcingSites(state, alias, owner, seen) : [expression];
+}
+
+/** Tells if the parent does not use the value of its child, as a statement, void, and typeof do. */
+function isDiscarded(parent: ts.Node): boolean {
+  return ts.isExpressionStatement(parent) || ts.isVoidExpression(parent) || ts.isTypeOfExpression(parent);
+}
+
+/**
+ * Tells if the function returns the value of the expression, also after one await. The caller gets the returned value
+ * as an unknown value, thus the caller makes an unknown effect when it runs a protocol on that value.
+ */
+function isReturnedValue(node: ts.Expression): boolean {
+  const value = outerExpression(node);
+  const result = ts.isAwaitExpression(value.parent) ? outerExpression(value.parent) : value;
+  return ts.isReturnStatement(result.parent) || (ts.isArrowFunction(result.parent) && result.parent.body === result);
 }
 
 function forcingSite(model: ScopeModel, expression: ts.Expression): ts.Node | undefined {
@@ -2487,7 +2506,7 @@ function targetStorageInsertions(
   const args = pointArguments(call);
   const invocation: StorageInvocation = { call, callable: call.expression,
     argumentFact: (index) => args[index] ? storageFactForExpression(state, summaries, args[index], owner, call) : unknownFact };
-  const sites = ts.isCallExpression(call) && resolved.targets.every(isGenerator) ? generatorSites(state, call, owner) : [call];
+  const sites = (ts.isCallExpression(call) && resolved.targets.every(isGenerator) ? generatorSites(state, call, owner) : undefined) ?? [call];
   return sites.flatMap((node) => resolved.targets.flatMap((target) => {
     const summary = summaries.get(target);
     const direct = (summary?.storageInsertions ?? []).map((insertion) => instantiateInsertion(
@@ -2743,7 +2762,7 @@ function taggedTemplateEffects(
   const resolved = resolveTargets(dispatchFor(state, summaries), node.tag);
   const substitutions = ts.isTemplateExpression(node.template) ? node.template.templateSpans.map((span) => span.expression) : [];
   const facts = [privateFact, ...substitutions.map((value) => storageFactForExpression(state, summaries, value, owner, node))];
-  const effects = instantiateCallbackTargets(state, summaries, resolved.targets, facts, node.tag, owner, new Set());
+  const effects = instantiateCallbackTargets(state, summaries, resolved.targets, facts, node.tag, owner);
   return resolved.complete ? effects : combineEffects([effects, unknownEffects(node.tag, owner, "calls unresolved callable")]);
 }
 
