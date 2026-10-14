@@ -27,6 +27,8 @@ export type StorageInsertion = ({ readonly kind: "cell" } | { readonly kind: "bi
 export type StorageResolver = {
   readonly call: CallStorageResolver;
   readonly insertions: (owner: EffectOwner, site: ts.Node) => readonly StorageInsertion[];
+  readonly cache?: Map<string, StorageFact>;
+  readonly cycles?: { count: number };
 };
 
 type FactContext = {
@@ -79,9 +81,14 @@ export function storageFactAt(
   seen: ReadonlySet<Binding> = new Set(),
   resolver?: StorageResolver,
 ): StorageFact {
-  if (seen.has(binding)) {
-    return UNKNOWN_FACT;
+  const cached = cachedBindingFact(binding, owner, site, resolver);
+  if (cached) {
+    return cached;
   }
+  if (seen.has(binding)) {
+    return recordCycle(resolver);
+  }
+  const beforeCycle = cycleCount(resolver);
   const context = { model, owner, seen: new Set(seen).add(binding), resolver };
   let fact = initialFact(model, binding, owner);
   const alias = assignments.ambientAlias(binding, owner);
@@ -105,7 +112,39 @@ export function storageFactAt(
     const next = storage.selectedFact(event.value, event, (part) => expressionFact(part, event.context));
     fact = event.replace ? next : storage.joinFacts(fact, next);
   }
-  return insertedFact(fact, { ...context, site });
+  return cacheBindingFact(binding, owner, site, resolver, beforeCycle, insertedFact(fact, { ...context, site }));
+}
+
+export function nodeKey(node: ts.Node): string {
+  return `${node.kind}.${node.pos}.${node.end}`;
+}
+
+function bindingCacheKey(binding: Binding, owner: EffectOwner, site: ts.Node): string {
+  return `b:${binding.declarations[0].identifier.getStart()}:${nodeKey(owner)}:${nodeKey(site)}`;
+}
+
+function cachedBindingFact(binding: Binding, owner: EffectOwner, site: ts.Node, resolver?: StorageResolver): StorageFact | undefined {
+  return resolver?.cache?.get(bindingCacheKey(binding, owner, site));
+}
+
+function cycleCount(resolver?: StorageResolver): number {
+  return resolver?.cycles ? resolver.cycles.count : 0;
+}
+
+function recordCycle(resolver?: StorageResolver): StorageFact {
+  if (resolver?.cycles) {
+    resolver.cycles.count += 1;
+  }
+  return UNKNOWN_FACT;
+}
+
+function cacheBindingFact(
+  binding: Binding, owner: EffectOwner, site: ts.Node, resolver: StorageResolver | undefined, before: number, result: StorageFact,
+): StorageFact {
+  if (cycleCount(resolver) === before) {
+    resolver?.cache?.set(bindingCacheKey(binding, owner, site), result);
+  }
+  return result;
 }
 
 /** Gives the storage the expression evaluates to at the site in the owner. */
@@ -115,8 +154,9 @@ export function expressionStorageFact(
   owner: EffectOwner,
   site: ts.Node,
   resolver?: StorageResolver,
+  seen: ReadonlySet<Binding> = new Set(),
 ): StorageFact {
-  return expressionFact(expression, { model, owner, site, seen: new Set(), resolver });
+  return expressionFact(expression, { model, owner, site, seen, resolver });
 }
 
 export function externalBindingOrigin(binding: Binding): `external:${number}` {

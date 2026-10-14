@@ -58,6 +58,8 @@ const STORING_METHODS = new Map<string, LibraryStorage>([
   ["splice", "splice"], ["unshift", "arguments"],
 ]);
 
+const MOVING_METHODS = new Set(["copyWithin", "reverse", "shift", "sort", "splice", "unshift"]);
+
 const HOLDING_GLOBAL_CALLS = new Map<string, readonly number[]>([
   ["Array.from", [1]], ["Array.of", []], ["Object.entries", []], ["Object.fromEntries", []], ["Object.values", []],
 ]);
@@ -96,7 +98,6 @@ const PURE_CONSTRUCTORS = new Set([
   "Array", "Date", "Error", "Map", "Object", "RangeError", "RegExp", "Set", "TypeError", "URL", "URLSearchParams",
   "WeakMap", "WeakSet",
 ]);
-
 
 function methods(result: LibraryResult, names: readonly string[]): [string, LibraryResult][] {
   return names.map((name) => [name, result]);
@@ -193,6 +194,11 @@ function memberCall(name: string | undefined): LibraryCall | undefined {
   }
   const pure = PURE_METHODS.get(name);
   return pure ? { kind: "pure", result: pure, target: "receiver", callbacks, stores: "none" } : undefined;
+}
+
+/** Tells if the method can move what one index of its receiver holds to another index. */
+export function movesElements(call: LibraryCall, name: string | undefined): boolean {
+  return call.kind === "mutating" && call.target === "receiver" && MOVING_METHODS.has(name ?? "");
 }
 
 export function iteratedArgument(call: ts.CallExpression, model: ScopeModel): ts.Expression | undefined {

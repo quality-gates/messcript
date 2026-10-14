@@ -29,7 +29,6 @@ const STRING_METHODS = new Set([
   "trimEnd", "trimStart",
 ]);
 
-
 export function standardMethod(model: ScopeModel, expression: ts.Expression, method: string | undefined): boolean {
   if (!method) {
     return false;

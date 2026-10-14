@@ -84,19 +84,17 @@ function bindingTargets(dispatch: Dispatch, binding: Binding, seen: ReadonlySet<
   return groups.length > 0 ? joinTargets(groups) : UNKNOWN;
 }
 
-// A plain name in an object pattern, as in "const { add } = api", takes the member the name selects.
 function elementTargets(dispatch: Dispatch, binding: Binding, node: ts.Node, value: ts.Expression, seen: ReadonlySet<Binding>): Targets {
   const name = patternName(binding.declarations.find((declaration) => declaration.node === node)?.identifier.parent, node);
   return name === undefined ? UNKNOWN : namedTargets(dispatch, value, name, "call", seen, node);
 }
 
-// Gives the member name a plain element of the top object pattern of the declaration selects.
 function patternName(element: ts.Node | undefined, declaration: ts.Node): string | undefined {
   if (!element || !ts.isBindingElement(element) || !ts.isObjectBindingPattern(element.parent) || element.parent.parent !== declaration ||
       element.dotDotDotToken || element.initializer) {
     return undefined;
   }
-  return shapes.keyName(element.propertyName ?? element.name);
+  return expressions.keyName(element.propertyName ?? element.name);
 }
 
 export function memberTargets(dispatch: Dispatch, expression: ts.Expression, kind: MemberKind, seen: ReadonlySet<Binding> = new Set()): Targets {
@@ -114,14 +112,12 @@ export function memberTargets(dispatch: Dispatch, expression: ts.Expression, kin
   return namedTargets(dispatch, receiver, name, kind, seen, expression);
 }
 
-/** Gives the members a name selects on the value of the receiver at the site. */
 function namedTargets(dispatch: Dispatch, receiver: ts.Expression, name: string, kind: MemberKind, seen: ReadonlySet<Binding>, site: ts.Node): Targets {
   const selected = shapes.receiverShapes(dispatch.model, receiver, seen, site);
   if (selected) {
     return joinTargets([...selected.map((shape) => ts.isClassLike(shape) ? classMembers(dispatch, shape, name, kind, new Set())
-      : membersTargets(dispatch, shape.properties, name, kind, seen)), patchedTargets(site, name, kind)]);
+      : membersTargets(dispatch, shapes.liveProperties(shape, name), name, kind, seen)), patchedTargets(dispatch, name, kind)]);
   }
-  // A global object holds no method of this file unless the file stores one there, which it reports as a write.
   if (ts.isIdentifier(receiver) && !dispatch.model.resolve(receiver)) {
     return UNKNOWN;
   }
@@ -129,9 +125,8 @@ function namedTargets(dispatch: Dispatch, receiver: ts.Expression, name: string,
   return { targets: candidates, complete: false };
 }
 
-// A method that code in the file replaces by name can hold any value.
-function patchedTargets(site: ts.Node, name: string, kind: MemberKind): Targets {
-  return kind === "call" && shapes.patchedName(site, name) ? UNKNOWN : EMPTY;
+function patchedTargets(dispatch: Dispatch, name: string, kind: MemberKind): Targets {
+  return kind === "call" && dispatch.model.writesMemberName(name) ? UNKNOWN : EMPTY;
 }
 
 function receiverTargets(dispatch: Dispatch, node: ts.Node, name: string, kind: MemberKind, baseOnly: boolean): Targets {
@@ -150,7 +145,7 @@ function receiverTargets(dispatch: Dispatch, node: ts.Node, name: string, kind: 
   }))];
   const subtypes = classes.filter((candidate) => shapes.descendsFrom(dispatch.model, candidate, owner, new Set()));
   const groups = [owner, ...subtypes].map((candidate) => classMembers(dispatch, candidate, name, kind, new Set()));
-  groups.push(patchedTargets(node, name, kind));
+  groups.push(patchedTargets(dispatch, name, kind));
   if (shapes.isOpenMember(owner, name) || !shapes.closedShapes(dispatch.model, [owner, ...subtypes])) {
     groups.push(UNKNOWN);
   }
@@ -181,7 +176,7 @@ function entryTargets(dispatch: Dispatch, member: ts.Node, name: string, kind: M
   if (ts.isSpreadAssignment(member)) {
     return [namedTargets(dispatch, member.expression, name, kind, seen, member)];
   }
-  if (shapes.declarationName(member) !== name) {
+  if (expressions.declarationName(member) !== name) {
     return shapes.openName(member) ? [UNKNOWN] : [];
   }
   if (memberMatches(member, name, kind)) {
@@ -192,5 +187,5 @@ function entryTargets(dispatch: Dispatch, member: ts.Node, name: string, kind: M
 }
 
 function memberMatches(node: ts.Node, name: string, kind: MemberKind): node is owners.EffectOwner {
-  return MEMBER_KINDS[kind](node) && node.body !== undefined && shapes.declarationName(node) === name;
+  return MEMBER_KINDS[kind](node) && node.body !== undefined && expressions.declarationName(node) === name;
 }

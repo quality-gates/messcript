@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- The `explicitness` ruleset adds `ImplicitInput`, `ImplicitOutput`, and `UnknownEffect`, reported per function, method, constructor, and module. Storage identity, aliasing, append bounds, and read depth decide which reads and writes count, and a call or mutation the analysis cannot resolve is reported as `UnknownEffect` rather than left quiet. It is opt-in: combine as `typescript,explicitness`.
+
 ### Fixed
 
 - `CamelCaseMethodName`, `ShortMethodName`, and `BooleanGetMethodName` now see object-literal methods and get/set accessors, and parameter-naming rules see their parameters ([#304](https://github.com/quality-gates/messcript/issues/304)). Each member is its own group, because an object literal cannot overload. A property whose value is a function expression or arrow function is unchanged.

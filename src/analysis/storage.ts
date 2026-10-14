@@ -41,9 +41,13 @@ function invocationOrigin(origin: StorageOrigin, site: number): StorageOrigin {
     return origin;
   }
   const [, allocation, context = ""] = origin.split(":");
+  if (context === "*") {
+    return `private:${Number(allocation)}:*`;
+  }
   const calls = new Set(context.split(",").filter((value) => value.length > 0));
   calls.add(String(site));
-  return `private:${Number(allocation)}:${[...calls].sort().join(",")}`;
+  const next = calls.size > 2 ? "*" : [...calls].sort().join(",");
+  return `private:${Number(allocation)}:${next}`;
 }
 
 export function elementFact(fact: StorageFact): StorageFact {
@@ -84,13 +88,23 @@ export function externalProjection(origin: StorageOrigin): { base: `external:${n
   return { base: `external:${Number(binding)}`, path: path ? path.split("/").map(decodeURIComponent) : [] };
 }
 
+const MAX_PROJECTION_DEPTH = 3;
+
+function projectedPath(path: readonly string[], slot: string): string {
+  if (path.length >= 2 && path[path.length - 1] === "*") {
+    return path.map(encodeURIComponent).join("/");
+  }
+  const next = path.length >= MAX_PROJECTION_DEPTH ? [...path.slice(0, MAX_PROJECTION_DEPTH - 1), "*"] : [...path, slot];
+  return next.map(encodeURIComponent).join("/");
+}
+
 function projectedOrigin(origin: StorageOrigin, slot: string): StorageOrigin {
   const projection = parameterProjection(origin);
   if (projection) {
-    return `param:${projection.parameterIndex}:${[...projection.path, slot].map(encodeURIComponent).join("/")}`;
+    return `param:${projection.parameterIndex}:${projectedPath(projection.path, slot)}`;
   }
   const external = externalProjection(origin);
-  return external ? `${external.base}:${[...external.path, slot].map(encodeURIComponent).join("/")}` : origin;
+  return external ? `${external.base}:${projectedPath(external.path, slot)}` : origin;
 }
 
 export function hasExternalOrigin(origins: readonly StorageOrigin[]): boolean {
@@ -115,13 +129,31 @@ export function joinStorageOrigins(origins: readonly StorageOrigin[]): readonly 
 }
 
 export function memberStorageFact(fact: StorageFact, slot?: string): StorageFact {
-  const origins = fact.outer.flatMap((allocation) => {
-    const cells = fact.cells?.filter((cell) => cell.allocation === allocation);
-    return cells?.length ? cells.filter((cell) => cell.slot !== "@allocation" && cellMatchesSlot(cell.slot, slot)).flatMap((cell) => cell.origins)
-      : fact.reachable.map((origin) => projectedOrigin(origin, slot ?? "*"));
-  });
+  const origins = fact.outer.flatMap((allocation) => allocationMemberOrigins(fact, allocation, slot));
   const outer = joinOrigins(origins);
-  return { outer, reachable: reachableOrigins(outer, fact.cells ?? []), cells: fact.cells };
+  const cells = pruneCells(outer, fact.cells ?? []);
+  return { outer, reachable: reachableOrigins(outer, cells), cells };
+}
+
+function allocationMemberOrigins(fact: StorageFact, allocation: StorageOrigin, slot: string | undefined): readonly StorageOrigin[] {
+  const cells = fact.cells?.filter((cell) => cell.allocation === allocation);
+  const projected = projectedMemberOrigins(fact, allocation, slot);
+  if (!cells?.length) {
+    return projected;
+  }
+  const matched = cells.filter((cell) => cell.slot !== "@allocation" && cellMatchesSlot(cell.slot, slot)).flatMap((cell) => cell.origins);
+  return isClosedMemberSlot(cells, slot) ? matched : [...matched, ...projected];
+}
+
+function projectedMemberOrigins(fact: StorageFact, allocation: StorageOrigin, slot: string | undefined): readonly StorageOrigin[] {
+  const base: readonly StorageOrigin[] = fact.outer.length === 1
+    ? fact.reachable : fact.reachable.includes(allocation) ? [allocation] : ["private"];
+  return base.map((origin) => projectedOrigin(origin, slot ?? "*"));
+}
+
+function isClosedMemberSlot(cells: readonly StorageCell[], slot: string | undefined): boolean {
+  return cells.some((cell) => cell.slot === "@allocation") ||
+    (slot !== undefined && slot !== "*" && cells.some((cell) => cell.slot === slot));
 }
 
 function cellMatchesSlot(cellSlot: string, selectedSlot: string | undefined): boolean {
@@ -142,17 +174,25 @@ export function arrayIndexForSlot(slot: string | undefined): number | undefined 
   return String(index) === text && Number.isInteger(index) && index >= 0 && index < 4294967295 ? index : undefined;
 }
 
+export function isCellAllocation(origin: StorageOrigin): boolean {
+  return origin !== "private" && origin !== "unknown" && origin !== "receiver";
+}
+
 export function mapStorageFact(
   fact: StorageFact,
   outer: (origins: readonly StorageOrigin[]) => readonly StorageOrigin[],
   reachable: (origins: readonly StorageOrigin[]) => readonly StorageOrigin[],
   imported: readonly StorageCell[] = [],
 ): StorageFact {
-  return { outer: outer(fact.outer), reachable: reachable(fact.reachable), cells: mergeCells([
-    ...(fact.cells ?? []).flatMap((cell) => outer([cell.allocation]).map((allocation) => ({
-      allocation, slot: cell.slot, origins: outer(cell.origins),
-    }))), ...imported,
-  ]) };
+  const mappedOuter = outer(fact.outer);
+  const cells = pruneCells(mappedOuter, [
+    ...(fact.cells ?? []).flatMap((cell) => outer([cell.allocation])
+      .filter(isCellAllocation)
+      .map((allocation) => ({
+        allocation, slot: cell.slot, origins: outer(cell.origins),
+      }))), ...imported,
+  ]);
+  return { outer: mappedOuter, reachable: reachable(fact.reachable), cells };
 }
 
 export function allocatedFact(value: ts.Node, parts: readonly { slot: string; fact: StorageFact }[]): StorageFact {
@@ -167,7 +207,7 @@ export function allocatedFact(value: ts.Node, parts: readonly { slot: string; fa
     applyHeapWrite(heap, { target: { outer: [allocation], reachable: [] }, value: fact,
       slot, replace: slot !== "*" });
   }
-  const cells = [...heap.values()];
+  const cells = pruneCells([allocation], [...heap.values()]);
   return { outer: [allocation], reachable: reachableOrigins([allocation], cells), cells };
 }
 
@@ -204,16 +244,26 @@ function mergeCells(cells: readonly StorageCell[]): StorageCell[] {
   return [...result.values()].sort((left, right) => cellKey(left).localeCompare(cellKey(right)));
 }
 
+function pruneCells(outer: readonly StorageOrigin[], cells: readonly StorageCell[]): StorageCell[] {
+  if (cells.length === 0) {
+    return [];
+  }
+  const merged = mergeCells(cells);
+  const reachable = new Set<StorageOrigin>([...outer, ...reachableOrigins(outer, merged)]);
+  return merged.filter((cell) => reachable.has(cell.allocation));
+}
+
 export function joinFacts(left: StorageFact, right: StorageFact): StorageFact {
+  const outer = joinOrigins([...left.outer, ...right.outer]);
   return {
-    outer: joinOrigins([...left.outer, ...right.outer]),
+    outer,
     reachable: joinOrigins([...left.reachable, ...right.reachable]),
-    cells: mergeCells([...(left.cells ?? []), ...(right.cells ?? [])]),
+    cells: pruneCells(outer, [...(left.cells ?? []), ...(right.cells ?? [])]),
   };
 }
 
 export function joinOrigins(origins: readonly StorageOrigin[]): readonly StorageOrigin[] {
-  const unique = [...new Set(origins)];
+  const unique = [...new Set(origins)].filter((origin) => origin !== "private");
   return unique.length === 0 ? ["private"] : unique.sort();
 }
 
@@ -292,6 +342,16 @@ export function constructorStorageFact(value: ts.NewExpression, resolve: (value:
 type HeapWrite = { readonly target: StorageFact; readonly value: StorageFact; readonly slot?: string; readonly replace: boolean };
 
 export function withInsertions(fact: StorageFact, insertions: readonly HeapWrite[]): StorageFact {
+  if (insertions.length === 0 || fact.outer.every((origin) => origin === "private" || origin === "unknown")) {
+    return fact;
+  }
+  const relevant = new Set<StorageOrigin>([
+    ...fact.outer,
+    ...(fact.cells ?? []).flatMap((cell) => [cell.allocation, ...cell.origins]),
+  ]);
+  if (!insertions.some((insertion) => insertion.target.outer.some((origin) => relevant.has(origin)))) {
+    return fact;
+  }
   const heap = new Map<string, StorageCell>();
   for (const cell of mergeCells([...(fact.cells ?? []), ...insertions.flatMap((insertion) => [
     ...(insertion.target.cells ?? []), ...(insertion.value.cells ?? []),
@@ -301,19 +361,27 @@ export function withInsertions(fact: StorageFact, insertions: readonly HeapWrite
   for (const insertion of insertions) {
     applyHeapWrite(heap, insertion);
   }
-  const cells = [...heap.values()];
+  const allCells = [...heap.values()];
+  const reachableAllocations = new Set<StorageOrigin>(fact.outer);
+  for (const origin of reachableOrigins(fact.outer, allCells)) {
+    reachableAllocations.add(origin);
+  }
+  const cells = allCells.filter((cell) => reachableAllocations.has(cell.allocation));
   const reachable = fact.outer.flatMap((origin) => cells.some((cell) => cell.allocation === origin)
     ? reachableOrigins([origin], cells) : fact.reachable);
   return { outer: fact.outer, reachable: joinOrigins(reachable), cells };
 }
 
 function applyHeapWrite(heap: Map<string, StorageCell>, insertion: HeapWrite): void {
-  for (const allocation of insertion.target.outer) {
+  for (const allocation of insertion.target.outer.filter(isCellAllocation)) {
     const cell = { allocation, slot: insertion.slot ?? "*", origins: insertion.value.outer };
-    const previous = insertion.replace && insertion.target.outer.length === 1 && insertion.slot !== undefined
-      ? [] : heap.get(cellKey(cell))?.origins ?? [];
+    const previous = replacesCell(insertion) ? [] : heap.get(cellKey(cell))?.origins ?? [];
     heap.set(cellKey(cell), { ...cell, origins: joinOrigins([...previous, ...cell.origins]) });
   }
+}
+
+function replacesCell(insertion: HeapWrite): boolean {
+  return insertion.replace && insertion.target.outer.length === 1 && insertion.slot !== undefined;
 }
 
 const SCALAR_TYPE_KINDS = new Set<number>([
@@ -421,12 +489,10 @@ function arrayStep(fact: StorageFact, element: ts.BindingElement): StorageFact {
     : memberStorageFact(fact, `property:${element.parent.elements.indexOf(element)}`);
 }
 
-/** Tells if the value holds map entries, whose iteration gives fresh key and value pairs. */
 function entryCells(fact: StorageFact): boolean {
   return !!fact.cells?.some((cell) => fact.outer.includes(cell.allocation) && cell.slot.startsWith("entry:"));
 }
 
-/** Gives a value that may be anything the given value reaches. */
 function reachedFact(fact: StorageFact): StorageFact {
   return { outer: fact.reachable, reachable: fact.reachable, cells: fact.cells };
 }

@@ -67,7 +67,6 @@ function read() { return shared.length; }
 `), [
     "2:ImplicitOutput: The function mutate() mutates argument value, an implicit output.",
     "3:ImplicitOutput: The function write() mutates caller-owned value shared, an implicit output.",
-    "3:ImplicitInput: The function write() reads shared, an implicit input.",
     "4:ImplicitInput: The function read() reads shared, an implicit input.",
   ]);
   assert.deepEqual(messages("private-alias-read.ts", `const shared: number[] = [];
@@ -384,7 +383,6 @@ function read() { return shared.length; }
 export function get() { return shared; }
 function read() { return shared.length; }
 `), [
-    "2:ImplicitInput: The function get() reads shared, an implicit input.",
     "3:ImplicitInput: The function read() reads shared, an implicit input.",
   ]);
   assert.deepEqual(messages("named-callable-export.ts", `const shared: number[] = [];
@@ -392,7 +390,6 @@ const get = () => shared;
 export { get as values };
 function read() { return shared.length; }
 `), [
-    "2:ImplicitInput: The arrow function get() reads shared, an implicit input.",
     "4:ImplicitInput: The function read() reads shared, an implicit input.",
   ]);
   assert.deepEqual(messages("exported-scalar-copy.ts", `const shared: number[] = [1];
@@ -518,7 +515,6 @@ function typed(value: typeof count) { return value; }
     "5:ImplicitInput: The function decrement() reads count, an implicit input.",
     "5:ImplicitOutput: The function decrement() writes count, an implicit output.",
     "6:ImplicitOutput: The function configure() writes config, an implicit output.",
-    "7:ImplicitInput: The function describe() reads config, an implicit input.",
     "8:ImplicitOutput: The function loop() writes count, an implicit output.",
     "9:ImplicitOutput: The function unpack() writes count, an implicit output.",
     "10:ImplicitOutput: The function unpackList() writes count, an implicit output.",
@@ -1077,7 +1073,6 @@ function writeUnknown() {
 `), [
     "4:ImplicitOutput: The function mutate() mutates argument values, an implicit output.",
     "7:ImplicitOutput: The function writeShared() mutates caller-owned value shared, an implicit output.",
-    "7:ImplicitInput: The function writeShared() reads shared, an implicit input.",
     "10:UnknownEffect: The function writeUnknown() mutates value with unknown ownership, an unknown effect.",
   ]);
 });
@@ -2309,23 +2304,16 @@ function deleteSlice(v: { n?: number }[]) { delete v.slice()[0].n; }
 function incSlice(v: { n: number }[]) { v.slice()[0].n++; }
 `), [
     "2:ImplicitOutput: The function pushLit() mutates receiver of push, an implicit output.",
-    "2:ImplicitInput: The function pushLit() reads shared, an implicit input.",
     "3:ImplicitOutput: The function pushSlice() mutates argument v, an implicit output.",
     "4:ImplicitOutput: The function writeSlice() mutates argument v, an implicit output.",
     "5:ImplicitOutput: The function writeGet() mutates argument m, an implicit output.",
     "6:ImplicitOutput: The function writeFind() mutates argument v, an implicit output.",
-    "7:ImplicitInput: The function helper() reads shared, an implicit input.",
-    "8:ImplicitInput: The function writeHelper() reads shared, an implicit input.",
     "8:ImplicitOutput: The function writeHelper() mutates caller-owned value, an implicit output.",
-    "9:ImplicitInput: The function writeHelperDeep() reads shared, an implicit input.",
     "9:ImplicitOutput: The function writeHelperDeep() mutates caller-owned value, an implicit output.",
     "11:UnknownEffect: The function writeUnknown() mutates value with unknown ownership, an unknown effect.",
     "12:ImplicitOutput: The function writeCond() mutates argument a, an implicit output.",
-    "12:ImplicitInput: The function writeCond() reads shared, an implicit input.",
     "13:ImplicitOutput: The function writeLogical() mutates argument a, an implicit output.",
-    "13:ImplicitInput: The function writeLogical() reads shared, an implicit input.",
     "14:ImplicitOutput: The function writeObjLit() mutates caller-owned value, an implicit output.",
-    "14:ImplicitInput: The function writeObjLit() reads shared, an implicit input.",
     "15:ImplicitOutput: The function deleteSlice() mutates argument v, an implicit output.",
     "16:ImplicitOutput: The function incSlice() mutates argument v, an implicit output.",
   ]);
@@ -2360,12 +2348,229 @@ function freshCall() { return [{ n: 0 }].slice()[0].n = 3; }
     "3:ImplicitOutput: The function poke() mutates caller-owned value, an implicit output.",
     "9:ImplicitInput: The function poke() reads local, an implicit input.",
     "9:ImplicitOutput: The function poke() mutates receiver of push, an implicit output.",
-    "15:ImplicitInput: The function poke() reads local, an implicit input.",
     "15:ImplicitOutput: The function poke() mutates caller-owned value inner, an implicit output.",
     "20:ImplicitOutput: The function writeSlice() mutates argument v, an implicit output.",
     "21:ImplicitOutput: The function caller() mutates caller-owned value shared, an implicit output.",
     "21:ImplicitInput: The function caller() reads shared, an implicit input.",
   ]);
+});
+
+test("an unresolved parameter call can write argument storage that a local read observes, and a known callback cannot", () => {
+  assert.deepEqual(messages("unresolved-callback-action.ts", `function outer(apply: (xs: number[]) => void) {
+  const xs = [1];
+  function read() { return xs[0]; }
+  apply(xs);
+  return read();
+}
+`), [
+    "3:ImplicitInput: The function read() reads xs, an implicit input.",
+    "4:UnknownEffect: The function outer() calls unresolved callable, an unknown effect.",
+  ]);
+  assert.deepEqual(messages("known-callback-calculation.ts", `function outer() {
+  const xs = [1];
+  function read() { return xs[0]; }
+  const apply = (ys: number[]) => ys.length;
+  apply(xs);
+  return read();
+}
+`), []);
+});
+
+test("reverse, sort, and copyWithin move a caller-owned element into a written slot", () => {
+  assert.deepEqual(messages("reordered-slots-action.ts", `export function outer(item: number[]) {
+  const xs: number[][] = [[0], item];
+  xs.reverse();
+  xs[0].push(1);
+}
+export function sorted(item: number[]) {
+  const xs: number[][] = [[0], item];
+  xs.sort(() => -1);
+  xs[0].push(1);
+}
+export function copied(item: number[]) {
+  const xs: number[][] = [[0], item];
+  xs.copyWithin(0, 1);
+  xs[0].push(1);
+}
+`), [
+    "4:ImplicitOutput: The function outer() mutates caller-owned value xs, an implicit output.",
+    "9:ImplicitOutput: The function sorted() mutates caller-owned value xs, an implicit output.",
+    "14:ImplicitOutput: The function copied() mutates caller-owned value xs, an implicit output.",
+  ]);
+  assert.deepEqual(messages("reordered-slots-calculation.ts", `export function outer() {
+  const xs: number[][] = [[0], [1]];
+  xs.reverse();
+  xs[0].push(1);
+  return xs;
+}
+`), []);
+});
+
+test("appending to storage or handing on its reference is not a read of its contents", () => {
+  assert.deepEqual(messages("reference-read-action.ts", `const shared: number[] = [];
+function size(value: number[]) { return value.length; }
+function grow() { shared.push(1); }
+function measure() { return size(shared); }
+`), [
+    "3:ImplicitOutput: The function grow() writes shared, an implicit output.",
+    "4:ImplicitInput: The function measure() reads shared, an implicit input.",
+  ]);
+  assert.deepEqual(messages("reference-read-calculation.ts", `const shared: number[] = [];
+function append(value: number[]) { value.push(1); }
+function grow() { append(shared); }
+function handle() { return shared; }
+`), [
+    "2:ImplicitOutput: The function append() mutates argument value, an implicit output.",
+    "3:ImplicitOutput: The function grow() mutates caller-owned value shared, an implicit output.",
+  ]);
+  assert.deepEqual(messages("setter-read-action.ts", `const store: number[] = [];
+class Sink {
+  seen = 0;
+  set value(next: number[]) { this.seen = next.length; }
+}
+function grow() { store.push(1); }
+function write() {
+  const sink = new Sink();
+  sink.value = store;
+  return sink.seen;
+}
+`), [
+    "4:UnknownEffect: The accessor Sink.value() writes this.seen, an unknown effect.",
+    "6:ImplicitOutput: The function grow() writes store, an implicit output.",
+    "9:ImplicitInput: The function write() reads store, an implicit input.",
+  ]);
+  assert.deepEqual(messages("setter-read-calculation.ts", `const store: number[] = [];
+class Sink {
+  set value(next: number[]) { next.push(1); }
+}
+function write() {
+  const sink = new Sink();
+  sink.value = store;
+}
+`), [
+    "3:ImplicitOutput: The accessor Sink.value() mutates argument next, an implicit output.",
+    "7:ImplicitOutput: The function write() mutates caller-owned value store, an implicit output.",
+  ]);
+  assert.deepEqual(messages("receiver-read-action.ts", `const api = { items: [0], add(item: number) { this.items.push(item); }, size() { return this.items.length; } };
+function grow() { api.add(1); }
+function measure() { return api.size(); }
+`), [
+    "1:UnknownEffect: The method add() writes this.items, an unknown effect.",
+    "1:UnknownEffect: The method size() reads this.items, an unknown effect.",
+    "2:ImplicitOutput: The function grow() mutates receiver state, an implicit output.",
+    "3:ImplicitInput: The function measure() reads this.items, an implicit input.",
+  ]);
+  assert.deepEqual(messages("receiver-read-calculation.ts", `const api = { items: [0], add(item: number) { this.items.push(item); } };
+function grow() { api.add(1); }
+function more() { api.add(2); }
+`), [
+    "1:UnknownEffect: The method add() writes this.items, an unknown effect.",
+    "2:ImplicitOutput: The function grow() mutates receiver state, an implicit output.",
+    "3:ImplicitOutput: The function more() mutates receiver state, an implicit output.",
+  ]);
+});
+
+test("a default argument writes the storage it names, and a helper-returned generator runs only where it is consumed", () => {
+  assert.deepEqual(messages("default-generator-action.ts", `const log: number[] = [];
+function send(value: number, sink: number[] = log) { sink.push(value); }
+function* gen() { log.push(1); yield 1; }
+function make() { return gen(); }
+export function defaulted() { send(1); }
+export function iterated() { return [...make()]; }
+`), [
+    "2:ImplicitOutput: The function send() mutates argument sink, an implicit output.",
+    "3:ImplicitOutput: The function gen() writes log, an implicit output.",
+    "5:ImplicitOutput: The function defaulted() mutates caller-owned value log, an implicit output.",
+    "6:ImplicitOutput: The function iterated() writes log, an implicit output.",
+  ]);
+  assert.deepEqual(messages("default-generator-calculation.ts", `const log: number[] = [];
+function send(value: number, sink: number[] = log) { sink.push(value); }
+function* gen() { log.push(1); yield 1; }
+function make() { return gen(); }
+export function explicit() { const own: number[] = []; send(1, own); return own; }
+export function created() { return make() === undefined; }
+export function compared() { return gen() === undefined; }
+export function negated() { return !gen(); }
+`), [
+    "2:ImplicitOutput: The function send() mutates argument sink, an implicit output.",
+    "3:ImplicitOutput: The function gen() writes log, an implicit output.",
+  ]);
+});
+
+test("a boxed generator runs where its box is consumed, and a later explicit member overrides a spread member", () => {
+  assert.deepEqual(messages("boxed-spread-action.ts", `const log: number[] = [];
+function* gen() { log.push(1); yield 1; }
+export function boxed() {
+  const box = { it: gen() };
+  return box.it.next().value;
+}
+export function spread() {
+  const base = { run: () => { log.push(1); } };
+  const api = { run: () => {}, ...base };
+  api.run();
+}
+`), [
+    "2:ImplicitOutput: The function gen() writes log, an implicit output.",
+    "5:ImplicitOutput: The function boxed() writes log, an implicit output.",
+    "5:UnknownEffect: The function boxed() calls unresolved callable, an unknown effect.",
+    "8:ImplicitOutput: The arrow function anonymous() writes log, an implicit output.",
+    "10:ImplicitOutput: The function spread() writes log, an implicit output.",
+  ]);
+  assert.deepEqual(messages("boxed-spread-calculation.ts", `const log: number[] = [];
+function* gen() { log.push(1); yield 1; }
+export function boxed() {
+  const box = { it: gen() };
+  return Object.keys(box).length;
+}
+export function spread() {
+  const base = { run: () => { log.push(1); } };
+  const api = { ...base, run: () => {} };
+  api.run();
+}
+`), [
+    "2:ImplicitOutput: The function gen() writes log, an implicit output.",
+    "8:ImplicitOutput: The arrow function anonymous() writes log, an implicit output.",
+  ]);
+});
+
+test("a shared method call reports what its body does to this, and a removed or shifted slot does not hold the caller's value", () => {
+  assert.deepEqual(messages("shared-method-action.ts", `const api = { items: [0], add(item: number) { this.items.push(item); } };
+function outer() {
+  return api.add(1);
+}
+`), [
+    "1:UnknownEffect: The method add() writes this.items, an unknown effect.",
+    "3:ImplicitOutput: The function outer() mutates receiver state, an implicit output.",
+  ]);
+  assert.deepEqual(messages("shared-method-calculation.ts", `const api = { items: [0], add(item: number) { return item + this.items.length; } };
+function outer() {
+  return api.add(1);
+}
+`), [
+    "1:UnknownEffect: The method add() reads this.items, an unknown effect.",
+  ]);
+  assert.deepEqual(messages("insertion-after-action.ts", `function change(items: number[]) {
+  const values: number[][] = [[]];
+  values.splice(0, 1);
+  values.push(items);
+  values[0].push(1);
+}
+`), [
+    "5:ImplicitOutput: The function change() mutates caller-owned value values, an implicit output.",
+  ]);
+  assert.deepEqual(messages("insertion-after-calculation.ts", `function change(items: number[]) {
+  const values: number[][] = [[]];
+  values.splice(0, 0, []);
+  values.push(items);
+  values[0].push(1);
+}
+function trimmed(items: number[]) {
+  const values: number[][] = [[], []];
+  values.length = values.length - 1;
+  values.push(items);
+  values[0].push(1);
+}
+`), []);
 });
 
 test("the reviewed explicitness corpus keeps its contract findings", () => {
@@ -2381,5 +2586,13 @@ test("the reviewed explicitness corpus keeps its contract findings", () => {
   assert.deepEqual(report.errors, []);
   const actual = new Map(corpus.map((item) => [item.name, []]));
   report.findings.forEach((finding) => actual.get(basename(finding.path, ".ts")).push(`${finding.line}:${finding.ruleName}: ${finding.context}: ${finding.message}`));
-  assert.deepEqual(Object.fromEntries(actual), Object.fromEntries(corpus.map((item) => [item.name, item.findings])));
+  const admissible = (item) => (item.admissible ?? []).map((entry) => entry.finding);
+  assert.deepEqual(
+    Object.fromEntries(corpus.map((item) => [item.name, actual.get(item.name).filter((finding) => !admissible(item).includes(finding))])),
+    Object.fromEntries(corpus.map((item) => [item.name, item.findings])),
+  );
+  assert.deepEqual(
+    corpus.flatMap((item) => admissible(item).filter((finding) => !actual.get(item.name).includes(finding)).map((finding) => `${item.name} ${finding}`)),
+    [],
+  );
 });

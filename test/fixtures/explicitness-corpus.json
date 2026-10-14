@@ -879,6 +879,16 @@
   ]
  },
  {
+  "name": "fresh120-insertion-after-length-minus-one-C",
+  "source": "function change(items: number[]) {\n  const values: number[][] = [[], []];\n  values.length = values.length - 1;\n  values.push(items);\n  values[0].push(1);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "fresh120-insertion-after-splice-insert-C",
+  "source": "function change(items: number[]) {\n  const values: number[][] = [[]];\n  values.splice(0, 0, []);\n  values.push(items);\n  values[0].push(1);\n}\n",
+  "findings": []
+ },
+ {
   "name": "fresh42-alias-push",
   "source": "function outer() {\n  const values = [0];\n  const other = values;\n  function read() { return values[1] ?? -1; }\n  other.push(1);\n  return read();\n}\n",
   "findings": [
@@ -2334,6 +2344,175 @@
   ]
  },
  {
+  "name": "h-b-computed-const-key-C",
+  "source": "function outer() {\n  const state: Record<string, number[]> = { items: [0] };\n  const key = 'items';\n  function add(item: number) { state[key].push(item); }\n  function read() { return state.items[0] ?? -1; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes state, an implicit output."
+  ],
+  "admissible": [
+   {
+    "finding": "5:ImplicitInput: function read(): The function read() reads state, an implicit input.",
+    "reason": "a key bound to a constant string is not resolved to its member, so the push may reach state.items[0]"
+   }
+  ]
+ },
+ {
+  "name": "h-c-object-assign-patch-C",
+  "source": "function outer() {\n  const api = { add(item: number): number { return item + 1; } };\n  Object.assign(api, { add: (item: number): number => item });\n  return api.add(1);\n}\n",
+  "findings": [],
+  "admissible": [
+   {
+    "finding": "4:UnknownEffect: function outer(): The function outer() calls overridable method, an unknown effect.",
+    "reason": "Object.assign replaces the method; patched members are outside the trusted subset, so UnknownEffect is the tolerated answer"
+   }
+  ]
+ },
+ {
+  "name": "h-c-shared-this-method-C",
+  "source": "const api = { items: [0], add(item: number) { return item + this.items.length; } };\nfunction outer() {\n  return api.add(1);\n}\n",
+  "findings": [
+   "1:UnknownEffect: method add(): The method add() reads this.items, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-c-this-method-C",
+  "source": "function outer() {\n  const api = { items: [0], add(item: number) { this.items.push(item); } };\n  function read() { return api.items[0] ?? -1; }\n  api.add(1);\n  api.add(2);\n  return read();\n}\n",
+  "findings": [
+   "2:UnknownEffect: method add(): The method add() writes this.items, an unknown effect."
+  ],
+  "admissible": [
+   {
+    "finding": "3:ImplicitInput: function read(): The function read() reads api, an implicit input.",
+    "reason": "a push through a method receiver keeps no append bound, so the read of index 0 is not separated from it"
+   }
+  ]
+ },
+ {
+  "name": "h-f-overwrite-last-C",
+  "source": "function outer() {\n  const values: number[] = [0, 0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  values[values.length - 1] = 5;\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ],
+  "admissible": [
+   {
+    "finding": "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+    "reason": "the index values.length - 1 is not resolved, so the write may reach index 0"
+   }
+  ]
+ },
+ {
+  "name": "h-f-two-pops-far-C",
+  "source": "function outer() {\n  const values: number[] = [0, 0, 0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  values.pop();\n  values.pop();\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ],
+  "admissible": [
+   {
+    "finding": "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+    "reason": "the push start bound is kept for one pop only, so after two pops the push may reach index 0"
+   }
+  ]
+ },
+ {
+  "name": "h-p-array-proto-push-call-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  Array.prototype.push.call(values, 2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ],
+  "admissible": [
+   {
+    "finding": "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+    "reason": "push through call, apply or Reflect.apply is outside the trusted method set, so the write has no known slot"
+   },
+   {
+    "finding": "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect.",
+    "reason": "the call is outside the trusted subset; UnknownEffect is the tolerated fail-closed answer"
+   }
+  ]
+ },
+ {
+  "name": "h-p-extracted-push-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  const again = values.push;\n  again.call(values, 2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ],
+  "admissible": [
+   {
+    "finding": "7:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect.",
+    "reason": "the call is outside the trusted subset; UnknownEffect is the tolerated fail-closed answer"
+   }
+  ]
+ },
+ {
+  "name": "h-p-extracted-push-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  const again = values.push;\n  again.call(values, 2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ],
+  "admissible": [
+   {
+    "finding": "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+    "reason": "push through call, apply or Reflect.apply is outside the trusted method set, so the write has no known slot"
+   },
+   {
+    "finding": "7:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect.",
+    "reason": "the call is outside the trusted subset; UnknownEffect is the tolerated fail-closed answer"
+   }
+  ]
+ },
+ {
+  "name": "h-p-push-apply-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  values.push.apply(values, [2]);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ],
+  "admissible": [
+   {
+    "finding": "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+    "reason": "push through call, apply or Reflect.apply is outside the trusted method set, so the write has no known slot"
+   },
+   {
+    "finding": "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect.",
+    "reason": "the call is outside the trusted subset; UnknownEffect is the tolerated fail-closed answer"
+   }
+  ]
+ },
+ {
+  "name": "h-p-push-call-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  values.push.call(values, 2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ],
+  "admissible": [
+   {
+    "finding": "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+    "reason": "push through call, apply or Reflect.apply is outside the trusted method set, so the write has no known slot"
+   },
+   {
+    "finding": "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect.",
+    "reason": "the call is outside the trusted subset; UnknownEffect is the tolerated fail-closed answer"
+   }
+  ]
+ },
+ {
+  "name": "h-p-reflect-push-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  Reflect.apply(values.push, values, [2]);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ],
+  "admissible": [
+   {
+    "finding": "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+    "reason": "push through call, apply or Reflect.apply is outside the trusted method set, so the write has no known slot"
+   },
+   {
+    "finding": "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect.",
+    "reason": "the call is outside the trusted subset; UnknownEffect is the tolerated fail-closed answer"
+   }
+  ]
+ },
+ {
   "name": "mut-reduce-initial-external",
   "source": "const store: number[] = [];\nfunction total() {\n  const local = [1, 2];\n  return local.reduce((sum, item) => { sum.push(item); return sum; }, store);\n}\n",
   "findings": [
@@ -2500,7 +2679,6 @@
   "findings": [
    "2:ImplicitOutput: function add(): The function add() mutates argument list, an implicit output.",
    "3:ImplicitOutput: function run(): The function run() mutates caller-owned value log, an implicit output.",
-   "3:ImplicitInput: function run(): The function run() reads log, an implicit input.",
    "4:ImplicitInput: function first(): The function first() reads log, an implicit input.",
    "5:ImplicitInput: function third(): The function third() reads log, an implicit input."
   ]
@@ -2511,7 +2689,6 @@
   "findings": [
    "2:ImplicitOutput: function add(): The function add() mutates argument list, an implicit output.",
    "3:ImplicitOutput: function run(): The function run() mutates caller-owned value state.a, an implicit output.",
-   "3:ImplicitInput: function run(): The function run() reads state, an implicit input.",
    "5:ImplicitInput: function readA(): The function readA() reads state, an implicit input."
   ]
  },
@@ -2521,8 +2698,7 @@
   "findings": [
    "2:ImplicitOutput: function setX(): The function setX() writes state, an implicit output.",
    "3:ImplicitInput: function readY(): The function readY() reads state, an implicit input.",
-   "4:ImplicitInput: function readX(): The function readX() reads state, an implicit input.",
-   "5:ImplicitInput: function readA(): The function readA() reads state, an implicit input."
+   "4:ImplicitInput: function readX(): The function readX() reads state, an implicit input."
   ]
  },
  {
@@ -2731,15 +2907,10 @@
   "source": "function outer(index: number) {\n  const state = { a: { a: 1, b: 2 }, b: { a: 1, b: 2 }, length: 1 };\n  function change() { state[index === 0 ? 'a' : 'b'].a = 5; }\n  function read0() { return state; }\n  function read1() { return state.a; }\n  function read2() { return state.b; }\n  function read3() { return state.a.a; }\n  function read4() { return state.a.b; }\n  function read5() { return state[index]; }\n  function read6() { return state.a[index]; }\n  function read7() { return String(state.b); }\n  function read8() { return state.length; }\n  return { change, read0, read1, read2, read3, read4, read5, read6, read7, read8 };\n}\n",
   "findings": [
    "3:ImplicitOutput: function change(): The function change() writes state, an implicit output.",
-   "4:ImplicitInput: function read0(): The function read0() reads state, an implicit input.",
-   "5:ImplicitInput: function read1(): The function read1() reads state, an implicit input.",
-   "6:ImplicitInput: function read2(): The function read2() reads state, an implicit input.",
    "7:ImplicitInput: function read3(): The function read3() reads state, an implicit input.",
    "8:ImplicitInput: function read4(): The function read4() reads state, an implicit input.",
-   "9:ImplicitInput: function read5(): The function read5() reads state, an implicit input.",
    "10:ImplicitInput: function read6(): The function read6() reads state, an implicit input.",
-   "11:ImplicitInput: function read7(): The function read7() reads state, an implicit input.",
-   "12:ImplicitInput: function read8(): The function read8() reads state, an implicit input."
+   "11:ImplicitInput: function read7(): The function read7() reads state, an implicit input."
   ]
  },
  {
@@ -2763,9 +2934,7 @@
   "source": "function outer(index: number) {\n  const values = [0, 1];\n  function change() { values[1] = 5; }\n  function read0() { return values; }\n  function read1() { return values[index]; }\n  function read2() { return values[0]; }\n  function read3() { return values[1]; }\n  function read4() { return values[2]; }\n  function read5() { return values.length; }\n  function read6() { return values.at(0); }\n  function read7() { return String(values[0]); }\n  function read8() { return values[0].toFixed(); }\n  return { change, read0, read1, read2, read3, read4, read5, read6, read7, read8 };\n}\n",
   "findings": [
    "3:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
-   "4:ImplicitInput: function read0(): The function read0() reads values, an implicit input.",
    "5:ImplicitInput: function read1(): The function read1() reads values, an implicit input.",
-   "6:ImplicitInput: function read2(): The function read2() reads values, an implicit input.",
    "7:ImplicitInput: function read3(): The function read3() reads values, an implicit input.",
    "9:ImplicitInput: function read5(): The function read5() reads values, an implicit input.",
    "10:ImplicitInput: function read6(): The function read6() reads values, an implicit input.",
@@ -2779,8 +2948,7 @@
   "source": "function outer() {\n  const state = { a: { b: { x: 1 }, c: 2 }, d: 3 };\n  function change() { state.a.b.x = 5; }\n  function read0() { return state.a.c; }\n  function read1() { return state.a.b.x; }\n  function read2() { return state.d; }\n  function read3() { return state.a.b; }\n  change();\n  return [read0(), read1(), read2(), read3()];\n}\n",
   "findings": [
    "3:ImplicitOutput: function change(): The function change() writes state, an implicit output.",
-   "5:ImplicitInput: function read1(): The function read1() reads state, an implicit input.",
-   "7:ImplicitInput: function read3(): The function read3() reads state, an implicit input."
+   "5:ImplicitInput: function read1(): The function read1() reads state, an implicit input."
   ]
  },
  {
@@ -2788,11 +2956,8 @@
   "source": "function outer(index: number) {\n  const state: { a: { a?: number; b: number }; b: number; length: number } = { a: { a: 1, b: 2 }, b: 3, length: 1 };\n  function change() { delete state.a.a; }\n  function read0() { return state; }\n  function read1() { return state.a; }\n  function read2() { return state.b; }\n  function read3() { return state.a.a; }\n  function read4() { return state.a.b; }\n  function read5() { return state[index]; }\n  function read6() { return state.a[index]; }\n  function read7() { return String(state.b); }\n  function read8() { return state.length; }\n  return { change, read0, read1, read2, read3, read4, read5, read6, read7, read8 };\n}\n",
   "findings": [
    "3:ImplicitOutput: function change(): The function change() writes state, an implicit output.",
-   "4:ImplicitInput: function read0(): The function read0() reads state, an implicit input.",
-   "5:ImplicitInput: function read1(): The function read1() reads state, an implicit input.",
    "7:ImplicitInput: function read3(): The function read3() reads state, an implicit input.",
    "8:ImplicitInput: function read4(): The function read4() reads state, an implicit input.",
-   "9:ImplicitInput: function read5(): The function read5() reads state, an implicit input.",
    "10:ImplicitInput: function read6(): The function read6() reads state, an implicit input."
   ]
  },
@@ -2802,7 +2967,6 @@
   "findings": [
    "3:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
    "3:ImplicitInput: function change(): The function change() reads values, an implicit input.",
-   "4:ImplicitInput: function read0(): The function read0() reads values, an implicit input.",
    "5:ImplicitInput: function read1(): The function read1() reads values, an implicit input.",
    "6:ImplicitInput: function read2(): The function read2() reads values, an implicit input.",
    "7:ImplicitInput: function read3(): The function read3() reads values, an implicit input.",
@@ -2993,7 +3157,6 @@
   "name": "mut-e2-fwd-destructure",
   "source": "export function change(items: number[]) {\n  const holder = { items };\n  function add() { const { items: list } = holder; list.push(1); }\n  add();\n}\n",
   "findings": [
-   "3:ImplicitInput: function add(): The function add() reads holder, an implicit input.",
    "3:ImplicitOutput: function add(): The function add() mutates caller-owned value list, an implicit output.",
    "4:ImplicitOutput: function change(): The function change() mutates caller-owned value holder, an implicit output."
   ]
@@ -3108,7 +3271,6 @@
   "name": "mut-e2-exposed-export-list",
   "source": "const limits = [1, 2];\nfunction all() { return limits; }\nfunction first() { return limits[0]; }\nexport { all, first };\n",
   "findings": [
-   "2:ImplicitInput: function all(): The function all() reads limits, an implicit input.",
    "3:ImplicitInput: function first(): The function first() reads limits, an implicit input."
   ]
  },
@@ -3289,8 +3451,7 @@
   "source": "const store: number[] = [];\nclass Sink {\n  set value(next: number[]) {\n    next.push(1);\n  }\n}\nfunction write() {\n  const sink = new Sink();\n  sink.value = store;\n}\n",
   "findings": [
    "4:ImplicitOutput: accessor Sink.value(): The accessor Sink.value() mutates argument next, an implicit output.",
-   "9:ImplicitOutput: function write(): The function write() mutates caller-owned value store, an implicit output.",
-   "9:ImplicitInput: function write(): The function write() reads store, an implicit input."
+   "9:ImplicitOutput: function write(): The function write() mutates caller-owned value store, an implicit output."
   ]
  },
  {
@@ -3498,7 +3659,7 @@
   "findings": [
    "4:UnknownEffect: method Box.total(): The method Box.total() reads this.items, an unknown effect.",
    "11:ImplicitOutput: function touch(): The function touch() writes shared, an implicit output.",
-   "14:ImplicitInput: function run(): The function run() reads this.items, an implicit input."
+   "14:ImplicitInput: function run(): The function run() reads shared, an implicit input."
   ]
  },
  {
@@ -3508,8 +3669,7 @@
    "5:UnknownEffect: method Box.add(): The method Box.add() writes this.items, an unknown effect.",
    "9:ImplicitOutput: function fill(): The function fill() mutates argument box, an implicit output.",
    "9:UnknownEffect: function fill(): The function fill() calls overridable method, an unknown effect.",
-   "13:UnknownEffect: function main(): The function main() calls overridable method, an unknown effect.",
-   "14:ImplicitInput: function main(): The function main() reads store, an implicit input."
+   "13:UnknownEffect: function main(): The function main() calls overridable method, an unknown effect."
   ]
  },
  {
@@ -3669,7 +3829,6 @@
   "name": "mut-s1-map-entry-iterate-external",
   "source": "const store: number[] = [];\nexport function change(): void {\n  const entries = new Map([[\"a\", store]]);\n  for (const [, value] of entries) {\n    value.push(1);\n  }\n}\n",
   "findings": [
-   "3:ImplicitInput: function change(): The function change() reads store, an implicit input.",
    "5:ImplicitOutput: function change(): The function change() mutates caller-owned value value, an implicit output."
   ]
  },
@@ -3677,7 +3836,6 @@
   "name": "mut-s1-map-entry-get-external",
   "source": "const store: number[] = [];\nexport function change(): void {\n  const entries = new Map([[\"a\", store]]);\n  entries.get(\"a\")?.push(1);\n}\n",
   "findings": [
-   "3:ImplicitInput: function change(): The function change() reads store, an implicit input.",
    "4:ImplicitOutput: function change(): The function change() mutates receiver of push, an implicit output."
   ]
  },
@@ -3685,7 +3843,6 @@
   "name": "mut-s1-map-entry-dynamic-key",
   "source": "const store: number[] = [];\nexport function change(): void {\n  const key = String(Math.PI);\n  const entries = new Map([[key, store]]);\n  for (const [, value] of entries) {\n    value.push(1);\n  }\n}\n",
   "findings": [
-   "4:ImplicitInput: function change(): The function change() reads store, an implicit input.",
    "6:ImplicitOutput: function change(): The function change() mutates caller-owned value value, an implicit output."
   ]
  },
@@ -3693,7 +3850,6 @@
   "name": "mut-s1-weakmap-entry-get-external",
   "source": "const store: number[] = [];\nexport function change(): void {\n  const key = {};\n  const entries = new WeakMap([[key, store]]);\n  entries.get(key)?.push(1);\n}\n",
   "findings": [
-   "4:ImplicitInput: function change(): The function change() reads store, an implicit input.",
    "5:ImplicitOutput: function change(): The function change() mutates receiver of push, an implicit output."
   ]
  },
@@ -3706,7 +3862,6 @@
   "name": "mut-s1-map-for-of-values",
   "source": "const store: number[] = [];\nexport function change(): void {\n  const entries = new Map([[\"a\", store]]);\n  for (const value of entries.values()) {\n    value.push(1);\n  }\n}\n",
   "findings": [
-   "3:ImplicitInput: function change(): The function change() reads store, an implicit input.",
    "5:ImplicitOutput: function change(): The function change() mutates caller-owned value value, an implicit output."
   ]
  },
@@ -3714,7 +3869,6 @@
   "name": "mut-s1-object-rest-external",
   "source": "const store: number[] = [];\nexport function change(): void {\n  const holder = { a: [0], b: store };\n  const { a, ...rest } = holder;\n  rest.b.push(a.length);\n}\n",
   "findings": [
-   "3:ImplicitInput: function change(): The function change() reads store, an implicit input.",
    "5:ImplicitOutput: function change(): The function change() mutates caller-owned value rest, an implicit output."
   ]
  },
@@ -3742,7 +3896,6 @@
   "name": "mut-s1-object-pattern-dynamic-key",
   "source": "const store: number[] = [];\nexport function change(): void {\n  const key = String(Math.PI) as \"a\";\n  const holder = { a: [0], b: store };\n  const { [key]: first } = holder;\n  first.push(1);\n}\n",
   "findings": [
-   "4:ImplicitInput: function change(): The function change() reads store, an implicit input.",
    "6:ImplicitOutput: function change(): The function change() mutates caller-owned value first, an implicit output."
   ]
  },
@@ -3755,7 +3908,6 @@
   "name": "mut-s1-array-pattern-external",
   "source": "const store: number[] = [];\nexport function change(): void {\n  const pair = [[0], store];\n  const [, second] = pair;\n  second.push(1);\n}\n",
   "findings": [
-   "3:ImplicitInput: function change(): The function change() reads store, an implicit input.",
    "5:ImplicitOutput: function change(): The function change() mutates caller-owned value second, an implicit output."
   ]
  },
@@ -3763,7 +3915,6 @@
   "name": "mut-s1-array-pattern-rest",
   "source": "const store: number[] = [];\nexport function change(): void {\n  const pair = [[0], store];\n  const [, ...others] = pair;\n  others[0].push(1);\n}\n",
   "findings": [
-   "3:ImplicitInput: function change(): The function change() reads store, an implicit input.",
    "5:ImplicitOutput: function change(): The function change() mutates caller-owned value others, an implicit output."
   ]
  },
@@ -3785,9 +3936,7 @@
  {
   "name": "mut-s1-nested-factory-distinct",
   "source": "const store: number[] = [];\nfunction make(): number[][] {\n  return [[0]];\n}\nfunction pair() {\n  return { x: make(), y: make() };\n}\nexport function change(): void {\n  const both = pair();\n  both.x.push(store);\n  both.y[0].push(1);\n}\n",
-  "findings": [
-   "10:ImplicitInput: function change(): The function change() reads store, an implicit input."
-  ]
+  "findings": []
  },
  {
   "name": "mut-s1-factory-members-distinct",
@@ -3799,7 +3948,6 @@
   "source": "const store: number[] = [];\nfunction change(rows: number[][]): void {\n  for (const row of rows) {\n    row.push(1);\n  }\n}\nexport function outer(): void {\n  const local = [store];\n  change(local);\n}\n",
   "findings": [
    "4:ImplicitOutput: function change(): The function change() mutates caller-owned value row, an implicit output.",
-   "8:ImplicitInput: function outer(): The function outer() reads store, an implicit input.",
    "9:ImplicitOutput: function outer(): The function outer() mutates caller-owned value local, an implicit output."
   ]
  },
@@ -3819,7 +3967,6 @@
   "name": "mut-s1-spread-merge",
   "source": "const store: number[] = [];\nexport function change(): void {\n  const all = [...[store], ...[[0]]];\n  all[0].push(1);\n}\n",
   "findings": [
-   "3:ImplicitInput: function change(): The function change() reads store, an implicit input.",
    "4:ImplicitOutput: function change(): The function change() mutates caller-owned value all, an implicit output."
   ]
  },
@@ -3827,7 +3974,6 @@
   "name": "mut-s1-assign-variable-source",
   "source": "const store: number[] = [];\nexport function change(): void {\n  const source = { a: store };\n  const target: { a?: number[] } = {};\n  Object.assign(target, source);\n  target.a?.push(1);\n}\n",
   "findings": [
-   "3:ImplicitInput: function change(): The function change() reads store, an implicit input.",
    "6:ImplicitOutput: function change(): The function change() mutates caller-owned value target, an implicit output."
   ]
  },
@@ -3840,7 +3986,6 @@
   "name": "mut-s1-object-computed-dynamic",
   "source": "const store: number[] = [];\nexport function change(key: string): void {\n  const holder = { [key]: store, b: [0] };\n  holder.b.push(1);\n}\n",
   "findings": [
-   "3:ImplicitInput: function change(): The function change() reads store, an implicit input.",
    "4:ImplicitOutput: function change(): The function change() mutates caller-owned value holder, an implicit output."
   ]
  },
@@ -4652,7 +4797,6 @@
   "name": "mut-s3-loop-earlier-unconditional-reassign",
   "source": "const store: number[] = [];\nexport function fill() {\n  let target: number[] = store;\n  for (let i = 0; i < 2; i++) {\n    target = [];\n    target.push(i);\n  }\n  return 0;\n}\n",
   "findings": [
-   "3:ImplicitInput: function fill(): The function fill() reads store, an implicit input.",
    "6:ImplicitOutput: function fill(): The function fill() mutates caller-owned value target, an implicit output."
   ]
  },
@@ -4723,7 +4867,6 @@
   "name": "mut-s3-and-replace-keeps-store",
   "source": "const store: number[] = [];\nexport function fill(flag: boolean) {\n  let target: number[] = store;\n  flag && (target = []);\n  target.push(1);\n  return 0;\n}\n",
   "findings": [
-   "3:ImplicitInput: function fill(): The function fill() reads store, an implicit input.",
    "5:ImplicitOutput: function fill(): The function fill() mutates caller-owned value target, an implicit output."
   ]
  },
@@ -4731,7 +4874,6 @@
   "name": "mut-s3-pattern-assign-after-store",
   "source": "const store: number[] = [];\nexport function fill() {\n  let target: number[] = store;\n  [target] = [[0]];\n  target.push(1);\n  return 0;\n}\n",
   "findings": [
-   "3:ImplicitInput: function fill(): The function fill() reads store, an implicit input.",
    "5:ImplicitOutput: function fill(): The function fill() mutates caller-owned value target, an implicit output.",
    "5:UnknownEffect: function fill(): The function fill() mutates value with unknown ownership, an unknown effect."
   ]
@@ -4745,7 +4887,6 @@
   "name": "mut-s3-for-of-map-entry-store",
   "source": "const store: number[] = [];\nexport function fill() {\n  const map = new Map([[\"a\", store]]);\n  for (const [, value] of map) {\n    value.push(1);\n  }\n  return map.size;\n}\n",
   "findings": [
-   "3:ImplicitInput: function fill(): The function fill() reads store, an implicit input.",
    "5:ImplicitOutput: function fill(): The function fill() mutates caller-owned value value, an implicit output."
   ]
  },
@@ -4753,7 +4894,6 @@
   "name": "mut-s3-for-of-pattern-member-store",
   "source": "const store: number[] = [];\nexport function fill() {\n  const rows = [{ items: store }];\n  for (const { items } of rows) {\n    items.push(1);\n  }\n  return rows.length;\n}\n",
   "findings": [
-   "3:ImplicitInput: function fill(): The function fill() reads store, an implicit input.",
    "5:ImplicitOutput: function fill(): The function fill() mutates caller-owned value items, an implicit output."
   ]
  },
@@ -5126,7 +5266,7 @@
   "source": "const log: number[] = [];\nfunction* gen() { log.push(1); yield 1; }\nfunction make() {\n  return gen();\n}\nexport function run() {\n  for (const x of make()) void x;\n}\n",
   "findings": [
    "2:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
-   "7:UnknownEffect: function run(): The function run() uses unresolved iterate protocol, an unknown effect."
+   "7:ImplicitOutput: function run(): The function run() writes log, an implicit output."
   ]
  },
  {
@@ -5148,7 +5288,7 @@
   "source": "const log: number[] = [];\nfunction* gen() { log.push(1); yield 1; }\nconst make = () => gen();\nexport function run() {\n  return [...make()];\n}\n",
   "findings": [
    "2:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
-   "5:UnknownEffect: function run(): The function run() uses unresolved iterate protocol, an unknown effect."
+   "5:ImplicitOutput: function run(): The function run() writes log, an implicit output."
   ]
  },
  {
@@ -5165,6 +5305,21 @@
    "2:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
    "4:UnknownEffect: function run(): The function run() uses unresolved iterate protocol, an unknown effect.",
    "4:ImplicitOutput: function run(): The function run() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "pi-regress-destructure-default-alias",
+  "source": "const log: number[] = [];\nfunction outer() {\n  const opts: { items?: number[] } = {};\n  const { items = log } = opts;\n  items.push(1);\n  return items.length;\n}\n",
+  "findings": [
+   "5:ImplicitOutput: function outer(): The function outer() mutates caller-owned value items, an implicit output.",
+   "6:ImplicitInput: function outer(): The function outer() reads log, an implicit input."
+  ]
+ },
+ {
+  "name": "pi-regress-computed-object-write-call-target",
+  "source": "const a = { value: 0 };\nfunction pick(flag: boolean) { return flag ? a : { value: 0 }; }\nfunction outer(flag: boolean) {\n  pick(flag).value = 1;\n  return 0;\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function outer(): The function outer() mutates caller-owned value, an implicit output."
   ]
  }
 ]

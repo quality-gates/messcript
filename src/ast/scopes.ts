@@ -1,6 +1,6 @@
 // messcript-disable ConstantNamingConventions CouplingBetweenObjects
 import ts from "typescript";
-import { methodName, unwrapExpression } from "./expressions";
+import { declarationName, methodName, unwrapExpression } from "./expressions";
 import { isFunctionLike } from "./functions";
 
 export type ScopeKind = "file" | "namespace" | "function" | "class" | "block";
@@ -50,6 +50,10 @@ export type ScopeModel = {
   resolveType(identifier: ts.Identifier): LocalType | undefined;
   /** Gives the write to the root identifier or "this" of a write target, as "a" in a.b = 1 or a.push(1). */
   writeOf(node: ts.Node): Write | undefined;
+  /** Tells if the file assigns, updates, or deletes the member access, as a.b in a.b = 1. */
+  writesMember(access: ts.Node): boolean;
+  /** Tells if the file writes or defines a member of the name, as add in o.add = f or Object.defineProperty(o, "add", d). */
+  writesMemberName(name: string): boolean;
 };
 
 type MutableBinding = {
@@ -81,7 +85,6 @@ function scopeKindOf(node: ts.Node): ScopeKind | undefined {
   if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
     return "class";
   }
-  // A global augmentation declares names in the global scope, which this model folds into the file scope.
   if (ts.isModuleBlock(node) && (node.parent.flags & ts.NodeFlags.GlobalAugmentation) === 0) {
     return "namespace";
   }
@@ -406,18 +409,65 @@ class ScopeBuilder {
   }
 }
 
+type MemberWrites = { readonly targets: ReadonlySet<ts.Node>; readonly names: ReadonlySet<string> };
+
+const definingCalls = new Set(["Object.defineProperty", "Reflect.defineProperty", "Reflect.set"]);
+
+function memberWrites(sourceFile: ts.SourceFile): MemberWrites {
+  const targets = new Set<ts.Node>();
+  const names = new Set<string>();
+  const visit = (node: ts.Node): void => {
+    for (const target of writeTargets(node)) {
+      const value = unwrapExpression(target);
+      targets.add(value);
+      const name = methodName(value);
+      if (name !== undefined) {
+        names.add(name);
+      }
+    }
+    for (const name of definedNames(node)) {
+      names.add(name);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return { targets, names };
+}
+
+function definedNames(node: ts.Node): string[] {
+  if (!ts.isCallExpression(node)) {
+    return [];
+  }
+  const callee = unwrapExpression(node.expression);
+  const library = ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) ? `${callee.expression.text}.${callee.name.text}` : "";
+  const key = node.arguments[1] && unwrapExpression(node.arguments[1]);
+  if (key && ts.isStringLiteralLike(key) && definingCalls.has(library)) {
+    return [key.text];
+  }
+  return library === "Object.assign"
+    ? node.arguments.slice(1).flatMap((source) => {
+      const value = unwrapExpression(source);
+      return ts.isObjectLiteralExpression(value) ? value.properties.flatMap((property) => declarationName(property) ?? []) : [];
+    })
+    : [];
+}
+
 // messcript-disable-next-line GlobalVariable
 const modelCache = new WeakMap<ts.SourceFile, ScopeModel>();
 
 function buildModel(sourceFile: ts.SourceFile): ScopeModel {
   const builder = new ScopeBuilder();
   builder.build(sourceFile);
+  let members: MemberWrites | undefined;
+  const writes = (): MemberWrites => (members ??= memberWrites(sourceFile));
   return {
     bindings: builder.bindings,
     isReference: (identifier) => builder.resolved.has(identifier),
     resolve: (identifier) => builder.resolved.get(identifier),
     resolveType: resolveLocalType,
     writeOf: (node) => builder.writes.get(node),
+    writesMember: (access) => writes().targets.has(access),
+    writesMemberName: (name) => writes().names.has(name),
   };
 }
 
