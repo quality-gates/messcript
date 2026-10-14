@@ -5336,5 +5336,63 @@
    "4:ImplicitOutput: function bump(): The function bump() writes a, an implicit output.",
    "9:ImplicitInput: function order(): The function order() reads a, an implicit input."
   ]
+ },
+ {
+  "name": "mut-s1-captured-copy-inner-read",
+  "source": "const rows: number[][] = [[1]];\nexport function bump() {\n  rows[0][0] = 2;\n}\nexport function outer() {\n  const copy = [...rows];\n  const inner = () => copy[0][0];\n  return inner();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes rows, an implicit output.",
+   "7:ImplicitInput: arrow function inner(): The arrow function inner() reads rows, an implicit input.",
+   "8:ImplicitInput: function outer(): The function outer() reads rows, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-captured-copy-callback-read",
+  "source": "const rows: number[][] = [[1]];\nexport function bump() {\n  rows[0][0] = 2;\n}\nexport function outer() {\n  const copy = [...rows];\n  return [0].map(() => copy[0][0])[0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes rows, an implicit output.",
+   "7:ImplicitInput: function outer(): The function outer() reads rows, an implicit input.",
+   "7:ImplicitInput: arrow function anonymous(): The arrow function anonymous() reads rows, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-captured-copy-length-quiet",
+  "source": "const rows: number[][] = [[1]];\nexport function bump() {\n  rows[0][0] = 2;\n}\nexport function outer() {\n  const copy = [...rows];\n  const inner = () => copy.length;\n  return inner();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes rows, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-captured-copy-returned-closure",
+  "source": "const rows: number[][] = [[1]];\nexport function bump() {\n  rows[0][0] = 2;\n}\nexport function outer() {\n  const copy = [...rows];\n  return () => copy[0][0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes rows, an implicit output.",
+   "7:ImplicitInput: arrow function anonymous(): The arrow function anonymous() reads rows, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-setitem-reads-stored",
+  "source": "const items: number[] = [1];\nexport function grow() {\n  items.push(2);\n}\nexport function save() {\n  localStorage.setItem(\"items\", items as unknown as string);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function grow(): The function grow() writes items, an implicit output.",
+   "6:ImplicitOutput: function save(): The function save() writes localStorage, an implicit output.",
+   "6:ImplicitInput: function save(): The function save() reads items, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-assign-reads-sources",
+  "source": "const src = { a: 1 };\nexport function bump() {\n  src.a = 2;\n}\nexport function copy() {\n  const target = {};\n  Object.assign(target, src);\n  return target;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes src, an implicit output.",
+   "7:ImplicitInput: function copy(): The function copy() reads src, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-spread-copy-stringify",
+  "source": "const state = { items: [1] };\nexport function bump() {\n  state.items.push(2);\n}\nexport function dump() {\n  const copy = { ...state };\n  return JSON.stringify(copy);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes state, an implicit output.",
+   "7:ImplicitInput: function dump(): The function dump() reads state, an implicit input."
+  ]
  }
 ]

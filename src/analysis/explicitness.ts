@@ -370,10 +370,16 @@ function boundFlows(state: AnalysisState, binding: Binding, node: ts.Identifier,
 /** Finds shared storage that a function-local value reads, including the elements its own write hands to a callback. */
 function localStorageRead(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner, write: Write | undefined): Binding | undefined {
   const sites = !write ? storageReadSites(state, node) : callbackReadsReceiver(state, node) ? [{ path: ["*"], reference: false }] : [];
-  if (!sites.length || !inside(binding.scope.node, owner)) {
+  const home = inside(binding.scope.node, owner) ? owner : declaringOwner(state, binding);
+  if (!sites.length || !home) {
     return undefined;
   }
-  return externalReads(state, storageFactForExpression(state, state.summaries, node, owner, node), sites, owner, false);
+  return externalReads(state, storageFactForExpression(state, state.summaries, node, home, node), sites, owner, false);
+}
+
+function declaringOwner(state: AnalysisState, binding: Binding): EffectOwner | undefined {
+  return state.callables.filter((callable) => isLocalBindingOfOwner(binding, callable))
+    .reduce<EffectOwner | undefined>((innermost, callable) => !innermost || inside(callable, innermost) ? callable : innermost, undefined);
 }
 
 /** Tells if a receiver write, as in copy.sort(compare), also hands the receiver's elements to a callback that reads them. */
