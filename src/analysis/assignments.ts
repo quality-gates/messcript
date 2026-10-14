@@ -98,6 +98,18 @@ export function declarationAssignment(node: ts.Node, identifier: ts.Identifier):
   return { node, value: node.initializer, ...(node.name === identifier ? {} : { element: true, pattern: identifier }) };
 }
 
+/** Gives the declaration that makes a binding outside the owner an alias of a name or member, as in "const items = store.items". */
+export function ambientAlias(binding: Binding, owner: EffectOwner): (Assignment & { readonly value: ts.Expression }) | undefined {
+  const declaration = inside(binding.scope.node, owner) ? undefined : binding.declarations.find((item) => ts.isVariableDeclaration(item.node));
+  const assignment = declaration && declarationAssignment(declaration.node, declaration.identifier);
+  return assignment?.value && ts.isVariableDeclaration(assignment.node) && isNameOrMember(assignment.value) ? { ...assignment, value: assignment.value } : undefined;
+}
+
+function isNameOrMember(expression: ts.Expression): boolean {
+  const value = unwrapExpression(expression);
+  return ts.isIdentifier(value) || ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value);
+}
+
 function referenceAssignment(reference: ts.Identifier): Assignment | undefined {
   const target = outerExpression(reference);
   const parent = target.parent;
@@ -149,6 +161,19 @@ export function inside(node: ts.Node, ancestor: ts.Node): boolean {
     }
   }
   return false;
+}
+
+/** Tells if the use can run before the site. A use outside the function, class, or file that holds the site can run at any time. */
+export function canRunBefore(use: ts.Node, site: ts.Node): boolean {
+  let owner: ts.Node = site.parent;
+  while (!isOwner(owner)) {
+    owner = owner.parent;
+  }
+  return !inside(use, owner) || canReachSite(use, owner, site);
+}
+
+function isOwner(node: ts.Node): node is EffectOwner {
+  return isFunctionLike(node) || ts.isClassLike(node) || ts.isSourceFile(node);
 }
 
 /** Tells if the node runs on every path through the owner, with no branch, loop, handler, or nested function around it. */

@@ -7,7 +7,8 @@ import { analyzeScopes, isAmbient, writeTargets } from "../ast/scopes";
 import type { Binding, ScopeModel, Write } from "../ast/scopes";
 import { reachableChildren } from "./control-flow";
 import { bindingAssignments, canReachSite, inside, unconditional } from "./assignments";
-import { callableTargets as resolveTargets, classTargets, memberTargets, type Dispatch, type Targets } from "./dispatch";
+import { callableTargets as resolveTargets, memberTargets, type Dispatch, type Targets } from "./dispatch";
+import { classTargets } from "./shapes";
 import { ambientFlow, isPureConstructor, iteratedArgument, libraryCall, libraryCallback, type LibraryCall, type LibraryStorage } from "./library";
 import { protocolExpressions, supportsProtocol } from "./protocols";
 import {
@@ -321,16 +322,23 @@ function identifierFlows(state: AnalysisState, node: ts.Identifier, owner: Effec
     const flow = ambientFlow(node, write !== undefined) ?? namespaceFlow(node, write);
     return flow ? withCompoundRead(write, { kind: flow[0], node, owner, description: flow[1] }) : [];
   }
-  if (aliasOf(state.model, node)) {
-    return [];
-  }
+  return aliasOf(state.model, node) ? [] : boundFlows(state, binding, node, owner, write);
+}
+
+/** Gives the flow of a reference to a binding, or to the constant that a constant alias binding copies. */
+function boundFlows(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner, write: Write | undefined): ImplicitFlow[] {
   const shared = bindingSharesRead(state, binding, node, owner);
   const direct = bindingFlow(binding, node, owner, write, shared);
-  const target = direct ? undefined : aliasTarget(state.model, binding, new Set());
-  const flow = direct ?? (target && bindingFlow(target, node, owner, write, shared || bindingSharesRead(state, target, node, owner)));
-  return flow
-    ? withCompoundRead(write, { kind: flow[0], node, owner, description: flow[1], ...bindingAccess(direct ? binding : target ?? binding, node, write) })
-    : [];
+  if (direct) {
+    return accessFlows(direct, binding, node, owner, write);
+  }
+  const target = aliasTarget(state.model, binding, new Set());
+  const aliased = target && bindingFlow(target, node, owner, write, shared || bindingSharesRead(state, target, node, owner));
+  return target && aliased ? accessFlows(aliased, target, node, owner, write) : [];
+}
+
+function accessFlows(flow: [ImplicitFlowKind, string], binding: Binding, node: ts.Identifier, owner: EffectOwner, write: Write | undefined): ImplicitFlow[] {
+  return withCompoundRead(write, { kind: flow[0], node, owner, description: flow[1], ...bindingAccess(binding, node, write) });
 }
 
 /**
@@ -716,11 +724,16 @@ function assignedSlots(state: AnalysisState, site: ts.Identifier): readonly (str
 /** Gives the least index an append by length, as values[values.length] = 1, can write: the array's least length there. */
 function appendStart(state: AnalysisState, site: ts.Identifier, member: ts.ElementAccessExpression): number {
   const owner = enclosingFunction(site);
-  const binding = state.model.resolve(site);
-  const fact = owner && binding ? storageFactForBinding(state, state.summaries, binding, owner, member) : undefined;
-  const origin = fact?.outer.length === 1 ? fact.outer[0] : undefined;
+  const origin = owner ? soleOrigin(state, site, owner, member) : undefined;
   const length = origin === undefined ? undefined : literalAllocationLength(state, origin);
   return owner && origin !== undefined && length !== undefined ? priorPushStart(state, owner, member, origin, length)?.lowerBound ?? 0 : 0;
+}
+
+/** Gives the one origin that the binding of the identifier holds at the site, or undefined. */
+function soleOrigin(state: AnalysisState, identifier: ts.Identifier, owner: EffectOwner, site: ts.Node): StorageOrigin | undefined {
+  const binding = state.model.resolve(identifier);
+  const fact = binding ? storageFactForBinding(state, state.summaries, binding, owner, site) : undefined;
+  return fact?.outer.length === 1 ? fact.outer[0] : undefined;
 }
 
 function outermostAccess(site: ts.Identifier): ts.Expression {
@@ -1930,20 +1943,37 @@ function reboundFlow(
   if (flow.binding && inside(flow.binding.scope.node, owner)) {
     return ownedBindingFlow(state, summaries, flow, flow.binding, node, owner);
   }
-  const forwarded = (origins?: readonly StorageOrigin[]): ImplicitFlow =>
-    ({ ...flow, node, owner, defaultParameterIndex: undefined, writeNode: flow.writeNode ?? flow.node, origins: origins ?? flow.origins });
-  if (!flow.origins?.some((origin) => ownedOrigin(state, origin, owner))) {
-    return { flows: [forwarded()], writes: [], parameterCalls: [] };
+  return forwardedFlow(state, summaries, flow, node, owner);
+}
+
+/**
+ * Moves the flow of a callee to the call in the caller.
+ * An output to external storage that the caller owns is a mutation that the caller resolves against its own bindings.
+ */
+function forwardedFlow(
+  state: AnalysisState,
+  summaries: ReadonlyMap<EffectOwner, CallableSummary>,
+  flow: ImplicitFlow,
+  node: ts.Node,
+  owner: EffectOwner,
+): CallEffects {
+  const origins = flow.origins ?? [];
+  if (!origins.some((origin) => ownedOrigin(state, origin, owner))) {
+    return { flows: [movedFlow(flow, node, owner, flow.origins)], writes: [], parameterCalls: [] };
   }
-  return combineEffects(flow.origins.map((origin) => {
+  return combineEffects(origins.map((origin) => {
     const external = ownedOrigin(state, origin, owner);
     if (!external) {
-      return { flows: [forwarded([origin])], writes: [], parameterCalls: [] };
+      return { flows: [movedFlow(flow, node, owner, [origin])], writes: [], parameterCalls: [] };
     }
     const fact = storageFactForBinding(state, summaries, external.binding, owner, node);
-    return mutationEffectsFromFact(state, fact, external.path.length ? external.path : "outer", node, owner,
-      isParameterOf(external.binding, owner) ? `mutates argument ${external.binding.name}` : `mutates caller-owned value ${external.binding.name}`);
+    const subject = isParameterOf(external.binding, owner) ? "argument" : "caller-owned value";
+    return mutationEffectsFromFact(state, fact, external.path.length ? external.path : "outer", node, owner, `mutates ${subject} ${external.binding.name}`);
   }));
+}
+
+function movedFlow(flow: ImplicitFlow, node: ts.Node, owner: EffectOwner, origins: readonly StorageOrigin[] | undefined): ImplicitFlow {
+  return { ...flow, node, owner, defaultParameterIndex: undefined, writeNode: flow.writeNode ?? flow.node, origins };
 }
 
 /** Gives an external origin's binding when the caller declares it, so the caller can resolve what that storage holds. */

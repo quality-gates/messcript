@@ -371,3 +371,62 @@ function scalarArrayReference(model: ScopeModel, type: ts.TypeNode, seen: Readon
   }
   return (type.typeName.text === "Array" || type.typeName.text === "ReadonlyArray") && scalarType(type.typeArguments?.[0]);
 }
+
+/** The part of a value that an assignment selects: an element, an iterated element, or the name a destructuring pattern binds. */
+export type Selection = { readonly element?: boolean; readonly iterated?: boolean; readonly pattern?: ts.Node };
+
+/**
+ * Gives the part of the value that an element assignment selects: an iterated element, then each destructuring step.
+ * A property step selects the member, a rest step copies the members it keeps, and a default joins its own value.
+ * A step this analysis cannot place, as an array pattern over map entries, gives whatever the value reaches.
+ */
+export function selectedFact(value: StorageFact, selection: Selection, resolve: (value: ts.Expression) => StorageFact): StorageFact {
+  if (!selection.element) {
+    return value;
+  }
+  const steps: ts.BindingElement[] = [];
+  for (let node = selection.pattern?.parent; node && ts.isBindingElement(node); node = node.parent.parent) {
+    steps.unshift(node);
+  }
+  if (!selection.iterated && steps.length === 0) {
+    return elementFact(value);
+  }
+  return steps.reduce((fact, element) => patternStep(fact, element, resolve), selection.iterated ? iteratedFact(value) : value);
+}
+
+function iteratedFact(value: StorageFact): StorageFact {
+  return entryCells(value) ? reachedFact(value) : elementFact(value);
+}
+
+function patternStep(fact: StorageFact, element: ts.BindingElement, resolve: (value: ts.Expression) => StorageFact): StorageFact {
+  const selected = ts.isObjectBindingPattern(element.parent) ? propertyStep(fact, element) : arrayStep(fact, element);
+  return element.initializer ? joinFacts(selected, resolve(element.initializer)) : selected;
+}
+
+function propertyStep(fact: StorageFact, element: ts.BindingElement): StorageFact {
+  if (element.dotDotDotToken) {
+    return shallowStorageFact(element.name, fact);
+  }
+  const key = element.propertyName ?? element.name;
+  const name = ts.isComputedPropertyName(key) ? literalKey(key.expression)
+    : ts.isIdentifier(key) || ts.isStringLiteral(key) || ts.isNumericLiteral(key) ? key.text : undefined;
+  return memberStorageFact(fact, name === undefined ? undefined : `property:${name}`);
+}
+
+function arrayStep(fact: StorageFact, element: ts.BindingElement): StorageFact {
+  if (entryCells(fact)) {
+    return reachedFact(fact);
+  }
+  return element.dotDotDotToken ? allocatedFact(element.name, [{ slot: "*", fact: elementFact(fact) }])
+    : memberStorageFact(fact, `property:${element.parent.elements.indexOf(element)}`);
+}
+
+/** Tells if the value holds map entries, whose iteration gives fresh key and value pairs. */
+function entryCells(fact: StorageFact): boolean {
+  return !!fact.cells?.some((cell) => fact.outer.includes(cell.allocation) && cell.slot.startsWith("entry:"));
+}
+
+/** Gives a value that may be anything the given value reaches. */
+function reachedFact(fact: StorageFact): StorageFact {
+  return { outer: fact.reachable, reachable: fact.reachable, cells: fact.cells };
+}
