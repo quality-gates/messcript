@@ -79,10 +79,11 @@ const PURE_METHODS = new Map<string, LibraryResult>([
 
 const MUTATING_METHODS = new Map<string, LibraryResult>([
   ...methods("receiver", [
-    "add", "append", "appendChild", "clear", "copyWithin", "delete", "fill", "insertBefore", "prepend", "push",
+    "add", "append", "appendChild", "clear", "copyWithin", "delete", "fill", "insertBefore", "prepend",
     "remove", "removeAttribute", "removeChild", "removeItem", "replaceChildren", "reverse", "set", "setAttribute",
-    "setItem", "sort", "unshift", "write", "writeln",
+    "setItem", "sort", "write", "writeln",
   ]),
+  ...methods("fresh", ["push", "unshift"]),
   ...methods("element", ["pop", "shift"]),
   ...methods("shallow", ["splice"]),
 ]);

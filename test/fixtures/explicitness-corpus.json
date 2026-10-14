@@ -2562,7 +2562,7 @@
   "name": "mut-sort-copy-second-element",
   "source": "const rows: number[][] = [[1], [2]];\nfunction order() {\n  const copy = [...rows];\n  copy.sort((left, right) => { right.push(1); return left.length - right.length; });\n  return copy;\n}\n",
   "findings": [
-   "3:ImplicitInput: function order(): The function order() reads rows, an implicit input.",
+   "4:ImplicitInput: function order(): The function order() reads rows, an implicit input.",
    "4:ImplicitOutput: function order(): The function order() mutates caller-owned callback argument, an implicit output.",
    "4:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() mutates argument right, an implicit output."
   ]
@@ -2906,10 +2906,14 @@
   "source": "function outer(index: number) {\n  const state = { a: { a: 1, b: 2 }, b: { a: 1, b: 2 }, length: 1 };\n  function change() { state[index === 0 ? 'a' : 'b'].a = 5; }\n  function read0() { return state; }\n  function read1() { return state.a; }\n  function read2() { return state.b; }\n  function read3() { return state.a.a; }\n  function read4() { return state.a.b; }\n  function read5() { return state[index]; }\n  function read6() { return state.a[index]; }\n  function read7() { return String(state.b); }\n  function read8() { return state.length; }\n  return { change, read0, read1, read2, read3, read4, read5, read6, read7, read8 };\n}\n",
   "findings": [
    "3:ImplicitOutput: function change(): The function change() writes state, an implicit output.",
+   "5:ImplicitInput: function read1(): The function read1() reads state, an implicit input.",
+   "6:ImplicitInput: function read2(): The function read2() reads state, an implicit input.",
    "7:ImplicitInput: function read3(): The function read3() reads state, an implicit input.",
    "8:ImplicitInput: function read4(): The function read4() reads state, an implicit input.",
+   "9:ImplicitInput: function read5(): The function read5() reads state, an implicit input.",
    "10:ImplicitInput: function read6(): The function read6() reads state, an implicit input.",
-   "11:ImplicitInput: function read7(): The function read7() reads state, an implicit input."
+   "11:ImplicitInput: function read7(): The function read7() reads state, an implicit input.",
+   "12:ImplicitInput: function read8(): The function read8() reads state, an implicit input."
   ]
  },
  {
@@ -2934,7 +2938,9 @@
   "findings": [
    "3:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
    "5:ImplicitInput: function read1(): The function read1() reads values, an implicit input.",
+   "6:ImplicitInput: function read2(): The function read2() reads values, an implicit input.",
    "7:ImplicitInput: function read3(): The function read3() reads values, an implicit input.",
+   "8:ImplicitInput: function read4(): The function read4() reads values, an implicit input.",
    "9:ImplicitInput: function read5(): The function read5() reads values, an implicit input.",
    "10:ImplicitInput: function read6(): The function read6() reads values, an implicit input.",
    "11:ImplicitInput: function read7(): The function read7() reads values, an implicit input.",
@@ -2955,9 +2961,14 @@
   "source": "function outer(index: number) {\n  const state: { a: { a?: number; b: number }; b: number; length: number } = { a: { a: 1, b: 2 }, b: 3, length: 1 };\n  function change() { delete state.a.a; }\n  function read0() { return state; }\n  function read1() { return state.a; }\n  function read2() { return state.b; }\n  function read3() { return state.a.a; }\n  function read4() { return state.a.b; }\n  function read5() { return state[index]; }\n  function read6() { return state.a[index]; }\n  function read7() { return String(state.b); }\n  function read8() { return state.length; }\n  return { change, read0, read1, read2, read3, read4, read5, read6, read7, read8 };\n}\n",
   "findings": [
    "3:ImplicitOutput: function change(): The function change() writes state, an implicit output.",
+   "5:ImplicitInput: function read1(): The function read1() reads state, an implicit input.",
+   "6:ImplicitInput: function read2(): The function read2() reads state, an implicit input.",
    "7:ImplicitInput: function read3(): The function read3() reads state, an implicit input.",
    "8:ImplicitInput: function read4(): The function read4() reads state, an implicit input.",
-   "10:ImplicitInput: function read6(): The function read6() reads state, an implicit input."
+   "9:ImplicitInput: function read5(): The function read5() reads state, an implicit input.",
+   "10:ImplicitInput: function read6(): The function read6() reads state, an implicit input.",
+   "11:ImplicitInput: function read7(): The function read7() reads state, an implicit input.",
+   "12:ImplicitInput: function read8(): The function read8() reads state, an implicit input."
   ]
  },
  {

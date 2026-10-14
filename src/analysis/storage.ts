@@ -274,7 +274,7 @@ export function shallowStorageFact(value: ts.Node, source: StorageFact): Storage
   const cells = source.cells?.filter((cell) => source.outer.includes(cell.allocation));
   return cells?.length ? allocatedFact(value, cells.map((cell) => ({ slot: cell.slot,
     fact: { outer: cell.origins, reachable: reachableOrigins(cell.origins, source.cells ?? []), cells: source.cells } })))
-    : allocatedFact(value, [{ slot: "*", fact: { outer: source.reachable, reachable: source.reachable, cells: source.cells } }]);
+    : allocatedFact(value, [{ slot: "*", fact: elementFact(source) }]);
 }
 
 export function arrayLiteralFact(value: ts.Expression, resolve: (value: ts.Expression) => StorageFact): StorageFact {

@@ -363,8 +363,20 @@ function boundFlows(state: AnalysisState, binding: Binding, node: ts.Identifier,
   if (target && aliased) {
     return accessFlows(aliased, target, node, owner, write);
   }
-  const read = !write && inside(binding.scope.node, owner) ? sharedStorageRead(state, node, owner) : undefined;
+  const read = localStorageRead(state, binding, node, owner, write);
   return read ? [{ kind: "input", node, owner, description: `reads ${read.name}` }] : [];
+}
+
+/** Finds shared storage that a function-local value reads, including through a callback its own write hands elements to. */
+function localStorageRead(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner, write: Write | undefined): Binding | undefined {
+  return (!write || callbackReadsReceiver(state, node)) && inside(binding.scope.node, owner) ? sharedStorageRead(state, node, owner) : undefined;
+}
+
+/** Tells if a receiver write, as in copy.sort(compare), also hands the receiver's elements to a callback that reads them. */
+function callbackReadsReceiver(state: AnalysisState, node: ts.Identifier): boolean {
+  const call = methodCallOn(node);
+  const known = call && libraryCall(call, state.model);
+  return known?.kind === "mutating" && known.target === "receiver" && known.callbacks.length > 0;
 }
 
 function sharedStorageRead(state: AnalysisState, node: ts.Identifier, owner: EffectOwner): Binding | undefined {
@@ -376,17 +388,27 @@ function externalReads(
   state: AnalysisState, fact: StorageFact, sites: readonly ReadSite[], owner: EffectOwner, exported: boolean,
 ): Binding | undefined {
   for (const site of sites) {
-    for (let length = 0; length <= site.path.length; length += 1) {
-      const origins = originsForPath(fact, length ? site.path.slice(0, length) : "outer");
-      const read = origins.map((origin) => originBinding(state, origin)).find((external) => external &&
-        ((exported && (isExportedStorage(external.binding) || isAmbientVariable(external.binding))) ||
-          storageReadAffected(state, external.binding, { path: [...external.path, ...site.path.slice(length)], reference: site.reference }, owner)));
-      if (read) {
-        return read.binding;
+    for (const { origin, rest } of readOrigins(fact, site)) {
+      const external = originBinding(state, origin);
+      if (external && ((exported && (isExportedStorage(external.binding) || isAmbientVariable(external.binding))) ||
+          storageReadAffected(state, external.binding, { path: [...external.path, ...rest], reference: site.reference }, owner))) {
+        return external.binding;
       }
     }
   }
   return undefined;
+}
+
+/**
+ * Pairs each origin a read reaches with the path still read below it. A contents read of a copy also reaches the
+ * source members the copy holds; whole bindings held inside local containers stay out of scope.
+ */
+function readOrigins(fact: StorageFact, site: ReadSite): { origin: StorageOrigin; rest: readonly string[] }[] {
+  const selected = Array.from({ length: site.path.length + 1 }, (_, length) =>
+    originsForPath(fact, length ? site.path.slice(0, length) : "outer").map((origin) => ({ origin, rest: site.path.slice(length) })));
+  const held = site.reference ? [] : site.path.reduce((value, slot) => memberStorageFact(value, slot), fact).reachable
+    .filter((origin) => (externalProjection(origin)?.path.length ?? 0) > 0);
+  return [...selected.flat(), ...held.map((origin) => ({ origin, rest: [] }))];
 }
 
 function isAmbientVariable(binding: Binding): boolean {
@@ -1844,6 +1866,20 @@ function escapeStorage(state: AnalysisState, facts: readonly StorageFact[], site
   shareAliasedLocalBindings(state, origins, site, owner, [undefined]);
 }
 
+/**
+ * Exposes captured storage a closure returns to the closures beside it. Returning an owned local hands it over,
+ * the exported-storage rule covers module storage, and a returned member may be a primitive, so only whole
+ * captured bindings escape.
+ */
+function escapeReturnedStorage(state: AnalysisState, facts: readonly StorageFact[], site: ts.Node, owner: EffectOwner): void {
+  const origins = joinStorageOrigins(facts.flatMap((fact) => [...fact.outer, ...fact.reachable])).filter((origin) => {
+    const external = originBinding(state, origin);
+    return !!external && !isModuleScope(external.binding) && external.path.length === 0;
+  });
+  shareOrigins(state, origins);
+  shareAliasedLocalBindings(state, origins, site, owner, [undefined]);
+}
+
 function isIteratorAdvance(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, callee: ts.Expression): boolean {
   return (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) &&
     ["next", "return", "throw"].includes(methodName(callee) ?? "") && isKnownIterator(state, summaries, callee.expression);
@@ -3156,7 +3192,9 @@ function appendReturn(
   expression: ts.Expression,
   owner: EffectOwner,
 ): void {
-  draft.returnedAliases.push(...returnedStorageFactsForExpression(state, summaries, expression, owner));
+  const facts = returnedStorageFactsForExpression(state, summaries, expression, owner);
+  draft.returnedAliases.push(...facts);
+  escapeReturnedStorage(state, facts, expression, owner);
   const returned = returnedCallablesForExpression(state, summaries, expression);
   draft.returnedCallables.push(...returned.targets);
   draft.opaqueReturn ||= !returned.complete;

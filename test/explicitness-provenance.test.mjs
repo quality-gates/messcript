@@ -18,6 +18,67 @@ test("a closure that returns a shallow copy keeps captured slots private", () =>
   assert.deepEqual(ownerMessages("head", "escape-copy.ts", source), []);
 });
 
+test("a closure that returns its captured array exposes it to the reads beside it", () => {
+  const source = [
+    "function outer() {",
+    "  const values = [0, 1];",
+    "  const bump = () => { values[1] = 5; };",
+    "  const expose = () => values;",
+    "  const head = () => values[0];",
+    "  return { bump, expose, head };",
+    "}",
+    "",
+  ].join("\n");
+  assert.deepEqual(ownerMessages("head", "escape-alias.ts", source), [
+    "5:ImplicitInput: The arrow function head() reads values, an implicit input.",
+  ]);
+});
+
+test("a closure that returns one element keeps the other captured slots private", () => {
+  const source = [
+    "function outer() {",
+    "  const values = [0, 1];",
+    "  const read = () => values[1] ?? -1;",
+    "  const add = () => values.slice().length;",
+    "  return { add, read };",
+    "}",
+    "",
+  ].join("\n");
+  assert.deepEqual(messages("escape-element.ts", source), []);
+});
+
+for (const [name, copy] of [["spread", "[...rows]"], ["slice", "rows.slice()"]]) {
+  test(`sorting a ${name} copy reads the elements another function mutates`, () => {
+    const source = [
+      "const rows: number[][] = [[1], [2]];",
+      "export function bump() { rows[0].push(1); }",
+      "export function order() {",
+      `  const copy = ${copy};`,
+      "  copy.sort((left, right) => left.length - right.length);",
+      "  return copy;",
+      "}",
+      "",
+    ].join("\n");
+    assert.equal(ownerMessages("order", `sort-${name}.ts`, source).length, 1);
+  });
+}
+
+test("iterating a spread copy reads the elements another function mutates", () => {
+  const source = [
+    "const rows: number[][] = [[1], [2]];",
+    "export function bump() { rows[0].push(1); }",
+    "export function order() {",
+    "  let total = 0;",
+    "  for (const row of [...rows]) total += row.length;",
+    "  return total;",
+    "}",
+    "",
+  ].join("\n");
+  assert.deepEqual(ownerMessages("order", "copy-loop.ts", source), [
+    "5:ImplicitInput: The function order() reads rows, an implicit input.",
+  ]);
+});
+
 const generator = [
   "const log: number[] = [];",
   "function* gen() {",
