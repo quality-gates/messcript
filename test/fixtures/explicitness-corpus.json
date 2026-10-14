@@ -1,0 +1,2336 @@
+[
+ {
+  "name": "fresh120-alias-helper-twice-A",
+  "source": "function outer() {\n  const values = [0];\n  const alias = values;\n  function add(item: number) { alias.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes alias, an implicit output.",
+   "5:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-alias-helper-twice-C",
+  "source": "function outer() {\n  const values = [0];\n  const alias = values;\n  function add(item: number) { alias.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes alias, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-append-index-then-helper-push-A",
+  "source": "function outer() {\n  const values: number[] = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  values[values.length] = 5;\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-append-index-then-helper-push-direct-push-A",
+  "source": "function outer() {\n  const values: number[] = [0];\n  function read() { return values[2] ?? -1; }\n  values[values.length] = 5;\n  values.push(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-append-index-then-helper-push-via-helper-A",
+  "source": "function outer() {\n  const values: number[] = [0];\n  function add(item: number) { values.push(item); }\n  function prep() {\n    values[values.length] = 5;\n  }\n  function read() { return values[2] ?? -1; }\n  prep();\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "5:ImplicitOutput: function prep(): The function prep() writes values, an implicit output.",
+   "5:ImplicitInput: function prep(): The function prep() reads values, an implicit input.",
+   "7:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-assign-then-helper-push-A",
+  "source": "function outer() {\n  const values: number[] = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[3] ?? -1; }\n  Object.assign(values, [1, 2, 3]);\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-assign-then-helper-push-direct-push-A",
+  "source": "function outer() {\n  const values: number[] = [0];\n  function read() { return values[3] ?? -1; }\n  Object.assign(values, [1, 2, 3]);\n  values.push(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-assign-then-helper-push-via-helper-A",
+  "source": "function outer() {\n  const values: number[] = [0];\n  function add(item: number) { values.push(item); }\n  function prep() {\n    Object.assign(values, [1, 2, 3]);\n  }\n  function read() { return values[3] ?? -1; }\n  prep();\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "5:ImplicitOutput: function prep(): The function prep() writes values, an implicit output.",
+   "7:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-async-foreach-pushes-A",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[2] ?? -1; }\n  [1, 2].forEach(async (item) => { values.push(item); });\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "4:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-async-foreach-pushes-C",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[0] ?? -1; }\n  [1, 2].forEach(async (item) => { values.push(item); });\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-async-helper-pushes-A",
+  "source": "function outer() {\n  const values = [0];\n  async function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  void add(1);\n  void add(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-async-helper-pushes-C",
+  "source": "function outer() {\n  const values = [0];\n  async function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  void add(1);\n  void add(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-bound-push-A",
+  "source": "function outer() {\n  const values = [0];\n  const push = values.push.bind(values);\n  function read() { return values[1] ?? -1; }\n  push(1);\n  return read();\n}\n",
+  "findings": [
+   "3:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-class-field-initializer-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); return item; }\n  function read() { return values[2] ?? -1; }\n  class Box { value = add(1); }\n  new Box();\n  new Box();\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "5:ImplicitOutput: constructor: The constructor writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-class-field-initializer-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); return item; }\n  function read() { return values[0] ?? -1; }\n  class Box { value = add(1); }\n  new Box();\n  new Box();\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "5:ImplicitOutput: constructor: The constructor writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-copy-push-then-real-push-A",
+  "source": "function outer() {\n  const values = [0];\n  function copyAdd(item: number) {\n    const copy = values.slice();\n    copy.push(item);\n    return copy.length;\n  }\n  function add(item: number) { values.push(item); }\n  function read() { return values[1] ?? -1; }\n  copyAdd(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitInput: function copyAdd(): The function copyAdd() reads values, an implicit input.",
+   "8:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "9:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-default-parameter-call-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); return item; }\n  function read() { return values[2] ?? -1; }\n  function wrap(value = add(1)) { return value; }\n  wrap();\n  wrap();\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "5:ImplicitOutput: function wrap(): The function wrap() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-default-parameter-call-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); return item; }\n  function read() { return values[0] ?? -1; }\n  function wrap(value = add(1)) { return value; }\n  wrap();\n  wrap();\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "5:ImplicitOutput: function wrap(): The function wrap() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-direct-and-dot-call-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  add.call(undefined, 2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "fresh120-direct-and-dot-call-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  add.call(undefined, 2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "fresh120-direct-and-nested-arrow-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  [5].forEach((item) => add(item));\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "6:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-direct-and-nested-arrow-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  [5].forEach((item) => add(item));\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "6:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-direct-then-aliased-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  const later = add;\n  later(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-direct-then-aliased-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  const later = add;\n  later(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-direct-then-passed-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  [5].forEach(add);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-direct-then-passed-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  [5].forEach(add);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-direct-then-returned-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  return { add, read };\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-direct-then-returned-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  return { add, read };\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-eager-callback-transfer-A",
+  "source": "function each(values: number[], action: (value: number) => void) {\n  for (const value of values) action(value);\n}\nfunction change(items: number[]) {\n  each([1], (value) => { items.push(value); });\n}\n",
+  "findings": [
+   "2:UnknownEffect: function each(): The function each() calls unresolved callable, an unknown effect.",
+   "5:ImplicitOutput: function change(): The function change() mutates argument items, an implicit output.",
+   "5:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes items, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-eager-callback-transfer-C",
+  "source": "function each(values: number[], action: (value: number) => void) {\n  for (const value of values) action(value);\n}\nfunction change(items: number[]) {\n  const local: number[] = [];\n  each([1], (value) => { local.push(value); });\n  return local.length + items.length;\n}\n",
+  "findings": [
+   "2:UnknownEffect: function each(): The function each() calls unresolved callable, an unknown effect.",
+   "6:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes local, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-finally-push-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) {\n    try {\n      return item;\n    } finally {\n      values.push(item);\n    }\n  }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "7:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "10:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-finally-push-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) {\n    try {\n      return item;\n    } finally {\n      values.push(item);\n    }\n  }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "7:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-generator-pushes-A",
+  "source": "function outer() {\n  const values = [0];\n  function* gen() {\n    values.push(1);\n    yield 1;\n    values.push(2);\n    yield 2;\n  }\n  function read() { return values[4] ?? -1; }\n  for (const item of gen()) values.push(item * 10);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function gen(): The function gen() writes values, an implicit output.",
+   "9:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-generator-pushes-C",
+  "source": "function outer() {\n  const values = [0];\n  function* gen() {\n    values.push(1);\n    yield 1;\n    values.push(2);\n    yield 2;\n  }\n  function read() { return values[0] ?? -1; }\n  for (const item of gen()) values.push(item * 10);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function gen(): The function gen() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-guarded-double-push-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) {\n    if (item > 5) return;\n    values.push(item);\n    values.push(item);\n  }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  return read();\n}\n",
+  "findings": [
+   "5:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "8:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-guarded-double-push-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) {\n    if (item > 5) return;\n    values.push(item);\n    values.push(item);\n  }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  return read();\n}\n",
+  "findings": [
+   "5:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-helper-copywithin-A",
+  "source": "function outer() {\n  const values = [0, 7];\n  function change() {\n    values.copyWithin(0, 1);\n  }\n  function read() { return values[0] ?? -1; }\n  change();\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
+   "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-helper-delete-A",
+  "source": "function outer() {\n  const values = [0, 7];\n  function change() {\n    delete values[0];\n  }\n  function read() { return values[0] ?? -1; }\n  change();\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
+   "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-helper-fill-A",
+  "source": "function outer() {\n  const values = [0];\n  function change() {\n    values.fill(9);\n  }\n  function read() { return values[0] ?? -1; }\n  change();\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
+   "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-helper-in-for-condition-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { return values.push(item); }\n  function read() { return values[2] ?? -1; }\n  for (let index = 1; add(index) < 3; index++) {}\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-helper-in-for-condition-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { return values.push(item); }\n  function read() { return values[0] ?? -1; }\n  for (let index = 1; add(index) < 3; index++) {}\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-helper-in-for-incrementor-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  for (let index = 1; index <= 2; add(index), index++) {}\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-helper-in-for-incrementor-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  for (let index = 1; index <= 2; add(index), index++) {}\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-helper-in-while-condition-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { return values.push(item); }\n  function read() { return values[2] ?? -1; }\n  while (add(5) < 3) {}\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-helper-in-while-condition-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { return values.push(item); }\n  function read() { return values[0] ?? -1; }\n  while (add(5) < 3) {}\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-helper-inner-loop-then-push-A",
+  "source": "function outer() {\n  const values = [0];\n  function addAll() {\n    for (const item of [1, 2]) values.push(item);\n  }\n  function read() { return values[3] ?? -1; }\n  addAll();\n  values.push(9);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function addAll(): The function addAll() writes values, an implicit output.",
+   "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-helper-inner-loop-then-push-C",
+  "source": "function outer() {\n  const values = [0];\n  function addAll() {\n    for (const item of [1, 2]) values.push(item);\n  }\n  function read() { return values[0] ?? -1; }\n  addAll();\n  values.push(9);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function addAll(): The function addAll() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-helper-length-minus-one-A",
+  "source": "function outer() {\n  const values = [0, 7];\n  function change() {\n    values.length = values.length - 1;\n  }\n  function read() { return values[1] ?? -1; }\n  change();\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
+   "4:ImplicitInput: function change(): The function change() reads values, an implicit input.",
+   "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-helper-length-zero-A",
+  "source": "function outer() {\n  const values = [0, 7];\n  function change() {\n    values.length = 0;\n  }\n  function read() { return values[0] ?? -1; }\n  change();\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
+   "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-helper-object-assign-A",
+  "source": "function outer() {\n  const values = [0];\n  function change() {\n    Object.assign(values, [9]);\n  }\n  function read() { return values[0] ?? -1; }\n  change();\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
+   "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-helper-pop-A",
+  "source": "function outer() {\n  const values = [0, 7];\n  function change() {\n    values.pop();\n  }\n  function read() { return values[1] ?? -1; }\n  change();\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
+   "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-helper-reverse-A",
+  "source": "function outer() {\n  const values = [0, 7];\n  function change() {\n    values.reverse();\n  }\n  function read() { return values[0] ?? -1; }\n  change();\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
+   "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-helper-shift-A",
+  "source": "function outer() {\n  const values = [0, 7];\n  function change() {\n    values.shift();\n  }\n  function read() { return values[0] ?? -1; }\n  change();\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
+   "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-helper-short-circuit-A",
+  "source": "function outer(flag: boolean) {\n  const values = [0];\n  function add(on: boolean) {\n    on && values.push(1);\n    values.push(2);\n  }\n  function read() { return values[2] ?? -1; }\n  add(flag);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "7:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-helper-short-circuit-C",
+  "source": "function outer(flag: boolean) {\n  const values = [0];\n  function add(on: boolean) {\n    on && values.push(1);\n    values.push(2);\n  }\n  function read() { return values[0] ?? -1; }\n  add(flag);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-helper-sort-A",
+  "source": "function outer() {\n  const values = [7, 0];\n  function change() {\n    values.sort();\n  }\n  function read() { return values[0] ?? -1; }\n  change();\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
+   "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-helper-splice-A",
+  "source": "function outer() {\n  const values = [0, 7];\n  function change() {\n    values.splice(0, 1);\n  }\n  function read() { return values[0] ?? -1; }\n  change();\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
+   "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-helper-unshift-A",
+  "source": "function outer() {\n  const values = [0];\n  function change() {\n    values.unshift(9);\n  }\n  function read() { return values[0] ?? -1; }\n  change();\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
+   "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-index-gap-then-helper-push-A",
+  "source": "function outer() {\n  const values: number[] = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[4] ?? -1; }\n  values[3] = 1;\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-index-gap-then-helper-push-direct-push-A",
+  "source": "function outer() {\n  const values: number[] = [0];\n  function read() { return values[4] ?? -1; }\n  values[3] = 1;\n  values.push(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-index-gap-then-helper-push-via-helper-A",
+  "source": "function outer() {\n  const values: number[] = [0];\n  function add(item: number) { values.push(item); }\n  function prep() {\n    values[3] = 1;\n  }\n  function read() { return values[4] ?? -1; }\n  prep();\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "5:ImplicitOutput: function prep(): The function prep() writes values, an implicit output.",
+   "7:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-insertion-after-append-index-A",
+  "source": "function change(items: number[]) {\n  const values: number[][] = [[]];\n  values[values.length] = [];\n  values.push(items);\n  values[2].push(1);\n}\n",
+  "findings": [
+   "5:ImplicitOutput: function change(): The function change() mutates caller-owned value values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-insertion-after-append-index-C",
+  "source": "function change(items: number[]) {\n  const values: number[][] = [[]];\n  values[values.length] = [];\n  values.push(items);\n  values[0].push(1);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "fresh120-insertion-after-index-gap-A",
+  "source": "function change(items: number[]) {\n  const values: number[][] = [[]];\n  values[2] = [];\n  values.push(items);\n  values[3].push(1);\n}\n",
+  "findings": [
+   "5:ImplicitOutput: function change(): The function change() mutates caller-owned value values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-insertion-after-index-gap-C",
+  "source": "function change(items: number[]) {\n  const values: number[][] = [[]];\n  values[2] = [];\n  values.push(items);\n  values[0].push(1);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "fresh120-insertion-after-length-grow-A",
+  "source": "function change(items: number[]) {\n  const values: number[][] = [[]];\n  values.length = 3;\n  values.push(items);\n  values[3].push(1);\n}\n",
+  "findings": [
+   "5:ImplicitOutput: function change(): The function change() mutates caller-owned value values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-insertion-after-length-grow-C",
+  "source": "function change(items: number[]) {\n  const values: number[][] = [[]];\n  values.length = 3;\n  values.push(items);\n  values[0].push(1);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "fresh120-insertion-after-length-minus-one-A",
+  "source": "function change(items: number[]) {\n  const values: number[][] = [[], []];\n  values.length = values.length - 1;\n  values.push(items);\n  values[1].push(1);\n}\n",
+  "findings": [
+   "5:ImplicitOutput: function change(): The function change() mutates caller-owned value values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-insertion-after-pop-A",
+  "source": "function change(items: number[]) {\n  const values: number[][] = [[], []];\n  values.pop();\n  values.push(items);\n  values[1].push(1);\n}\n",
+  "findings": [
+   "5:ImplicitOutput: function change(): The function change() mutates caller-owned value values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-insertion-after-pop-C",
+  "source": "function change(items: number[]) {\n  const values: number[][] = [[], []];\n  values.pop();\n  values.push(items);\n  values[0].push(1);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "fresh120-insertion-after-splice-insert-A",
+  "source": "function change(items: number[]) {\n  const values: number[][] = [[]];\n  values.splice(0, 0, []);\n  values.push(items);\n  values[2].push(1);\n}\n",
+  "findings": [
+   "5:ImplicitOutput: function change(): The function change() mutates caller-owned value values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-length-grow-then-helper-push-A",
+  "source": "function outer() {\n  const values: number[] = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[4] ?? -1; }\n  values.length = 4;\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-length-grow-then-helper-push-direct-push-A",
+  "source": "function outer() {\n  const values: number[] = [0];\n  function read() { return values[4] ?? -1; }\n  values.length = 4;\n  values.push(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-length-grow-then-helper-push-via-helper-A",
+  "source": "function outer() {\n  const values: number[] = [0];\n  function add(item: number) { values.push(item); }\n  function prep() {\n    values.length = 4;\n  }\n  function read() { return values[4] ?? -1; }\n  prep();\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "5:ImplicitOutput: function prep(): The function prep() writes values, an implicit output.",
+   "7:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-nested-grid-helper-A",
+  "source": "function outer() {\n  const grid = [[0]];\n  function add(item: number) { grid[0].push(item); }\n  function read() { return grid[0][2] ?? -1; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes grid, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads grid, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-nested-grid-helper-C",
+  "source": "function outer() {\n  const grid = [[0]];\n  function add(item: number) { grid[0].push(item); }\n  function read() { return grid.length; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes grid, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-object-method-twice-A",
+  "source": "function outer() {\n  const values = [0];\n  const api = { add(item: number) { values.push(item); } };\n  function read() { return values[2] ?? -1; }\n  api.add(1);\n  api.add(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: method add(): The method add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-object-method-twice-C",
+  "source": "function outer() {\n  const values = [0];\n  const api = { add(item: number) { values.push(item); } };\n  function read() { return values[0] ?? -1; }\n  api.add(1);\n  api.add(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: method add(): The method add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-owner-copywithin-A",
+  "source": "function outer() {\n  const values = [0, 7];\n  function read() { return values[0] ?? -1; }\n  values.copyWithin(0, 1);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-owner-delete-A",
+  "source": "function outer() {\n  const values = [0, 7];\n  function read() { return values[0] ?? -1; }\n  delete values[0];\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-owner-fill-A",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[0] ?? -1; }\n  values.fill(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-owner-object-assign-A",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[0] ?? -1; }\n  Object.assign(values, [9]);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-owner-pop-A",
+  "source": "function outer() {\n  const values = [0, 7];\n  function read() { return values[1] ?? -1; }\n  values.pop();\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-owner-reverse-A",
+  "source": "function outer() {\n  const values = [0, 7];\n  function read() { return values[0] ?? -1; }\n  values.reverse();\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-owner-shift-A",
+  "source": "function outer() {\n  const values = [0, 7];\n  function read() { return values[0] ?? -1; }\n  values.shift();\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-owner-splice-A",
+  "source": "function outer() {\n  const values = [0, 7];\n  function read() { return values[0] ?? -1; }\n  values.splice(0, 1);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-owner-try-finally-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  try {\n    add(1);\n  } finally {\n    add(2);\n  }\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-owner-try-finally-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  try {\n    add(1);\n  } finally {\n    add(2);\n  }\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-param-alias-A",
+  "source": "function change(items: number[]) {\n  const alias = items;\n  alias.push(1);\n  return alias;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function change(): The function change() mutates caller-owned value alias, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-param-double-then-direct-A",
+  "source": "function addTwo(target: number[], item: number) {\n  target.push(item);\n  target.push(item);\n}\nfunction outer() {\n  const values = [0];\n  function read() { return values[3] ?? -1; }\n  addTwo(values, 1);\n  values.push(9);\n  return read();\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function addTwo(): The function addTwo() mutates argument target, an implicit output.",
+   "7:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-param-double-then-direct-C",
+  "source": "function addTwo(target: number[], item: number) {\n  target.push(item);\n  target.push(item);\n}\nfunction outer() {\n  const values = [0];\n  function read() { return values[0] ?? -1; }\n  addTwo(values, 1);\n  values.push(9);\n  return read();\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function addTwo(): The function addTwo() mutates argument target, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-param-helper-twice-A",
+  "source": "function addTo(target: number[], item: number) {\n  target.push(item);\n}\nfunction outer() {\n  const values = [0];\n  function read() { return values[2] ?? -1; }\n  addTo(values, 1);\n  addTo(values, 2);\n  return read();\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function addTo(): The function addTo() mutates argument target, an implicit output.",
+   "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-param-helper-twice-C",
+  "source": "function addTo(target: number[], item: number) {\n  target.push(item);\n}\nfunction outer() {\n  const values = [0];\n  function read() { return values[0] ?? -1; }\n  addTo(values, 1);\n  addTo(values, 2);\n  return read();\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function addTo(): The function addTo() mutates argument target, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-param-slice-copy-C",
+  "source": "function change(items: number[]) {\n  const copy = items.slice();\n  copy.push(1);\n  return copy;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "fresh120-param-spread-copy-A",
+  "source": "function change(items: number[]) {\n  const copy = [...items];\n  items.push(1);\n  return copy;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function change(): The function change() mutates argument items, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-param-spread-copy-C",
+  "source": "function change(items: number[]) {\n  const copy = [...items];\n  copy.push(1);\n  return copy;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "fresh120-pop-then-helper-push-A",
+  "source": "function outer() {\n  const values: number[] = [0, 7];\n  function add(item: number) { values.push(item); }\n  function read() { return values[1] ?? -1; }\n  values.pop();\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-pop-then-helper-push-direct-push-A",
+  "source": "function outer() {\n  const values: number[] = [0, 7];\n  function read() { return values[1] ?? -1; }\n  values.pop();\n  values.push(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-pop-then-helper-push-via-helper-A",
+  "source": "function outer() {\n  const values: number[] = [0, 7];\n  function add(item: number) { values.push(item); }\n  function prep() {\n    values.pop();\n  }\n  function read() { return values[1] ?? -1; }\n  prep();\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "5:ImplicitOutput: function prep(): The function prep() writes values, an implicit output.",
+   "7:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-read-before-and-after-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  const first = read();\n  add(1);\n  add(2);\n  return [first, read()];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-read-before-and-after-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  const first = read();\n  add(1);\n  add(2);\n  return [first, read()];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-rebound-alias-then-push-A",
+  "source": "function outer() {\n  const values = [0];\n  const other = [0];\n  let arr = values;\n  arr = other;\n  arr.push(1);\n  function read() { return values[1] ?? -1; }\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "7:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-short-circuit-and-A",
+  "source": "function outer(flag: boolean) {\n  const values = [0];\n  function read() { return values[2] ?? -1; }\n  flag && values.push(1);\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-short-circuit-and-C",
+  "source": "function outer(flag: boolean) {\n  const values = [0];\n  function read() { return values[0] ?? -1; }\n  flag && values.push(1);\n  values.push(2);\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "fresh120-short-circuit-or-A",
+  "source": "function outer(flag: boolean) {\n  const values = [0];\n  function read() { return values[2] ?? -1; }\n  flag || values.push(1);\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-short-circuit-or-C",
+  "source": "function outer(flag: boolean) {\n  const values = [0];\n  function read() { return values[0] ?? -1; }\n  flag || values.push(1);\n  values.push(2);\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "fresh120-short-circuit-ternary-A",
+  "source": "function outer(flag: boolean) {\n  const values = [0];\n  function read() { return values[2] ?? -1; }\n  flag ? values.push(1) : 0;\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-short-circuit-ternary-C",
+  "source": "function outer(flag: boolean) {\n  const values = [0];\n  function read() { return values[0] ?? -1; }\n  flag ? values.push(1) : 0;\n  values.push(2);\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "fresh120-slice-copy-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) {\n    const copy = values.slice();\n    copy.push(item);\n    values.push(item);\n    return copy.length;\n  }\n  function read() { return values[1] ?? -1; }\n  add(1);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitInput: function add(): The function add() reads values, an implicit input.",
+   "6:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "9:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-slice-copy-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) {\n    const copy = values.slice();\n    copy.push(item);\n    return copy.length;\n  }\n  function read() { return values[1] ?? -1; }\n  add(1);\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "fresh120-splice-insert-then-helper-push-A",
+  "source": "function outer() {\n  const values: number[] = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[3] ?? -1; }\n  values.splice(0, 0, 5, 6);\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-splice-insert-then-helper-push-direct-push-A",
+  "source": "function outer() {\n  const values: number[] = [0];\n  function read() { return values[3] ?? -1; }\n  values.splice(0, 0, 5, 6);\n  values.push(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-splice-insert-then-helper-push-via-helper-A",
+  "source": "function outer() {\n  const values: number[] = [0];\n  function add(item: number) { values.push(item); }\n  function prep() {\n    values.splice(0, 0, 5, 6);\n  }\n  function read() { return values[3] ?? -1; }\n  prep();\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "5:ImplicitOutput: function prep(): The function prep() writes values, an implicit output.",
+   "7:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-spread-copy-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) {\n    const copy = [...values];\n    copy.push(item);\n    values.push(item);\n    return copy.length;\n  }\n  function read() { return values[1] ?? -1; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitInput: function add(): The function add() reads values, an implicit input.",
+   "6:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "9:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-spread-copy-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) {\n    const copy = [...values];\n    copy.push(item);\n    return copy.length;\n  }\n  function read() { return values[1] ?? -1; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "fresh120-state-items-helper-A",
+  "source": "function outer() {\n  const state = { items: [0] };\n  function add(item: number) { state.items.push(item); }\n  function read() { return state.items[2] ?? -1; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes state, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads state, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh120-state-items-helper-C",
+  "source": "function outer() {\n  const state = { items: [0] };\n  function add(item: number) { state.items.push(item); }\n  function read() { return state.items[0] ?? -1; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes state, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh120-state-items-param-A",
+  "source": "function change(state: { items: number[] }) {\n  state.items.push(1);\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function change(): The function change() mutates argument state, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-alias-push",
+  "source": "function outer() {\n  const values = [0];\n  const other = values;\n  function read() { return values[1] ?? -1; }\n  other.push(1);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh42-concat-no-mutation",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[0]; }\n  const more = values.concat([1]);\n  return read() + more.length;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "fresh42-conditional-helper-then-push-0",
+  "source": "function outer(flag: boolean) {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  if (flag) add(1);\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-conditional-helper-then-push-2",
+  "source": "function outer(flag: boolean) {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  if (flag) add(1);\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh42-direct-then-helper-insertion-1",
+  "source": "function append(values: number[][], item: number[]) { values.push(item); }\nfunction change(items: number[]) {\n  const values: number[][] = [[]];\n  values.push([]);\n  append(values, items);\n  values[1].push(1);\n}\n",
+  "findings": [
+   "1:ImplicitOutput: function append(): The function append() mutates argument values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-direct-then-helper-insertion-2",
+  "source": "function append(values: number[][], item: number[]) { values.push(item); }\nfunction change(items: number[]) {\n  const values: number[][] = [[]];\n  values.push([]);\n  append(values, items);\n  values[2].push(1);\n}\n",
+  "findings": [
+   "1:ImplicitOutput: function append(): The function append() mutates argument values, an implicit output.",
+   "6:ImplicitOutput: function change(): The function change() mutates caller-owned value values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-direct-unshift",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[0]; }\n  values.unshift(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh42-escaped-alias-copier",
+  "source": "function outer() {\n  const values = [0];\n  const alias = values;\n  function add(item: number) { return [...alias, item]; }\n  function read() { return values[1] ?? -1; }\n  return { add, read };\n}\n",
+  "findings": []
+ },
+ {
+  "name": "fresh42-escaped-alias-pusher",
+  "source": "function outer() {\n  const values = [0];\n  const alias = values;\n  function add(item: number) { alias.push(item); }\n  function read() { return values[1] ?? -1; }\n  return { add, read };\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes alias, an implicit output.",
+   "5:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh42-escaped-pusher-after-precise-push-0",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  values.push(1);\n  return { add, read };\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-escaped-pusher-after-precise-push-2",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  values.push(1);\n  return { add, read };\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh42-escaped-unshift-after-precise-push",
+  "source": "function outer() {\n  const values = [0];\n  function shift(item: number) { values.unshift(item); }\n  function read() { return values[0]; }\n  values.push(1);\n  return { shift, read };\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function shift(): The function shift() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh42-foreach-callback-append-0",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[0]; }\n  [1, 2].forEach((item) => values.push(item));\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-foreach-callback-append-2",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[2]; }\n  [1, 2].forEach((item) => values.push(item));\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "4:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-foreach-insertion-0",
+  "source": "function change(items: number[]) {\n  const values: number[][] = [[]];\n  [0, 1].forEach(() => values.push(items));\n  values[0].push(1);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-foreach-insertion-2",
+  "source": "function change(items: number[]) {\n  const values: number[][] = [[]];\n  [0, 1].forEach(() => values.push(items));\n  values[2].push(1);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes values, an implicit output.",
+   "3:ImplicitInput: arrow function anonymous(): The arrow function anonymous() reads items, an implicit input.",
+   "4:ImplicitOutput: function change(): The function change() mutates caller-owned value values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-helper-clear-then-push",
+  "source": "function outer() {\n  const values = [0, 0];\n  function clear() { values.length = 0; }\n  function read() { return values[0]; }\n  clear();\n  values.push(5);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function clear(): The function clear() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh42-helper-double-push-0",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) {\n    values.push(item);\n    values.push(item);\n  }\n  function read() { return values[0]; }\n  add(1);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-helper-double-push-2",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) {\n    values.push(item);\n    values.push(item);\n  }\n  function read() { return values[2]; }\n  add(1);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "7:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh42-helper-internal-loop-0",
+  "source": "function outer() {\n  const values = [0];\n  function addAll(items: number[]) {\n    for (const item of items) values.push(item);\n  }\n  function read() { return values[0]; }\n  addAll([1, 2]);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function addAll(): The function addAll() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-helper-internal-loop-2",
+  "source": "function outer() {\n  const values = [0];\n  function addAll(items: number[]) {\n    for (const item of items) values.push(item);\n  }\n  function read() { return values[2]; }\n  addAll([1, 2]);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function addAll(): The function addAll() writes values, an implicit output.",
+   "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh42-iife-then-direct-push-0",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[0]; }\n  (() => { values.push(1); })();\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-iife-then-direct-push-2",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[2]; }\n  (() => { values.push(1); })();\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "4:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-index-write-at-length",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[1] ?? -1; }\n  values[values.length] = 5;\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh42-length-truncate-0",
+  "source": "function outer() {\n  const values = [0, 7];\n  function read() { return values[0] ?? -1; }\n  values.length = 1;\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "fresh42-length-truncate-1",
+  "source": "function outer() {\n  const values = [0, 7];\n  function read() { return values[1] ?? -1; }\n  values.length = 1;\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh42-looped-helper-insertion-0",
+  "source": "function append(values: number[][], item: number[]) { values.push(item); }\nfunction change(items: number[]) {\n  const values: number[][] = [[]];\n  for (let index = 0; index < 2; index += 1) append(values, []);\n  append(values, items);\n  values[0].push(1);\n}\n",
+  "findings": [
+   "1:ImplicitOutput: function append(): The function append() mutates argument values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-looped-helper-insertion-3",
+  "source": "function append(values: number[][], item: number[]) { values.push(item); }\nfunction change(items: number[]) {\n  const values: number[][] = [[]];\n  for (let index = 0; index < 2; index += 1) append(values, []);\n  append(values, items);\n  values[3].push(1);\n}\n",
+  "findings": [
+   "1:ImplicitOutput: function append(): The function append() mutates argument values, an implicit output.",
+   "6:ImplicitOutput: function change(): The function change() mutates caller-owned value values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-nested-helper-chain-0",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function addTwo() {\n    add(1);\n    add(2);\n  }\n  function read() { return values[0]; }\n  addTwo();\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "5:ImplicitOutput: function addTwo(): The function addTwo() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-nested-helper-chain-2",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function addTwo() {\n    add(1);\n    add(2);\n  }\n  function read() { return values[2]; }\n  addTwo();\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "5:ImplicitOutput: function addTwo(): The function addTwo() writes values, an implicit output.",
+   "8:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh42-nested-multi-push-0",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[0]; }\n  values.push(values.push(1), values.push(2));\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "fresh42-nested-multi-push-4",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[4]; }\n  values.push(values.push(1), values.push(2));\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh42-param-helper-double-insertion-1",
+  "source": "function append2(values: number[][], item: number[]) {\n  values.push([]);\n  values.push(item);\n}\nfunction change(items: number[]) {\n  const values: number[][] = [[]];\n  append2(values, items);\n  values[1].push(1);\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function append2(): The function append2() mutates argument values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-param-helper-double-insertion-2",
+  "source": "function append2(values: number[][], item: number[]) {\n  values.push([]);\n  values.push(item);\n}\nfunction change(items: number[]) {\n  const values: number[][] = [[]];\n  append2(values, items);\n  values[2].push(1);\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function append2(): The function append2() mutates argument values, an implicit output.",
+   "8:ImplicitOutput: function change(): The function change() mutates caller-owned value values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-recursive-helper-append-0",
+  "source": "function outer() {\n  const values = [0];\n  function add(count: number) {\n    if (count === 0) return;\n    values.push(count);\n    add(count - 1);\n  }\n  function read() { return values[0]; }\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "5:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-recursive-helper-append-2",
+  "source": "function outer() {\n  const values = [0];\n  function add(count: number) {\n    if (count === 0) return;\n    values.push(count);\n    add(count - 1);\n  }\n  function read() { return values[2]; }\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "5:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "8:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh42-returned-alias-push-0",
+  "source": "function same(list: number[]) { return list; }\nfunction outer() {\n  const values = [0];\n  function read() { return values[0] ?? -1; }\n  same(values).push(1);\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "fresh42-returned-alias-push-1",
+  "source": "function same(list: number[]) { return list; }\nfunction outer() {\n  const values = [0];\n  function read() { return values[1] ?? -1; }\n  same(values).push(1);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "fresh42-splice-insertion",
+  "source": "function change(items: number[]) {\n  const values: number[][] = [[]];\n  values.splice(0, 0, items);\n  values[0].push(1);\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function change(): The function change() mutates caller-owned value values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-spread-copy-push",
+  "source": "function outer() {\n  const values = [0];\n  const other = [...values];\n  function read() { return values[1] ?? -1; }\n  other.push(1);\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "fresh42-twice-callback-append-0",
+  "source": "function twice(action: () => void) {\n  action();\n  action();\n}\nfunction outer() {\n  const values = [0];\n  function read() { return values[0]; }\n  twice(() => { values.push(1); });\n  return read();\n}\n",
+  "findings": [
+   "2:UnknownEffect: function twice(): The function twice() calls unresolved callable, an unknown effect.",
+   "8:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "fresh42-twice-callback-append-2",
+  "source": "function twice(action: () => void) {\n  action();\n  action();\n}\nfunction outer() {\n  const values = [0];\n  function read() { return values[2]; }\n  twice(() => { values.push(1); });\n  return read();\n}\n",
+  "findings": [
+   "2:UnknownEffect: function twice(): The function twice() calls unresolved callable, an unknown effect.",
+   "7:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "8:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "frozen34-alias-push-appended-index",
+  "source": "function outer() {\n  const values = [0];\n  const alias = values;\n  function read() { return values[1]; }\n  alias.push(1);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "frozen34-alias-push-disjoint-future",
+  "source": "function outer() {\n  const values = [0];\n  const alias = values;\n  function read() { return values[2] ?? 0; }\n  alias.push(1);\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "frozen34-alias-push-length",
+  "source": "function outer() {\n  const values = [0];\n  const alias = values;\n  function read() { return values.length; }\n  alias.push(1);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "frozen34-alias-push-stable-index",
+  "source": "function outer() {\n  const values = [0];\n  const alias = values;\n  function read() { return values[0]; }\n  alias.push(1);\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "frozen34-bracket-push-append",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[1]; }\n  values[\"push\"](1);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "frozen34-direct-index-write-action",
+  "source": "function outer() {\n  const values = [0];\n  const alias = values;\n  function read() { return values[0]; }\n  alias[0] = 1;\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "frozen34-dynamic-read-conservative",
+  "source": "function outer(index: number) {\n  const values = [0];\n  function read() { return values[index]; }\n  values.push(1);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "frozen34-helper-insertion-0",
+  "source": "function append(values: number[][], item: number[]) { values.push(item); }\nfunction change(items: number[]) {\n  const values: number[][] = [[]];\n  append(values, items);\n  values[0].push(1);\n}\n",
+  "findings": [
+   "1:ImplicitOutput: function append(): The function append() mutates argument values, an implicit output."
+  ]
+ },
+ {
+  "name": "frozen34-helper-insertion-1",
+  "source": "function append(values: number[][], item: number[]) { values.push(item); }\nfunction change(items: number[]) {\n  const values: number[][] = [[]];\n  append(values, items);\n  values[1].push(1);\n}\n",
+  "findings": [
+   "1:ImplicitOutput: function append(): The function append() mutates argument values, an implicit output.",
+   "5:ImplicitOutput: function change(): The function change() mutates caller-owned value values, an implicit output."
+  ]
+ },
+ {
+  "name": "frozen34-helper-loop-0",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0]; }\n  for (const item of [1, 2]) add(item);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "frozen34-helper-loop-2",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2]; }\n  for (const item of [1, 2]) add(item);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "frozen34-helper-repeat-0",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0]; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "frozen34-helper-repeat-2",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2]; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "frozen34-length-reset-before-append",
+  "source": "function outer() {\n  const values = [0];\n  const alias = values;\n  function read() { return values[0]; }\n  alias.length = 0;\n  alias.push(1);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "frozen34-literal-false-loop-quiet",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[1] ?? 0; }\n  for (; false;) {\n    values.push(1);\n  }\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "frozen34-literal-prior-push-false",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[2] ?? 0; }\n  if (false) values.push(1);\n  values.push(2);\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "frozen34-literal-prior-push-true",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[2] ?? 0; }\n  if (true) values.push(1);\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "frozen34-loop-alias-second-append",
+  "source": "function outer() {\n  const values = [0];\n  const alias = values;\n  function read() { return values[2]; }\n  for (const item of [1, 2]) {\n    alias.push(item);\n  }\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "frozen34-loop-counted-second-append",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[2]; }\n  for (let index = 1; index <= 2; index++) {\n    values.push(index);\n  }\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "frozen34-loop-do-second-append",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[2]; }\n  let index = 1;\n  do {\n    values.push(index++);\n  } while (index <= 2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "frozen34-loop-existing-index-quiet",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[0]; }\n  for (const item of [1, 2]) {\n    values.push(item);\n  }\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "frozen34-loop-for-of-second-append",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[2]; }\n  for (const item of [1, 2]) {\n    values.push(item);\n  }\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "frozen34-loop-nested-array-second-append",
+  "source": "function outer() {\n  const box = { values: [0] };\n  function read() { return box.values[2]; }\n  for (const item of [1, 2]) {\n    box.values.push(item);\n  }\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads box, an implicit input."
+  ]
+ },
+ {
+  "name": "frozen34-loop-pushed-insertion-0",
+  "source": "function change(items: number[]) {\n  const values: number[][] = [[]];\n  for (const item of [0, 1]) values.push(items);\n  values[0].push(1);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "frozen34-loop-pushed-insertion-2",
+  "source": "function change(items: number[]) {\n  const values: number[][] = [[]];\n  for (const item of [0, 1]) values.push(items);\n  values[2].push(1);\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function change(): The function change() mutates caller-owned value values, an implicit output."
+  ]
+ },
+ {
+  "name": "frozen34-loop-while-second-append",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[2]; }\n  let index = 1;\n  while (index <= 2) {\n    values.push(index++);\n  }\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "frozen34-multi-argument-append",
+  "source": "function outer() {\n  const values = [0];\n  const alias = values;\n  function stable() { return values[0]; }\n  function read() { return values[2]; }\n  alias.push(1, 2);\n  return [stable(), read()];\n}\n",
+  "findings": [
+   "5:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "frozen34-nested-push-0",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[0]; }\n  values.push(values.push(1));\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "frozen34-nested-push-2",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[2]; }\n  values.push(values.push(1));\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "frozen34-no-argument-push-quiet",
+  "source": "function outer() {\n  const values = [0];\n  const alias = values;\n  function read() { return values.length; }\n  alias.push();\n  return read();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "frozen34-pushed-reachable-caller-array",
+  "source": "function change(items: number[]) {\n  const values: number[][] = [[]];\n  values.push(items);\n  values[1].push(1);\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function change(): The function change() mutates caller-owned value values, an implicit output."
+  ]
+ },
+ {
+  "name": "frozen34-pushed-reachable-private-sibling",
+  "source": "function change(items: number[]) {\n  const values: number[][] = [[]];\n  values.push(items);\n  values[0].push(1);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "frozen34-sequential-pushes-second-append",
+  "source": "function outer() {\n  const values = [0];\n  function read() { return values[2]; }\n  values.push(1);\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "frozen34-spread-append-stable-and-changed",
+  "source": "function outer(items: number[]) {\n  const values = [0];\n  function stable() { return values[0]; }\n  function read() { return values[2]; }\n  values.push(...items);\n  return [stable(), read()];\n}\n",
+  "findings": [
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-b-computed-const-key-A",
+  "source": "function outer() {\n  const state: Record<string, number[]> = { items: [0] };\n  const key = 'items';\n  function add(item: number) { state[key].push(item); }\n  function read() { return state.items[2] ?? -1; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes state, an implicit output.",
+   "5:ImplicitInput: function read(): The function read() reads state, an implicit input."
+  ]
+ },
+ {
+  "name": "h-b-computed-param-key-A",
+  "source": "function outer(key: string) {\n  const state: Record<string, number[]> = { items: [0], other: [0] };\n  function add(item: number) { state[key].push(item); }\n  function read() { return state.items[1] ?? -1; }\n  add(1);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes state, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads state, an implicit input."
+  ]
+ },
+ {
+  "name": "h-b-member-alias-A",
+  "source": "function outer() {\n  const state = { items: [0] };\n  const items = state.items;\n  function add(item: number) { items.push(item); }\n  function read() { return state.items[2] ?? -1; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes items, an implicit output.",
+   "5:ImplicitInput: function read(): The function read() reads state, an implicit input."
+  ]
+ },
+ {
+  "name": "h-b-member-alias-C",
+  "source": "function outer() {\n  const state = { items: [0] };\n  const items = state.items;\n  function add(item: number) { items.push(item); }\n  function read() { return state.items[0] ?? -1; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes items, an implicit output."
+  ]
+ },
+ {
+  "name": "h-b-nested-destructure-A",
+  "source": "function outer() {\n  const state = { inner: { items: [0] } };\n  const { inner: { items } } = state;\n  function add(item: number) { items.push(item); }\n  function read() { return state.inner.items[2] ?? -1; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes items, an implicit output.",
+   "5:ImplicitInput: function read(): The function read() reads state, an implicit input."
+  ]
+ },
+ {
+  "name": "h-b-nested-destructure-C",
+  "source": "function outer() {\n  const state = { inner: { items: [0] } };\n  const { inner: { items } } = state;\n  function add(item: number) { items.push(item); }\n  function read() { return state.inner.items[0] ?? -1; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes items, an implicit output."
+  ]
+ },
+ {
+  "name": "h-b-optional-chain-A",
+  "source": "function outer() {\n  const state: { items: number[] } | undefined = { items: [0] };\n  function add(item: number) { state?.items.push(item); }\n  function read() { return state?.items[2] ?? -1; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes state, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads state, an implicit input."
+  ]
+ },
+ {
+  "name": "h-b-optional-chain-C",
+  "source": "function outer() {\n  const state: { items: number[] } | undefined = { items: [0] };\n  function add(item: number) { state?.items.push(item); }\n  function read() { return state?.items[0] ?? -1; }\n  add(1);\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes state, an implicit output."
+  ]
+ },
+ {
+  "name": "h-b-row-alias-helper-direct-A",
+  "source": "function outer() {\n  const grid = [[0], [0]];\n  const row = grid[1];\n  function add(item: number) { row.push(item); }\n  function read() { return grid[1][2] ?? -1; }\n  add(1);\n  grid[1].push(2);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes row, an implicit output.",
+   "5:ImplicitInput: function read(): The function read() reads grid, an implicit input."
+  ]
+ },
+ {
+  "name": "h-b-row-alias-helper-direct-C",
+  "source": "function outer() {\n  const grid = [[0], [0]];\n  const row = grid[1];\n  function add(item: number) { row.push(item); }\n  function read() { return grid[1][0] ?? -1; }\n  add(1);\n  grid[1].push(2);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes row, an implicit output."
+  ]
+ },
+ {
+  "name": "h-b-row-helper-alias-direct-A",
+  "source": "function outer() {\n  const grid = [[0], [0]];\n  const row = grid[1];\n  function add(item: number) { grid[1].push(item); }\n  function read() { return row[2] ?? -1; }\n  add(1);\n  row.push(2);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes grid, an implicit output.",
+   "5:ImplicitInput: function read(): The function read() reads row, an implicit input."
+  ]
+ },
+ {
+  "name": "h-b-row-helper-alias-direct-C",
+  "source": "function outer() {\n  const grid = [[0], [0]];\n  const row = grid[1];\n  function add(item: number) { grid[1].push(item); }\n  function read() { return row[0] ?? -1; }\n  add(1);\n  row.push(2);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function add(): The function add() writes grid, an implicit output."
+  ]
+ },
+ {
+  "name": "h-c-computed-method-name-A",
+  "source": "const log: number[] = [];\nconst api = { ['add'](item: number) { log.push(item); } };\nfunction outer() {\n  api.add(1);\n  return 0;\n}\n",
+  "findings": [
+   "2:ImplicitOutput: method ['add'](): The method ['add']() writes log, an implicit output.",
+   "4:ImplicitOutput: function outer(): The function outer() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "h-c-destructured-method-A",
+  "source": "function outer() {\n  const values = [0];\n  const api = { add(item: number) { values.push(item); } };\n  function read() { return values[2] ?? -1; }\n  api.add(1);\n  const { add } = api;\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: method add(): The method add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-c-destructured-method-C",
+  "source": "function outer() {\n  const values = [0];\n  const api = { add(item: number) { values.push(item); } };\n  function read() { return values[0] ?? -1; }\n  api.add(1);\n  const { add } = api;\n  add(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: method add(): The method add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "h-c-escaped-object-A",
+  "source": "function outer() {\n  const values = [0];\n  const api = { add(item: number) { values.push(item); } };\n  function read() { return values[2] ?? -1; }\n  api.add(1);\n  return { api, read };\n}\n",
+  "findings": [
+   "3:ImplicitOutput: method add(): The method add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-c-escaped-object-C",
+  "source": "function outer() {\n  const values = [0];\n  const api = { add(item: number) { values.push(item); } };\n  function read() { return values[0] ?? -1; }\n  api.add(1);\n  return { api, read };\n}\n",
+  "findings": [
+   "3:ImplicitOutput: method add(): The method add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "h-c-getter-date-A",
+  "source": "const clock = { get now(): number { return Date.now(); } };\nfunction stamp() {\n  return clock.now;\n}\n",
+  "findings": [
+   "1:ImplicitInput: accessor now(): The accessor now() calls Date.now(), an implicit input.",
+   "3:ImplicitInput: function stamp(): The function stamp() calls Date.now(), an implicit input."
+  ]
+ },
+ {
+  "name": "h-c-getter-date-C",
+  "source": "const clock = { get now(): number { return 5; } };\nfunction stamp() {\n  return clock.now;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "h-c-helper-patch-A",
+  "source": "let hits = 0;\nfunction patch(target: { add(item: number): number }) {\n  target.add = (item: number): number => { hits += 1; return item; };\n}\nfunction outer() {\n  const api = { add(item: number): number { return item + 1; } };\n  patch(api);\n  return api.add(1);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function patch(): The function patch() mutates argument target, an implicit output.",
+   "3:ImplicitInput: arrow function anonymous(): The arrow function anonymous() reads hits, an implicit input.",
+   "3:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes hits, an implicit output.",
+   "8:UnknownEffect: function outer(): The function outer() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-c-object-assign-patch-A",
+  "source": "let hits = 0;\nfunction outer() {\n  const api = { add(item: number): number { return item + 1; } };\n  Object.assign(api, { add: (item: number): number => { hits += 1; return item; } });\n  return api.add(1);\n}\n",
+  "findings": [
+   "4:ImplicitInput: arrow function anonymous(): The arrow function anonymous() reads hits, an implicit input.",
+   "4:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes hits, an implicit output.",
+   "5:UnknownEffect: function outer(): The function outer() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-c-setter-log-A",
+  "source": "const log: number[] = [];\nfunction record() {\n  const sink = { set value(item: number) { log.push(item); } };\n  sink.value = 1;\n  return 0;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: accessor value(): The accessor value() writes log, an implicit output.",
+   "4:ImplicitOutput: function record(): The function record() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "h-c-setter-log-C",
+  "source": "function record() {\n  const kept: number[] = [];\n  const sink = { set value(item: number) { kept.push(item); } };\n  sink.value = 1;\n  return kept.length;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: accessor value(): The accessor value() writes kept, an implicit output."
+  ]
+ },
+ {
+  "name": "h-c-shared-this-method-A",
+  "source": "const api = { items: [0], add(item: number) { this.items.push(item); } };\nfunction outer() {\n  api.add(1);\n  return api.items.length;\n}\n",
+  "findings": [
+   "1:UnknownEffect: method add(): The method add() writes this.items, an unknown effect.",
+   "3:ImplicitOutput: function outer(): The function outer() mutates receiver state, an implicit output.",
+   "4:ImplicitInput: function outer(): The function outer() reads api, an implicit input."
+  ]
+ },
+ {
+  "name": "h-c-spread-method-copy-A",
+  "source": "const log: number[] = [];\nfunction outer() {\n  const api = { add(item: number) { log.push(item); } };\n  const copy = { ...api };\n  copy.add(1);\n  return 0;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: method add(): The method add() writes log, an implicit output.",
+   "5:ImplicitOutput: function outer(): The function outer() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "h-c-spread-method-copy-C",
+  "source": "function outer() {\n  const api = { add(item: number) { return item + 1; } };\n  const copy = { ...api };\n  return copy.add(1);\n}\n",
+  "findings": []
+ },
+ {
+  "name": "h-c-this-alias-patch-A",
+  "source": "let hits = 0;\nfunction outer() {\n  const api = {\n    add(item: number): number { return item + 1; },\n    swap() { const self = this; self.add = (item: number): number => { hits += 1; return item; }; },\n  };\n  api.swap();\n  return api.add(1);\n}\n",
+  "findings": [
+   "5:UnknownEffect: method swap(): The method swap() reads this, an unknown effect.",
+   "5:ImplicitInput: arrow function anonymous(): The arrow function anonymous() reads hits, an implicit input.",
+   "5:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes hits, an implicit output.",
+   "7:UnknownEffect: function outer(): The function outer() calls overridable method, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-c-this-method-A",
+  "source": "function outer() {\n  const api = { items: [0], add(item: number) { this.items.push(item); } };\n  function read() { return api.items[2] ?? -1; }\n  api.add(1);\n  api.add(2);\n  return read();\n}\n",
+  "findings": [
+   "2:UnknownEffect: method add(): The method add() writes this.items, an unknown effect.",
+   "3:ImplicitInput: function read(): The function read() reads api, an implicit input."
+  ]
+ },
+ {
+  "name": "h-d-array-from-A",
+  "source": "const log: number[] = [];\nfunction* gen() { log.push(1); yield 1; }\nfunction collect() {\n  return Array.from(gen());\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
+   "4:ImplicitOutput: function collect(): The function collect() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "h-d-array-from-C",
+  "source": "const log: number[] = [];\nfunction* gen() { const local: number[] = [];\n  local.push(1); yield 1; }\nfunction collect() {\n  return Array.from(gen());\n}\n",
+  "findings": []
+ },
+ {
+  "name": "h-d-async-generator-A",
+  "source": "const log: number[] = [];\nasync function* agen() { log.push(1); yield 1; }\nfunction start() {\n  void agen().next();\n  return 0;\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function agen(): The function agen() writes log, an implicit output.",
+   "4:ImplicitOutput: function start(): The function start() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "h-d-async-generator-C",
+  "source": "const log: number[] = [];\nasync function* agen() { const local: number[] = [];\n  local.push(1); yield 1; }\nfunction start() {\n  void agen().next();\n  return 0;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "h-d-console-destructure-A",
+  "source": "function* gen() { console.log('x'); yield 1; }\nfunction first() {\n  const [a] = gen();\n  return a;\n}\n",
+  "findings": [
+   "1:ImplicitOutput: function gen(): The function gen() uses console, an implicit output.",
+   "3:ImplicitOutput: function first(): The function first() uses console, an implicit output."
+  ]
+ },
+ {
+  "name": "h-d-console-destructure-C",
+  "source": "function* gen() { String('x'); yield 1; }\nfunction first() {\n  const [a] = gen();\n  return a;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "h-d-created-only-C",
+  "source": "const log: number[] = [];\nfunction* gen() { log.push(1); yield 1; }\nfunction make() {\n  return gen();\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function gen(): The function gen() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "h-d-next-module-let-A",
+  "source": "let ticks = 0;\nfunction* gen() { ticks += 1; yield ticks; }\nfunction first() {\n  return gen().next().value;\n}\n",
+  "findings": [
+   "2:ImplicitInput: function gen(): The function gen() reads ticks, an implicit input.",
+   "2:ImplicitOutput: function gen(): The function gen() writes ticks, an implicit output.",
+   "4:ImplicitInput: function first(): The function first() reads ticks, an implicit input.",
+   "4:ImplicitOutput: function first(): The function first() writes ticks, an implicit output."
+  ]
+ },
+ {
+  "name": "h-d-next-module-let-C",
+  "source": "let ticks = 0;\nfunction* gen() { const local = 1; yield local; }\nfunction first() {\n  return gen().next().value;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "h-d-next-once-then-push-A",
+  "source": "function outer() {\n  const values = [0];\n  function* fill() {\n    values.push(1);\n    yield 0;\n    values.push(2);\n    yield 0;\n  }\n  function read() { return values[2] ?? -1; }\n  const it = fill();\n  it.next();\n  values.push(3);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function fill(): The function fill() writes values, an implicit output.",
+   "9:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-d-next-once-then-push-C",
+  "source": "function outer() {\n  const values = [0];\n  function* fill() {\n    values.push(1);\n    yield 0;\n    values.push(2);\n    yield 0;\n  }\n  function read() { return values[0] ?? -1; }\n  const it = fill();\n  it.next();\n  values.push(3);\n  return read();\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function fill(): The function fill() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "h-d-random-spread-A",
+  "source": "function* gen() { yield Math.random(); }\nfunction sample() {\n  return [...gen()];\n}\n",
+  "findings": [
+   "1:ImplicitInput: function gen(): The function gen() calls Math.random(), an implicit input.",
+   "3:ImplicitInput: function sample(): The function sample() calls Math.random(), an implicit input."
+  ]
+ },
+ {
+  "name": "h-d-random-spread-C",
+  "source": "function* gen() { yield 1; }\nfunction sample() {\n  return [...gen()];\n}\n",
+  "findings": []
+ },
+ {
+  "name": "h-d-stored-then-consumed-A",
+  "source": "function outer() {\n  const values = [0];\n  function* fill() { values.push(1); yield 0; }\n  function read() { return values[2] ?? -1; }\n  const it = fill();\n  values.push(2);\n  for (const step of it) { void step; }\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function fill(): The function fill() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-d-stored-then-consumed-C",
+  "source": "function outer() {\n  const values = [0];\n  function* fill() { values.push(1); yield 0; }\n  function read() { return values[0] ?? -1; }\n  const it = fill();\n  values.push(2);\n  for (const step of it) { void step; }\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function fill(): The function fill() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "h-d-yield-delegation-A",
+  "source": "const log: number[] = [];\nfunction* inner() { log.push(1); yield 1; }\nfunction* wrap() { yield* inner(); }\nfunction run() {\n  for (const item of wrap()) { void item; }\n  return 0;\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function inner(): The function inner() writes log, an implicit output.",
+   "3:ImplicitOutput: function wrap(): The function wrap() writes log, an implicit output.",
+   "5:ImplicitOutput: function run(): The function run() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "h-d-yield-delegation-C",
+  "source": "const log: number[] = [];\nfunction* inner() { const local: number[] = [];\n  local.push(1); yield 1; }\nfunction* wrap() { yield* inner(); }\nfunction run() {\n  for (const item of wrap()) { void item; }\n  return 0;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "h-e-ctor-captured-push-A",
+  "source": "function outer() {\n  const values = [0];\n  class Box { constructor(item: number) { values.push(item); } }\n  function read() { return values[2] ?? -1; }\n  new Box(1);\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: constructor: The constructor writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-e-ctor-captured-push-C",
+  "source": "function outer() {\n  const values = [0];\n  class Box { constructor(item: number) { values.push(item); } }\n  function read() { return values[0] ?? -1; }\n  new Box(1);\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: constructor: The constructor writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "h-e-ctor-helper-push-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  class Box { constructor() { add(1); add(2); } }\n  function read() { return values[3] ?? -1; }\n  new Box();\n  add(3);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitOutput: constructor: The constructor writes values, an implicit output.",
+   "5:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-e-ctor-helper-push-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  class Box { constructor() { add(1); add(2); } }\n  function read() { return values[0] ?? -1; }\n  new Box();\n  add(3);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitOutput: constructor: The constructor writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "h-e-ctor-module-let-A",
+  "source": "let created = 0;\nclass Item { n = 0; constructor() { created += 1; } }\nfunction make() {\n  return new Item();\n}\n",
+  "findings": [
+   "2:ImplicitInput: constructor: The constructor reads created, an implicit input.",
+   "2:ImplicitOutput: constructor: The constructor writes created, an implicit output.",
+   "4:ImplicitInput: function make(): The function make() reads created, an implicit input.",
+   "4:ImplicitOutput: function make(): The function make() writes created, an implicit output."
+  ]
+ },
+ {
+  "name": "h-e-ctor-module-let-C",
+  "source": "let created = 0;\nclass Item { n = 0; constructor() { this.n = 1; } }\nfunction make() {\n  return new Item();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "h-e-ctor-param-push-A",
+  "source": "class Box { constructor(target: number[], item: number) { target.push(item); } }\nfunction outer() {\n  const values = [0];\n  function read() { return values[2] ?? -1; }\n  new Box(values, 1);\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "1:ImplicitOutput: constructor: The constructor mutates argument target, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-e-ctor-param-push-C",
+  "source": "class Box { constructor(target: number[], item: number) { target.push(item); } }\nfunction outer() {\n  const values = [0];\n  function read() { return values[0] ?? -1; }\n  new Box(values, 1);\n  values.push(2);\n  return read();\n}\n",
+  "findings": [
+   "1:ImplicitOutput: constructor: The constructor mutates argument target, an implicit output."
+  ]
+ },
+ {
+  "name": "h-e-ctor-process-env-A",
+  "source": "declare const process: { env: Record<string, string | undefined> };\nclass Cfg {\n  mode: string;\n  constructor() { this.mode = process.env.MODE ?? 'x'; }\n}\nfunction load() {\n  return new Cfg().mode;\n}\n",
+  "findings": [
+   "4:ImplicitInput: constructor: The constructor reads process, an implicit input.",
+   "7:ImplicitInput: function load(): The function load() reads process, an implicit input."
+  ]
+ },
+ {
+  "name": "h-e-field-date-A",
+  "source": "class Stamp { at = Date.now(); }\nfunction make() {\n  return new Stamp().at;\n}\n",
+  "findings": [
+   "1:ImplicitInput: constructor: The constructor calls Date.now(), an implicit input.",
+   "3:ImplicitInput: function make(): The function make() calls Date.now(), an implicit input."
+  ]
+ },
+ {
+  "name": "h-e-field-date-C",
+  "source": "class Stamp { at = 1; }\nfunction make() {\n  return new Stamp().at;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "h-e-field-in-other-class-A",
+  "source": "function outer() {\n  const values = [0];\n  class Part { mark = values.push(1); }\n  class Whole { part = new Part(); }\n  function read() { return values[2] ?? -1; }\n  new Whole();\n  values.push(3);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: constructor: The constructor writes values, an implicit output.",
+   "4:ImplicitOutput: constructor: The constructor writes values, an implicit output.",
+   "5:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-e-field-in-other-class-C",
+  "source": "function outer() {\n  const values = [0];\n  class Part { mark = values.push(1); }\n  class Whole { part = new Part(); }\n  function read() { return values[0] ?? -1; }\n  new Whole();\n  values.push(3);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: constructor: The constructor writes values, an implicit output.",
+   "4:ImplicitOutput: constructor: The constructor writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "h-e-implicit-subclass-A",
+  "source": "function outer() {\n  const values = [0];\n  class Base { constructor() { values.push(1); } }\n  class Sub extends Base {}\n  function read() { return values[2] ?? -1; }\n  new Sub();\n  values.push(3);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: constructor: The constructor writes values, an implicit output.",
+   "4:ImplicitOutput: constructor: The constructor writes values, an implicit output.",
+   "5:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-e-implicit-subclass-C",
+  "source": "function outer() {\n  const values = [0];\n  class Base { constructor() { values.push(1); } }\n  class Sub extends Base {}\n  function read() { return values[0] ?? -1; }\n  new Sub();\n  values.push(3);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: constructor: The constructor writes values, an implicit output.",
+   "4:ImplicitOutput: constructor: The constructor writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "h-e-static-block-helper-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  class Reg { static { add(1); } }\n  values.push(3);\n  return [read(), Reg.name.length];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-e-static-block-helper-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  class Reg { static { add(1); } }\n  values.push(3);\n  return [read(), Reg.name.length];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "h-e-static-console-A",
+  "source": "function setup() {\n  class Reg { static { console.log('ready'); } }\n  return Reg.name;\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function setup(): The function setup() uses console, an implicit output."
+  ]
+ },
+ {
+  "name": "h-e-static-console-C",
+  "source": "function setup() {\n  class Reg { static { String('ready'); } }\n  return Reg.name;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "h-e-subclass-super-A",
+  "source": "function outer() {\n  const values = [0];\n  class Base { constructor() { values.push(1); } }\n  class Sub extends Base { constructor() { super(); values.push(2); } }\n  function read() { return values[3] ?? -1; }\n  new Sub();\n  values.push(3);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: constructor: The constructor writes values, an implicit output.",
+   "4:ImplicitOutput: constructor: The constructor writes values, an implicit output.",
+   "5:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-e-subclass-super-C",
+  "source": "function outer() {\n  const values = [0];\n  class Base { constructor() { values.push(1); } }\n  class Sub extends Base { constructor() { super(); values.push(2); } }\n  function read() { return values[0] ?? -1; }\n  new Sub();\n  values.push(3);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: constructor: The constructor writes values, an implicit output.",
+   "4:ImplicitOutput: constructor: The constructor writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "h-f-append-index-loop-A",
+  "source": "function outer() {\n  const values: number[] = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[3] ?? -1; }\n  for (const x of [1, 2]) { values[values.length] = x; }\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-f-append-index-loop-C",
+  "source": "function outer() {\n  const values: number[] = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  for (const x of [1, 2]) { values[values.length] = x; }\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "h-f-append-index-twice-A",
+  "source": "function outer() {\n  const values: number[] = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[3] ?? -1; }\n  values[values.length] = 1;\n  values[values.length] = 2;\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-f-append-index-twice-C",
+  "source": "function outer() {\n  const values: number[] = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  values[values.length] = 1;\n  values[values.length] = 2;\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "h-f-length-grow-after-loop-A",
+  "source": "function outer(extra: number[]) {\n  const values: number[] = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[4] ?? -1; }\n  for (const x of extra) { values.push(x); }\n  values.length = 4;\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-f-length-in-branch-A",
+  "source": "function outer(flag: boolean) {\n  const values: number[] = [0, 0, 0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[3] ?? -1; }\n  if (flag) { values.length = 1; }\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-f-length-reset-helper-branch-A",
+  "source": "function outer(flag: boolean) {\n  const values: number[] = [0, 0, 0];\n  function add(item: number) { values.push(item); }\n  function reset() { values.length = 1; }\n  function read() { return values[3] ?? -1; }\n  if (flag) { reset(); }\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitOutput: function reset(): The function reset() writes values, an implicit output.",
+   "5:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-f-overwrite-last-A",
+  "source": "function outer() {\n  const values: number[] = [0, 0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[1] ?? -1; }\n  values[values.length - 1] = 5;\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-f-overwrite-last-direct-push-A",
+  "source": "function outer() {\n  const values: number[] = [0, 0];\n  function read() { return values[1] ?? -1; }\n  values[values.length - 1] = 5;\n  values.push(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-f-pop-in-branch-A",
+  "source": "function outer(flag: boolean) {\n  const values: number[] = [0, 0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  if (flag) { values.pop(); }\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-f-pop-in-loop-A",
+  "source": "function outer() {\n  const values: number[] = [0, 0, 0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[1] ?? -1; }\n  for (let i = 0; i < 2; i += 1) { values.pop(); }\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-f-two-pops-A",
+  "source": "function outer() {\n  const values: number[] = [0, 0, 0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[1] ?? -1; }\n  values.pop();\n  values.pop();\n  add(9);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-g-alias-or-copy-module-A",
+  "source": "const log: number[] = [];\nfunction run() {\n  const alias = log;\n  alias.push(1);\n  return alias.length;\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function run(): The function run() writes alias, an implicit output.",
+   "5:ImplicitInput: function run(): The function run() reads alias, an implicit input."
+  ]
+ },
+ {
+  "name": "h-g-alias-or-copy-module-C",
+  "source": "const log: number[] = [];\nfunction run() {\n  const alias = log.slice();\n  alias.push(1);\n  return alias.length;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "h-g-array-proto-push-module-A",
+  "source": "const log: number[] = [];\nfunction outer() {\n  Array.prototype.push.call(log, 1);\n  return 0;\n}\n",
+  "findings": [
+   "3:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-g-bind-module-let-A",
+  "source": "let total = 0;\nfunction add(item: number) { total += item; return total; }\nfunction outer() {\n  const bound = add.bind(undefined, 2);\n  return bound();\n}\n",
+  "findings": [
+   "2:ImplicitInput: function add(): The function add() reads total, an implicit input.",
+   "2:ImplicitOutput: function add(): The function add() writes total, an implicit output.",
+   "4:ImplicitInput: function outer(): The function outer() reads add, an implicit input.",
+   "4:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-g-destructure-default-fn-A",
+  "source": "const log: number[] = [];\nconst api: { add?: (item: number) => void } = {};\nfunction outer() {\n  const { add = (item: number) => { log.push(item); } } = api;\n  add(1);\n  return 0;\n}\n",
+  "findings": [
+   "4:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes log, an implicit output.",
+   "5:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-g-extracted-method-date-A",
+  "source": "const clock = { now(): number { return Date.now(); } };\nfunction outer() {\n  const { now } = clock;\n  return now();\n}\n",
+  "findings": [
+   "1:ImplicitInput: method now(): The method now() calls Date.now(), an implicit input.",
+   "4:ImplicitInput: function outer(): The function outer() calls Date.now(), an implicit input."
+  ]
+ },
+ {
+  "name": "h-g-extracted-method-date-C",
+  "source": "const clock = { now(): number { return 5; } };\nfunction outer() {\n  const { now } = clock;\n  return now();\n}\n",
+  "findings": []
+ },
+ {
+  "name": "h-g-extracted-method-random-A",
+  "source": "const dice = { roll(): number { return Math.random(); } };\nfunction outer() {\n  const { roll } = dice;\n  return roll();\n}\n",
+  "findings": [
+   "1:ImplicitInput: method roll(): The method roll() calls Math.random(), an implicit input.",
+   "4:ImplicitInput: function outer(): The function outer() calls Math.random(), an implicit input."
+  ]
+ },
+ {
+  "name": "h-g-fn-proto-call-call-A",
+  "source": "const log: number[] = [];\nfunction add(item: number) { log.push(item); }\nfunction outer() {\n  Function.prototype.call.call(add, undefined, 1);\n  return 0;\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function add(): The function add() writes log, an implicit output.",
+   "4:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-g-foreach-module-A",
+  "source": "const log: number[] = [];\nfunction add(item: number) { log.push(item); }\nfunction run() {\n  [1, 2].forEach(add);\n  return 0;\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function add(): The function add() writes log, an implicit output.",
+   "4:ImplicitOutput: function run(): The function run() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "h-g-foreach-module-C",
+  "source": "const log: number[] = [];\nfunction add(item: number) { const local: number[] = [];\n  local.push(item); }\nfunction run() {\n  [1, 2].forEach(add);\n  return 0;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "h-g-optional-call-module-A",
+  "source": "const log: number[] = [];\nconst api: { add?: (item: number) => void } = { add: (item: number) => { log.push(item); } };\nfunction outer() {\n  api.add?.(1);\n  return 0;\n}\n",
+  "findings": [
+   "2:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes log, an implicit output.",
+   "4:ImplicitOutput: function outer(): The function outer() writes log, an implicit output."
+  ]
+ },
+ {
+  "name": "h-g-promise-executor-module-A",
+  "source": "const log: number[] = [];\nfunction outer() {\n  void new Promise<void>((resolve) => { log.push(1); resolve(); });\n  return 0;\n}\n",
+  "findings": [
+   "3:UnknownEffect: function outer(): The function outer() constructs unresolved class, an unknown effect.",
+   "3:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes log, an implicit output.",
+   "3:UnknownEffect: arrow function anonymous(): The arrow function anonymous() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-g-reflect-date-A",
+  "source": "function outer() {\n  return Reflect.apply(Date.now, undefined, []);\n}\n",
+  "findings": [
+   "2:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-p-array-proto-push-call-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  Array.prototype.push.call(values, 2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-p-push-apply-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  values.push.apply(values, [2]);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-p-push-call-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  values.push.call(values, 2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-p-reflect-push-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  Reflect.apply(values.push, values, [2]);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-q-apply-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  add.apply(undefined, [2]);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-q-apply-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  add.apply(undefined, [2]);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-q-array-element-call-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  [add][0](2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-q-array-element-call-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  [add][0](2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-q-bind-then-call-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  add.bind(undefined, 2)();\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-q-bind-then-call-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  add.bind(undefined, 2)();\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-q-destructure-alias-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  const { a } = { a: add };\n  a(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-q-destructure-alias-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  const { a } = { a: add };\n  a(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "h-q-fn-proto-call-call-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  Function.prototype.call.call(add, undefined, 2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-q-fn-proto-call-call-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  Function.prototype.call.call(add, undefined, 2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-q-generator-spread-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  const more = [...(function* () { add(2); yield 0; })()];\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "6:ImplicitOutput: function anonymous(): The function anonymous() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "h-q-generator-spread-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  const more = [...(function* () { add(2); yield 0; })()];\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "6:ImplicitOutput: function anonymous(): The function anonymous() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "h-q-iife-arrow-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  (() => add(2))();\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "6:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "h-q-iife-arrow-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  (() => add(2))();\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "6:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "h-q-object-property-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  ({ run: add }).run(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-q-object-property-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  ({ run: add }).run(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "h-q-optional-call-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  add?.(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-q-optional-call-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  add?.(2);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ },
+ {
+  "name": "h-q-promise-executor-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  void new Promise<void>((resolve) => { add(2); resolve(); });\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "6:UnknownEffect: function outer(): The function outer() constructs unresolved class, an unknown effect.",
+   "6:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes values, an implicit output.",
+   "6:UnknownEffect: arrow function anonymous(): The arrow function anonymous() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-q-promise-executor-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  void new Promise<void>((resolve) => { add(2); resolve(); });\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "6:UnknownEffect: function outer(): The function outer() constructs unresolved class, an unknown effect.",
+   "6:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes values, an implicit output.",
+   "6:UnknownEffect: arrow function anonymous(): The arrow function anonymous() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-q-reflect-apply-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  Reflect.apply(add, undefined, [2]);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
+   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-q-reflect-apply-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  Reflect.apply(add, undefined, [2]);\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "h-q-static-block-A",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  class Reg { static { add(2); } }\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
+  ]
+ },
+ {
+  "name": "h-q-static-block-C",
+  "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  class Reg { static { add(2); } }\n  return read();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
+  ]
+ }
+]

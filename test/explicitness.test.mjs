@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { Writable } from "node:stream";
 import { after, before, test } from "node:test";
 import ts from "typescript";
@@ -476,7 +476,7 @@ function send(body) { return fetch("/api", { body }); }
     "1:ImplicitInput: The function stamp() calls Date.now(), an implicit input.",
     "2:ImplicitInput: The function today() calls new Date(), an implicit input.",
     "3:ImplicitOutput: The function render() writes document, an implicit output.",
-    "3:UnknownEffect: The function render() calls unresolved callable, an unknown effect.",
+    "3:UnknownEffect: The function render() mutates value with unknown ownership, an unknown effect.",
     "4:ImplicitInput: The function language() reads navigator, an implicit input.",
     "5:ImplicitOutput: The function send() uses fetch, an implicit output.",
   ]);
@@ -2124,4 +2124,262 @@ test("pushes keep sound slots through bound methods, captured paths, object meth
   for (const [name, source, expected, targets] of cases) {
     assert.deepEqual(contextRecords(name, source, targets), expected, name);
   }
+});
+
+function lines(rows, render) {
+  return `${rows.map((row, index) => render(row, index)).join("\n")}\n`;
+}
+
+test("every fresh global call and pure constructor is a calculation", () => {
+  const calls = [
+    "Array.isArray", "Boolean", "Number", "Number.isFinite", "Number.isInteger", "Number.isNaN", "Number.parseFloat",
+    "Number.parseInt", "Object.keys", "String", "parseFloat", "parseInt", "Promise.resolve", "Promise.reject", "Promise.all",
+    "Promise.allSettled", "Promise.race", "structuredClone", "Math.abs", "Math.ceil", "Math.floor", "Math.max", "Math.min",
+    "Math.pow", "Math.round", "Math.sign", "Math.sqrt", "Math.trunc",
+  ];
+  assert.deepEqual(messages("fresh-globals.ts", lines(calls, (name, index) => `function f${index}(x: number) { return ${name}([x]); }`)), []);
+  const constructors = [
+    "Array", "Date", "Error", "Map", "Object", "RangeError", "RegExp", "Set", "TypeError", "URL", "URLSearchParams", "WeakMap", "WeakSet",
+  ];
+  assert.deepEqual(messages("pure-constructors.ts", lines(constructors, (name, index) => `function c${index}() { return new ${name}("0"); }`)), []);
+  assert.deepEqual(messages("unknown-globals.ts", `function f(x: number) { return Missing.call(x); }
+function c() { return new Missing("0"); }
+`), [
+    "1:UnknownEffect: The function f() calls unresolved callable, an unknown effect.",
+    "2:UnknownEffect: The function c() constructs unresolved class, an unknown effect.",
+  ]);
+});
+
+test("every standard callback method runs its callback in the caller", () => {
+  const methods = [
+    "every", "filter", "find", "findIndex", "findLast", "findLastIndex", "flatMap", "forEach", "map", "reduce", "reduceRight", "some", "toSorted",
+  ];
+  assert.deepEqual(messages("callback-methods.ts", lines(methods, (name, index) => `function k${index}(xs: number[]) { return xs.${name}(() => Math.random()); }`)),
+    methods.flatMap((_name, index) => [
+      `${index + 1}:ImplicitInput: The function k${index}() calls Math.random(), an implicit input.`,
+      `${index + 1}:ImplicitInput: The arrow function anonymous() calls Math.random(), an implicit input.`,
+    ]));
+});
+
+test("every modelled standard receiver method is a calculation and other methods are unknown", () => {
+  const arrays = [
+    "at", "concat", "entries", "every", "filter", "find", "findIndex", "findLast", "findLastIndex", "flat", "flatMap", "forEach",
+    "includes", "indexOf", "join", "keys", "lastIndexOf", "map", "reduce", "reduceRight", "slice", "some", "toReversed", "toSorted",
+    "values", "toString",
+  ];
+  const strings = [
+    "at", "charAt", "charCodeAt", "codePointAt", "concat", "endsWith", "includes", "indexOf", "lastIndexOf", "localeCompare",
+    "normalize", "padEnd", "padStart", "repeat", "replace", "replaceAll", "slice", "split", "startsWith", "substring",
+    "toLocaleLowerCase", "toLocaleUpperCase", "toLowerCase", "toUpperCase", "trim", "trimEnd", "trimStart", "toString",
+  ];
+  const rows = [
+    ...["number[]", "Array<number>", "ReadonlyArray<number>"].flatMap((type) => arrays.map((method) => [type, method])),
+    ...["string", "String"].flatMap((type) => strings.map((method) => [type, method])),
+    ...["number", "Number"].flatMap((type) => [[type, "toFixed"], [type, "toString"]]),
+    ["Date", "getTime"], ["Date", "toString"], ["Boolean", "toString"],
+    ...["Map<string, number>", "ReadonlyMap<string, number>", "WeakMap<object, number>"]
+      .flatMap((type) => ["get", "has", "entries", "keys", "values", "forEach"].map((method) => [type, method])),
+    ...["Set<number>", "ReadonlySet<number>", "WeakSet<object>"]
+      .flatMap((type) => ["has", "entries", "keys", "values", "forEach"].map((method) => [type, method])),
+  ];
+  assert.deepEqual(messages("receiver-methods.ts", lines(rows, ([type, method], index) => `function r${index}(v: ${type}) { return v.${method}(); }`)), []);
+  const unknown = [
+    ["number[]", "push2"], ["string", "at2"], ["number", "toPrecision"], ["Date", "getDay"], ["Boolean", "valueOf"],
+    ["Map<string, number>", "size2"], ["Set<number>", "get"], ["WeakSet<object>", "get"], ["ReadonlySet<number>", "get"],
+  ];
+  assert.deepEqual(messages("receiver-unknown.ts", lines(unknown, ([type, method], index) => `function n${index}(v: ${type}) { return v.${method}(); }`)),
+    unknown.map((_row, index) => `${index + 1}:UnknownEffect: The function n${index}() calls unresolved callable, an unknown effect.`));
+});
+
+test("standard receivers follow global results, method results, literals, and declarations", () => {
+  const known = [
+    "function a1(x: any) { return String(x).trim(); }",
+    "function a2(x: any) { return JSON.stringify(x).trim(); }",
+    "function a3(x: any) { return Number(x).toFixed(); }",
+    "function a4(x: number) { return Math.abs(x).toFixed(); }",
+    "function a5(x: number) { return Array.from([x]).slice(); }",
+    "function a6(x: number) { return Array.of(x).slice(); }",
+    "function a7(x: object) { return Object.keys(x).slice(); }",
+    "function a8(x: object) { return Object.values(x).slice(); }",
+    "function a9(x: object) { return Object.entries(x).slice(); }",
+    "function b1(v: number[]) { return v.map((y) => y).slice(); }",
+    "function b2(v: number[]) { return v.flatMap((y) => [y]).slice(); }",
+    "function b3(v: number[]) { return v.filter((y) => y).slice(); }",
+    "function b4(v: number[][]) { return v.flat().slice(); }",
+    "function b5(v: number[]) { return v.toReversed().slice(); }",
+    "function b6(v: number[]) { return v.toSorted().slice(); }",
+    "function b7(s: string) { return s.split(\",\").slice(); }",
+    "function b8(v: number[]) { return v.slice().slice(); }",
+    "function b9(s: string) { return s.slice().trim(); }",
+    "function c1(v: number[]) { return v.concat().slice(); }",
+    "function c2(s: string) { return s.concat().trim(); }",
+    "function c3(v: number[]) { return v.toString().trim(); }",
+    "function c4(s: string) { return s.trim().trim(); }",
+    "function d1() { return new Map().get(\"a\"); }",
+    "function d2() { return new Set().has(1); }",
+    "function d3() { return new Date(0).getTime(); }",
+    "function d4(c: boolean) { return (c ? \"a\" : \"b\").trim(); }",
+    "function d6() { return [1].slice(); }",
+    "function d7() { return \"a\".trim(); }",
+    "function d8(x: number) { return `a${x}`.trim(); }",
+    "function d9() { return `a`.trim(); }",
+    "function e0() { return (1).toFixed(); }",
+    "function e1() { return (-1).toFixed(); }",
+    "function e2() { return true.toString(); }",
+    "function e3() { return (10n).toString(); }",
+    "function e4() { let s = \"a\"; s = \"b\"; return s.trim(); }",
+    "function e5(v: string | number) { return v.toString(); }",
+    "function e6(v: [number]) { return v.slice(); }",
+    "function e7(v: readonly number[]) { return v.slice(); }",
+    "function e8(v: (number[])) { return v.slice(); }",
+    "function e9(v: L) { return v.slice(); }",
+    "function f1() { return g().trim(); }",
+    "function f2() { return false.toString(); }",
+    "function f3() { let s = \"a\"; s = s.trim(); return s.trim(); }",
+  ];
+  assert.deepEqual(messages("receiver-chains.ts", `type L = number[];
+function g(): string { return "a"; }
+${known.join("\n")}
+`), []);
+  assert.deepEqual(messages("receiver-chains-unknown.ts", `interface I { slice(): void }
+type R = string | R;
+function a(v: string[]) { return v.at(0).trim(); }
+function b(v: number[]) { return v.join(",").trim(); }
+function c(k: boolean, x: any) { return (k ? "a" : x).trim(); }
+function d(k: boolean, x: any) { return (k ? x : "a").trim(); }
+function e(v: I) { return v.slice(); }
+function f(v: string | I) { return v.toString(); }
+function g(x: any) { let s = x; return s.trim(); }
+function h(Map: any) { return new Map().get("a"); }
+function i(x: any) { return String(x).toFixed(); }
+function j(x: any) { return Number(x).trim(); }
+function k(x: number) { return Math.abs(x).trim(); }
+function l() { return new Date(0).toFixed(); }
+function m(v: R) { return v.trim(); }
+function n(k: boolean, x: any) { let s = "a"; if (k) { s = x; } return s.trim(); }
+function o(x: any) {
+  const mapped = x.map((y) => y);
+  return mapped.slice();
+}
+function p(k: boolean) {
+  const mapped = (k ? [1] : "a").map((y) => y);
+  return mapped.slice();
+}
+function q(k: boolean) {
+  const item = (k ? "a" : ["b"]).at(0);
+  return item.trim();
+}
+`), [
+    "3:UnknownEffect: The function a() calls unresolved callable, an unknown effect.",
+    "4:UnknownEffect: The function b() calls unresolved callable, an unknown effect.",
+    "5:UnknownEffect: The function c() calls unresolved callable, an unknown effect.",
+    "6:UnknownEffect: The function d() calls unresolved callable, an unknown effect.",
+    "7:UnknownEffect: The function e() calls unresolved callable, an unknown effect.",
+    "8:UnknownEffect: The function f() calls unresolved callable, an unknown effect.",
+    "9:UnknownEffect: The function g() calls unresolved callable, an unknown effect.",
+    "10:UnknownEffect: The function h() calls unresolved callable, an unknown effect.",
+    "11:UnknownEffect: The function i() calls unresolved callable, an unknown effect.",
+    "12:UnknownEffect: The function j() calls unresolved callable, an unknown effect.",
+    "13:UnknownEffect: The function k() calls unresolved callable, an unknown effect.",
+    "14:UnknownEffect: The function l() calls unresolved callable, an unknown effect.",
+    "15:UnknownEffect: The function m() calls unresolved callable, an unknown effect.",
+    "16:UnknownEffect: The function n() calls unresolved callable, an unknown effect.",
+    "18:UnknownEffect: The function o() calls unresolved callable, an unknown effect.",
+    "22:UnknownEffect: The function p() calls unresolved callable, an unknown effect.",
+    "27:UnknownEffect: The function q() calls unresolved callable, an unknown effect.",
+  ]);
+});
+
+test("writes through computed objects reach the storage the object expression selects", () => {
+  assert.deepEqual(messages("computed-writes.ts", `const shared = { n: 0, list: [0] };
+function pushLit() { [shared][0].list.push(1); }
+function pushSlice(v: number[][]) { v.slice()[0].push(1); }
+function writeSlice(v: { n: number }[]) { v.slice()[0].n = 1; }
+function writeGet(m: Map<string, { n: number }>) { m.get("k")!.n = 1; }
+function writeFind(v: { n: number }[]) { v.find(() => true)!.n = 1; }
+function helper() { return shared; }
+function writeHelper() { helper().n = 1; }
+function writeHelperDeep() { helper().list[0] = 1; }
+function writeNew() { new Array(3)[0] = 1; }
+function writeUnknown(get: () => { n: number }) { get().n = 1; }
+function writeCond(flag: boolean, a: { n: number }) { (flag ? a : shared).n = 1; }
+function writeLogical(a: { n: number } | undefined) { (a ?? shared).n = 1; }
+function writeObjLit() { ({ inner: shared }).inner.n = 1; }
+function deleteSlice(v: { n?: number }[]) { delete v.slice()[0].n; }
+function incSlice(v: { n: number }[]) { v.slice()[0].n++; }
+`), [
+    "2:ImplicitOutput: The function pushLit() mutates receiver of push, an implicit output.",
+    "2:ImplicitInput: The function pushLit() reads shared, an implicit input.",
+    "3:ImplicitOutput: The function pushSlice() mutates argument v, an implicit output.",
+    "4:ImplicitOutput: The function writeSlice() mutates argument v, an implicit output.",
+    "5:ImplicitOutput: The function writeGet() mutates argument m, an implicit output.",
+    "6:ImplicitOutput: The function writeFind() mutates argument v, an implicit output.",
+    "7:ImplicitInput: The function helper() reads shared, an implicit input.",
+    "8:ImplicitInput: The function writeHelper() reads shared, an implicit input.",
+    "8:ImplicitOutput: The function writeHelper() mutates caller-owned value, an implicit output.",
+    "9:ImplicitInput: The function writeHelperDeep() reads shared, an implicit input.",
+    "9:ImplicitOutput: The function writeHelperDeep() mutates caller-owned value, an implicit output.",
+    "11:UnknownEffect: The function writeUnknown() mutates value with unknown ownership, an unknown effect.",
+    "12:ImplicitOutput: The function writeCond() mutates argument a, an implicit output.",
+    "12:ImplicitInput: The function writeCond() reads shared, an implicit input.",
+    "13:ImplicitOutput: The function writeLogical() mutates argument a, an implicit output.",
+    "13:ImplicitInput: The function writeLogical() reads shared, an implicit input.",
+    "14:ImplicitOutput: The function writeObjLit() mutates caller-owned value, an implicit output.",
+    "14:ImplicitInput: The function writeObjLit() reads shared, an implicit input.",
+    "15:ImplicitOutput: The function deleteSlice() mutates argument v, an implicit output.",
+    "16:ImplicitOutput: The function incSlice() mutates argument v, an implicit output.",
+  ]);
+});
+
+test("a caller that owns captured storage resolves a nested write through a computed object", () => {
+  assert.deepEqual(messages("owned-computed-writes.ts", `function outer() {
+  const local = [{ n: 0 }];
+  function poke() { local.slice()[0].n = 2; }
+  poke();
+  return local;
+}
+function outerB() {
+  const local = [[0]];
+  function poke() { local.slice()[0].push(1); }
+  poke();
+  return local;
+}
+function outerC() {
+  const local = [[0]];
+  function poke() { const inner = local[0]; inner.push(1); }
+  poke();
+  return local;
+}
+const shared = [{ n: 0 }];
+function writeSlice(v: { n: number }[]) { v.slice()[0].n = 1; }
+function caller() { writeSlice(shared); }
+function fresh() { const local = [{ n: 0 }]; local.slice()[0].n = 2; return local; }
+function freshCall() { return [{ n: 0 }].slice()[0].n = 3; }
+`), [
+    "3:ImplicitInput: The function poke() reads local, an implicit input.",
+    "3:ImplicitOutput: The function poke() mutates caller-owned value, an implicit output.",
+    "9:ImplicitInput: The function poke() reads local, an implicit input.",
+    "9:ImplicitOutput: The function poke() mutates receiver of push, an implicit output.",
+    "15:ImplicitInput: The function poke() reads local, an implicit input.",
+    "15:ImplicitOutput: The function poke() mutates caller-owned value inner, an implicit output.",
+    "20:ImplicitOutput: The function writeSlice() mutates argument v, an implicit output.",
+    "21:ImplicitOutput: The function caller() mutates caller-owned value shared, an implicit output.",
+    "21:ImplicitInput: The function caller() reads shared, an implicit input.",
+  ]);
+});
+
+test("the reviewed explicitness corpus keeps its contract findings", () => {
+  const corpus = JSON.parse(readFileSync(new URL("./fixtures/explicitness-corpus.json", import.meta.url), "utf8"));
+  const directory = join(workspace, "corpus");
+  mkdirSync(directory);
+  corpus.forEach((item) => writeFileSync(join(directory, `${item.name}.ts`), item.source));
+  const stdout = captureOutput();
+  const stderr = captureOutput();
+  runCliInProcess([directory, "json", "explicitness"], { stdout: stdout.stream, stderr: stderr.stream });
+  assert.equal(stderr.read(), "");
+  const report = JSON.parse(stdout.read());
+  assert.deepEqual(report.errors, []);
+  const actual = new Map(corpus.map((item) => [item.name, []]));
+  report.findings.forEach((finding) => actual.get(basename(finding.path, ".ts")).push(`${finding.line}:${finding.ruleName}: ${finding.context}: ${finding.message}`));
+  assert.deepEqual(Object.fromEntries(actual), Object.fromEntries(corpus.map((item) => [item.name, item.findings])));
 });

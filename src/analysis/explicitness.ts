@@ -3,7 +3,7 @@ import ts from "typescript";
 import { globalName } from "../ast/global-reference";
 import { isFunctionLike, isFunctionLikeWithBody } from "../ast/functions";
 import { methodName, outerExpression, unwrapExpression } from "../ast/expressions";
-import { analyzeScopes, isAmbient } from "../ast/scopes";
+import { analyzeScopes, isAmbient, writeTargets } from "../ast/scopes";
 import type { Binding, ScopeModel, Write } from "../ast/scopes";
 import { reachableChildren } from "./control-flow";
 import { bindingAssignments, canReachSite, inside, unconditional } from "./assignments";
@@ -58,6 +58,8 @@ export type ImplicitFlow = {
   defaultParameterIndex?: number;
   /** The write in a deeper callee that this flow forwards; set once a flow passes through a call it does not own. */
   writeNode?: ts.Node;
+  /** The external storage an output flow mutates, so a caller that owns one of those bindings can re-resolve it. */
+  origins?: readonly StorageOrigin[];
 };
 
 type BindingAccess = "read" | "reassign" | "contents";
@@ -579,7 +581,7 @@ function originFlows(
   const flows: ImplicitFlow[] = [];
   if (hasExternalOrigin(origins)) {
     shareOrigins(state, origins);
-    flows.push({ kind: "output", node, owner, description });
+    flows.push({ kind: "output", node, owner, description, origins: origins.filter((origin) => origin.startsWith("external:")) });
   }
   if (hasReceiverOrigin(origins) && !receiverReported) {
     flows.push({ kind: state.includeThis ? "output" : "unknown", node, owner, description: "mutates receiver state", receiver: "write", path: "outer" });
@@ -1928,7 +1930,26 @@ function reboundFlow(
   if (flow.binding && inside(flow.binding.scope.node, owner)) {
     return ownedBindingFlow(state, summaries, flow, flow.binding, node, owner);
   }
-  return { flows: [{ ...flow, node, owner, defaultParameterIndex: undefined, writeNode: flow.writeNode ?? flow.node }], writes: [], parameterCalls: [] };
+  const forwarded = (origins?: readonly StorageOrigin[]): ImplicitFlow =>
+    ({ ...flow, node, owner, defaultParameterIndex: undefined, writeNode: flow.writeNode ?? flow.node, origins: origins ?? flow.origins });
+  if (!flow.origins?.some((origin) => ownedOrigin(state, origin, owner))) {
+    return { flows: [forwarded()], writes: [], parameterCalls: [] };
+  }
+  return combineEffects(flow.origins.map((origin) => {
+    const external = ownedOrigin(state, origin, owner);
+    if (!external) {
+      return { flows: [forwarded([origin])], writes: [], parameterCalls: [] };
+    }
+    const fact = storageFactForBinding(state, summaries, external.binding, owner, node);
+    return mutationEffectsFromFact(state, fact, external.path.length ? external.path : "outer", node, owner,
+      isParameterOf(external.binding, owner) ? `mutates argument ${external.binding.name}` : `mutates caller-owned value ${external.binding.name}`);
+  }));
+}
+
+/** Gives an external origin's binding when the caller declares it, so the caller can resolve what that storage holds. */
+function ownedOrigin(state: AnalysisState, origin: StorageOrigin, owner: EffectOwner): { binding: Binding; path: readonly string[] } | undefined {
+  const external = originBinding(state, origin);
+  return external && inside(external.binding.scope.node, owner) ? external : undefined;
 }
 
 function ownedBindingFlow(
@@ -2117,6 +2138,36 @@ function mutatingMethodEffects(
   const name = methodName(unwrapExpression(call.expression));
   return mutationEffectsFromFact(state, fact, "outer", call.expression, owner,
     indexes.length === 1 ? `mutates argument ${parameterName(owner, indexes[0])}` : `mutates receiver of ${name ?? "call"}`);
+}
+
+/**
+ * A member write whose object is computed, such as "helper().value = 1" or "(flag ? a : b).value = 1", changes the storage
+ * the object expression evaluates to. A write rooted at a name or "this" is reported through that name instead.
+ */
+function computedWriteEffects(
+  state: AnalysisState,
+  summaries: ReadonlyMap<EffectOwner, CallableSummary>,
+  target: ts.Expression,
+  node: ts.Node,
+  owner: EffectOwner,
+): CallEffects {
+  const member = unwrapExpression(target);
+  if ((!ts.isPropertyAccessExpression(member) && !ts.isElementAccessExpression(member)) || namedRoot(member)) {
+    return emptyCallEffects();
+  }
+  const fact = storageFactForExpression(state, summaries, member.expression, owner, node);
+  const indexes = parameterOriginIndexes(fact.outer);
+  return mutationEffectsFromFact(state, fact, "outer", member, owner,
+    indexes.length === 1 ? `mutates argument ${parameterName(owner, indexes[0])}` : "mutates caller-owned value");
+}
+
+/** True when a chain of member accesses ends at a name or "this". */
+function namedRoot(expression: ts.Expression): boolean {
+  let current = unwrapExpression(expression);
+  while (ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current)) {
+    current = unwrapExpression(current.expression);
+  }
+  return ts.isIdentifier(current) || current.kind === ts.SyntaxKind.ThisKeyword;
 }
 
 /** True when the expression selects storage through a bound name alone, so the name's own write reports the change. */
@@ -2629,6 +2680,7 @@ function nodeEffects(
   return combineEffects([
     { flows: directFlowsFor(state, node, owner, includeThis), writes: [], parameterCalls: [] },
     { ...mutation, parameterCalls: [] },
+    ...writeTargets(node).map((target) => computedWriteEffects(state, summaries, target, node, owner)),
     invocationEffects(state, summaries, node, owner),
     evaluationEffects(state, summaries, node, owner),
   ]);
