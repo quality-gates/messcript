@@ -115,7 +115,10 @@ export function memberTargets(dispatch: Dispatch, expression: ts.Expression, kin
 }
 
 function namedTargets(dispatch: Dispatch, receiver: ts.Expression, name: string, kind: MemberKind, seen: ReadonlySet<Binding>, site: ts.Node): Targets {
-  const selected = shapes.receiverShapes(dispatch.model, receiver, seen, site);
+  const selected = shapes.receiverShapes(dispatch.model, receiver, seen, site, (call) => {
+    const callees = callableTargets(dispatch, call.expression, seen);
+    return callees.complete ? callees.targets : undefined;
+  });
   if (selected) {
     return joinTargets([...selected.map((shape) => ts.isClassLike(shape) ? classMembers(dispatch, shape, name, kind, new Set())
       : membersTargets(dispatch, shapes.liveProperties(shape, name), name, kind, seen)), patchedTargets(dispatch, name, kind)]);

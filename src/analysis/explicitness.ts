@@ -1,6 +1,6 @@
 // messcript-disable ConstantNamingConventions CouplingBetweenObjects
 import ts from "typescript";
-import { globalName } from "../ast/global-reference";
+import { aliasedGlobal, globalName } from "../ast/global-reference";
 import { isFunctionLike, isFunctionLikeWithBody } from "../ast/functions";
 import { methodName, outerExpression, unwrapExpression } from "../ast/expressions";
 import { analyzeScopes, isAmbient, writeTargets } from "../ast/scopes";
@@ -344,7 +344,12 @@ function identifierFlows(state: AnalysisState, node: ts.Identifier, owner: Effec
     const flow = ambientFlow(node, write !== undefined) ?? namespaceFlow(node, write);
     return flow ? withCompoundRead(write, { kind: flow[0], node, owner, description: flow[1] }) : [];
   }
-  return aliasOf(state.model, node) ? [] : boundFlows(state, binding, node, owner, write);
+  if (aliasOf(state.model, node)) {
+    return [];
+  }
+  const global = aliasedGlobal(node, state.model);
+  const flow = global === undefined ? undefined : ambientFlow(node, write !== undefined, global);
+  return flow ? withCompoundRead(write, { kind: flow[0], node, owner, description: flow[1] }) : boundFlows(state, binding, node, owner, write);
 }
 
 function boundFlows(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner, write: Write | undefined): ImplicitFlow[] {
@@ -1704,7 +1709,7 @@ function instantiateReturnFact(
     cache.set(index, resolved);
     return resolved;
   };
-  return instantiateStorageFact(invokedStorageFact(fact, call), actualFact);
+  return invocationStorageFact(state, summaries, fact, { call, callable: call.expression, argumentFact: actualFact }, owner);
 }
 
 function defaultArgumentFact(
@@ -1973,6 +1978,9 @@ function capturesForExpression(
   if (ts.isCallExpression(value)) {
     return factoryCaptures(state, summaries, value, owner);
   }
+  if (ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)) {
+    return capturesForExpression(state, summaries, value.expression, owner, seen);
+  }
   if (!ts.isIdentifier(value)) {
     return new Map();
   }
@@ -2013,8 +2021,8 @@ function factoryRelativeCaptures(
   factory: EffectOwner,
   actualFact: (index: number) => StorageFact,
 ): ReadonlyMap<Binding, StorageFact> {
-  const returned = summaries.get(factory)?.returnedCallables ?? [];
-  return joinCaptures(returned.map((closure) => new Map(state.model.bindings
+  const closures = state.callables.filter((callable) => inside(callable, factory));
+  return joinCaptures(closures.map((closure) => new Map(state.model.bindings
     .filter((binding) => inside(binding.scope.node, factory) && !inside(binding.scope.node, closure) &&
       binding.references.some((reference) => inside(reference, closure)))
     .map((binding) => [binding, instantiateStorageFact(storageFactForBinding(state, summaries, binding, factory, closure), actualFact)]))));
@@ -2557,17 +2565,25 @@ function holderSites(state: AnalysisState, holder: ts.Expression, owner: EffectO
 
 function isInertUse(model: ScopeModel, expression: ts.Expression): boolean {
   const parent = expression.parent;
+  if (ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) {
+    const member = outerExpression(parent);
+    return !isCallee(member) && isInertUse(model, member);
+  }
   if (ts.isBinaryExpression(parent)) {
     return [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken].includes(parent.operatorToken.kind);
   }
   if (ts.isPrefixUnaryExpression(parent)) {
     return parent.operator === ts.SyntaxKind.ExclamationToken;
   }
-  if (!ts.isCallExpression(parent) || parent.expression === expression) {
-    return isDiscarded(parent);
+  return ts.isCallExpression(parent) ? isInertArgument(model, parent) : isDiscarded(parent);
+}
+
+function isInertArgument(model: ScopeModel, call: ts.CallExpression): boolean {
+  const known = libraryCall(call, model);
+  if (known?.kind === "mutating") {
+    return known.target === "receiver";
   }
-  const known = libraryCall(parent, model);
-  return known?.kind === "pure" && known.result === "fresh" && known.callbacks.length === 0 && iteratedArgument(parent, model) === undefined;
+  return known?.kind === "pure" && known.result === "fresh" && known.callbacks.length === 0 && iteratedArgument(call, model) === undefined;
 }
 
 function bindingForcingSites(state: AnalysisState, binding: Binding, owner: EffectOwner, seen: ReadonlySet<Binding>): ts.Node[] {
@@ -2632,10 +2648,14 @@ function explicitForcingSite(model: ScopeModel, expression: ts.Expression): ts.N
     return parent.expression;
   }
   if ((ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) &&
-      ["next", "return", "throw"].includes(methodName(parent) ?? "")) {
+      ["next", "return", "throw"].includes(methodName(parent) ?? "") && isCallee(outerExpression(parent))) {
     return outerExpression(parent).parent;
   }
   return undefined;
+}
+
+function isCallee(expression: ts.Expression): boolean {
+  return ts.isCallExpression(expression.parent) && expression.parent.expression === expression;
 }
 
 function isKnownIterator(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, expression: ts.Expression, seen: ReadonlySet<Binding> = new Set()): boolean {

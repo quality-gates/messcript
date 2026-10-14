@@ -216,7 +216,7 @@ function dateCallDescription(expression: ts.Expression): string | undefined {
   return `calls ${ts.isNewExpression(parent) ? "new " : ""}Date()`;
 }
 
-function ambientMethodCallName(expression: ts.Expression): string | undefined {
+function ambientMethodCallName(expression: ts.Expression, name: string): string | undefined {
   const access = outerExpression(expression).parent;
   if (!ts.isPropertyAccessExpression(access) && !ts.isElementAccessExpression(access)) {
     return undefined;
@@ -231,39 +231,39 @@ function ambientMethodCallName(expression: ts.Expression): string | undefined {
   if (!method || !ts.isIdentifier(receiver)) {
     return undefined;
   }
-  return `${receiver.text}.${method}`;
+  return `${name}.${method}`;
 }
 
-function ambientCallDescription(node: ts.Identifier): string | undefined {
+function ambientCallDescription(node: ts.Identifier, name: string): string | undefined {
   const expression = outerExpression(node);
-  if (node.text === "Date") {
+  if (name === "Date") {
     const dateCall = dateCallDescription(expression);
     if (dateCall) {
       return dateCall;
     }
   }
-  const name = ambientMethodCallName(expression);
-  return name && NONDETERMINISTIC_CALLS.has(name) ? `calls ${name}()` : undefined;
+  const call = ambientMethodCallName(expression, name);
+  return call && NONDETERMINISTIC_CALLS.has(call) ? `calls ${call}()` : undefined;
 }
 
-function sinkName(node: ts.Identifier): string {
+function sinkName(node: ts.Identifier, name: string): string {
   const expression = outerExpression(node);
   const parent = expression.parent;
   const access = (ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) && parent.expression === expression
     ? parent
     : undefined;
-  return (access && globalObjectMember(access)) ?? node.text;
+  return (access && globalObjectMember(access)) ?? name;
 }
 
-/** Gives the ambient input or output that an unbound identifier reaches. */
-export function ambientFlow(node: ts.Identifier, written: boolean): AmbientFlow | undefined {
-  const sink = sinkName(node);
+/** Gives the ambient input or output that an identifier naming the unbound global reaches. */
+export function ambientFlow(node: ts.Identifier, written: boolean, name = node.text): AmbientFlow | undefined {
+  const sink = sinkName(node, name);
   if (OUTPUT_SINKS.has(sink)) {
     return ["output", `uses ${sink}`];
   }
-  if (HOST_OBJECTS.has(node.text)) {
-    return written ? ["output", `writes ${node.text}`] : ["input", `reads ${node.text}`];
+  if (HOST_OBJECTS.has(name)) {
+    return written ? ["output", `writes ${name}`] : ["input", `reads ${name}`];
   }
-  const call = ambientCallDescription(node);
+  const call = ambientCallDescription(node, name);
   return call ? ["input", call] : undefined;
 }

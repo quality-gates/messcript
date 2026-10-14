@@ -37,9 +37,17 @@ function bindingClasses(model: ScopeModel, binding: Binding, seen: ReadonlySet<B
   return classes.length > 0 ? [...new Set(classes)] : undefined;
 }
 
+/** Gives every callable that a call can run, or undefined when some are not known. */
+export type CallTargets = (call: ts.CallExpression) => readonly owners.EffectOwner[] | undefined;
+
 /** Gives the shapes the receiver can hold at the site, or undefined when other code can replace their members. */
-export function receiverShapes(model: ScopeModel, expression: ts.Expression, seen: ReadonlySet<Binding>, site: ts.Node): readonly Shape[] | undefined {
+export function receiverShapes(
+  model: ScopeModel, expression: ts.Expression, seen: ReadonlySet<Binding>, site: ts.Node, callees: CallTargets = () => undefined,
+): readonly Shape[] | undefined {
   const value = expressions.unwrapExpression(expression);
+  if (ts.isCallExpression(value)) {
+    return returnedShapes(model, value, callees);
+  }
   if (ts.isNewExpression(value)) {
     return closedShapes(model, classTargets(model, value.expression));
   }
@@ -57,7 +65,7 @@ export function receiverShapes(model: ScopeModel, expression: ts.Expression, see
   if (!binding || seen.has(binding) || !sealed(model, binding, site, new Set())) {
     return undefined;
   }
-  return bindingShapes(model, binding, new Set(seen).add(binding), site);
+  return bindingShapes(model, binding, new Set(seen).add(binding), site, callees);
 }
 
 function setsPrototype(literal: ts.ObjectLiteralExpression): boolean {
@@ -65,13 +73,63 @@ function setsPrototype(literal: ts.ObjectLiteralExpression): boolean {
     expressions.keyName(property.name) === "__proto__");
 }
 
-function bindingShapes(model: ScopeModel, binding: Binding, seen: ReadonlySet<Binding>, site: ts.Node): readonly Shape[] | undefined {
+function returnedShapes(model: ScopeModel, call: ts.CallExpression, callees: CallTargets): readonly Shape[] | undefined {
+  const targets = callees(call);
+  if (!targets || targets.length === 0) {
+    return undefined;
+  }
+  const found: Shape[] = [];
+  for (const target of targets) {
+    const shapes = calleeShapes(model, target, (inner) => {
+      const resolved = callees(inner);
+      return resolved?.includes(target) ? undefined : resolved;
+    });
+    if (!shapes) {
+      return undefined;
+    }
+    found.push(...shapes);
+  }
+  return found;
+}
+
+function calleeShapes(model: ScopeModel, callee: owners.EffectOwner, callees: CallTargets): readonly Shape[] | undefined {
+  const values = owners.isGenerator(callee) || isAsync(callee) ? [] : returnedValues(callee);
+  const selected = values.map((value) => receiverShapes(model, value, new Set(), value, callees));
+  return selected.length === 0 || selected.some((group) => group === undefined) ? undefined : selected.flatMap((group) => group ?? []);
+}
+
+function isAsync(owner: owners.EffectOwner): boolean {
+  return ts.canHaveModifiers(owner) && (ts.getModifiers(owner) ?? []).some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword);
+}
+
+function returnedValues(owner: owners.EffectOwner): ts.Expression[] {
+  if (ts.isArrowFunction(owner) && !ts.isBlock(owner.body)) {
+    return [owner.body];
+  }
+  const values: ts.Expression[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isReturnStatement(node)) {
+      values.push(...(node.expression ? [node.expression] : []));
+    } else if (!ts.isFunctionLike(node) && !ts.isClassLike(node)) {
+      ts.forEachChild(node, visit);
+    }
+  };
+  const body = ts.isFunctionLike(owner) ? (owner as { body?: ts.Node }).body : undefined;
+  if (body) {
+    ts.forEachChild(body, visit);
+  }
+  return values;
+}
+
+function bindingShapes(
+  model: ScopeModel, binding: Binding, seen: ReadonlySet<Binding>, site: ts.Node, callees: CallTargets,
+): readonly Shape[] | undefined {
   if (binding.declarations.some((declaration) => declaration.kind === "parameter" || declaration.kind === "import")) {
     return undefined;
   }
   const shapes: Shape[] = [];
   for (const assignment of assignments.bindingAssignments(binding)) {
-    const targets = assignment.value && !assignment.element ? receiverShapes(model, assignment.value, seen, site) : undefined;
+    const targets = assignment.value && !assignment.element ? receiverShapes(model, assignment.value, seen, site, callees) : undefined;
     if (!targets) {
       return undefined;
     }
