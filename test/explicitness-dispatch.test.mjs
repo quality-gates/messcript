@@ -134,6 +134,18 @@ function outer(n: number) {
   return 0;
 }
 `), ["6:ImplicitOutput: The function outer() mutates caller-owned value target, an implicit output."]);
+  assert.deepEqual(messages("switch-fallthrough-reassign.ts", `const store: number[] = [];
+function outer(k: number) {
+  let target = store;
+  switch (k) {
+    case 1:
+      target = [];
+    case 2:
+      target.push(1);
+  }
+  return 0;
+}
+`), ["8:ImplicitOutput: The function outer() mutates caller-owned value target, an implicit output."]);
 });
 
 test("an array destructuring assignment rebinds each name to the matching source element", () => {

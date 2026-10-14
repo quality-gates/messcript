@@ -211,7 +211,7 @@ export function unconditional(node: ts.Node, owner: EffectOwner): boolean {
 
 function dominates(node: ts.Node, owner: EffectOwner, site: ts.Node): boolean {
   for (let current: ts.Node | undefined = node.parent; current && current !== owner; current = current.parent) {
-    if (isBranch(current) && !knownBranch(current)) {
+    if ((isBranch(current) && !knownBranch(current)) || (ts.isCaseOrDefaultClause(current) && !inside(site, current))) {
       return false;
     }
     if (inside(site, current)) {
