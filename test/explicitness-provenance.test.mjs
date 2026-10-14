@@ -177,6 +177,11 @@ test("a generator escaping into a library result transfers its effects to the es
     "9:ImplicitOutput: The function outer() writes log, an implicit output.",
     "10:UnknownEffect: The function outer() uses unresolved iterate protocol, an unknown effect.",
   ]);
+  const holder = [...generator, "function outer() {", "  const box: { g?: Generator<number> } = {};", "  Object.assign(box, { g: gen() });", "  return [...box.g!];", "}", ""];
+  assert.deepEqual(ownerMessages("outer", "escape-assign-holder.ts", holder.join("\n")), [
+    "8:ImplicitOutput: The function outer() writes log, an implicit output.",
+    "9:UnknownEffect: The function outer() uses unresolved iterate protocol, an unknown effect.",
+  ]);
   const replacer = ["  return JSON.stringify(it, (key, value) => (value && typeof value.next === \"function\" ? value.next().value : value));"];
   assert.deepEqual(ownerMessages("outer", "escape-json.ts", generatorUse(replacer)), [
     "8:UnknownEffect: The function outer() calls unresolved callable, an unknown effect.",
@@ -189,10 +194,10 @@ test("a generator escaping into a library result transfers its effects to the es
   ]);
 });
 
-test("a call's returned literal resolves methods through arrow bodies and nested branches but not nested functions", () => {
+test("a call's returned literal resolves methods through arrow bodies, exported functions and nested branches but not nested functions", () => {
   const source = [
     "const arrow = () => ({ emit(): void { console.log(\"a\"); } });",
-    "function branch(flag: boolean) {",
+    "export function branch(flag: boolean) {",
     "  if (flag) {",
     "    return { emit(): void { console.log(\"b\"); } };",
     "  }",
