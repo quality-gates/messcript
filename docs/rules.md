@@ -135,7 +135,9 @@ branches stay quiet.
 Parameter-reached reads are explicit inputs. A private `const` container that
 never changes is quiet. Exported containers and mutable captured or module state
 are shared inputs. Shallow copies retain the ownership of their elements, while
-copied scalar elements have no mutable storage.
+copied scalar elements have no mutable storage. Sorting a copy with a comparator
+reads its elements. A closure that returns captured storage shares it with the
+closures beside it, so their reads of that storage become inputs.
 
 Imported functions, unresolved property calls, dynamic callable lookup, injected
 callbacks, and writes with unknown ownership stay `UnknownEffect`. Unresolved
