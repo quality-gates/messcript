@@ -104,6 +104,6 @@ export function globalName(callee: ts.Expression, model: ScopeModel): string | u
     return globalReference(callee);
   }
   const global = aliasedGlobal(root, model);
-  const chain = memberChainName(callee);
-  return global === undefined || chain === undefined ? undefined : global + chain.slice(root.text.length);
+  const chain = global === undefined ? undefined : memberChainName(callee);
+  return chain === undefined ? undefined : global + chain.slice(root.text.length);
 }
