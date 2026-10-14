@@ -76,10 +76,7 @@ type ParameterWrite = {
   readonly description: string;
   readonly defaultParameterIndex?: number;
   readonly writeNode?: ts.Node;
-  readonly via?: readonly ForwardingHop[];
 };
-
-type ForwardingHop = { readonly site: ts.Node; readonly argument: ts.Expression };
 
 type ParameterCall = {
   readonly parameterIndex: number;
@@ -923,9 +920,7 @@ function pushSlots(call: ts.CallExpression, owner: EffectOwner, start: PushStart
     : Array.from(call.arguments.keys(), (index) => `property:${start.lowerBound + index}`))];
 }
 
-type TransferSource = {
-  readonly node: ts.Node; readonly writeNode?: ts.Node; readonly repeated?: boolean; readonly via?: readonly ForwardingHop[];
-};
+type TransferSource = { readonly node: ts.Node; readonly writeNode?: ts.Node; readonly repeated?: boolean };
 
 /**
  * Gives the slots a callee's push changes in the caller's array, or undefined for every slot.
@@ -1006,33 +1001,7 @@ function iteratorStep(call: ts.CallExpression): boolean {
 }
 
 function transferOffset(state: AnalysisState, source: TransferSource, push: ts.CallExpression, sourceOwner: EffectOwner): PushStart | undefined {
-  if (source.via) {
-    return forwardedPushOffset(state, source.via, push);
-  }
   return source.writeNode || source.repeated ? { lowerBound: 0, exact: false } : calleePushOffset(state, push, sourceOwner);
-}
-
-/** A forwarded push lands after every push its hops make first, and is unbounded when any hop may shrink the array first. */
-function forwardedPushOffset(state: AnalysisState, via: readonly ForwardingHop[], push: ts.CallExpression): PushStart | undefined {
-  const pushOwner = enclosingFunction(push);
-  let lowerBound = 0;
-  for (const offset of [
-    ...via.map((hop) => hopOffset(state, hop)),
-    pushOwner && calleePushOffset(state, push, pushOwner),
-  ]) {
-    if (!offset) {
-      return undefined;
-    }
-    lowerBound += offset.lowerBound;
-  }
-  return { lowerBound, exact: false };
-}
-
-function hopOffset(state: AnalysisState, hop: ForwardingHop): PushStart | undefined {
-  const owner = enclosingFunction(hop.site);
-  const call = invocationAt(hop.site);
-  const target = storageKey(state, hop.argument);
-  return owner && call && target ? writeOffsetBefore(state, call, target, owner, new Set()) : undefined;
 }
 
 function invocationResets(state: AnalysisState, fact: StorageFact, invocation: Invocation): boolean {
@@ -1045,21 +1014,16 @@ function sharedWrites(state: AnalysisState): SharedWrite[] {
 }
 
 function calleePushOffset(state: AnalysisState, push: ts.CallExpression, sourceOwner: EffectOwner): PushStart | undefined {
+  const summary = state.summaries.get(sourceOwner);
   const target = pushReceiverKey(state, push);
-  return target ? writeOffsetBefore(state, push, target, sourceOwner, new Set([push])) : undefined;
-}
-
-function writeOffsetBefore(
-  state: AnalysisState, point: ts.Node, target: string, owner: EffectOwner, counted: Set<ts.CallExpression>,
-): PushStart | undefined {
-  const summary = state.summaries.get(owner);
-  if (!summary) {
+  if (!summary || !target) {
     return undefined;
   }
   let offset: PushStart | undefined = { lowerBound: 0, exact: true };
+  const counted = new Set<ts.CallExpression>([push]);
   for (const effect of [...summary.flows.filter(isWritingFlow), ...summary.parameterWrites]) {
-    if (offset && mayRunBefore(writeEnd(effect), point, owner)) {
-      offset = advanceCalleeOffset(state, offset, effect, target, counted, owner);
+    if (offset && mayRunBefore(writeEnd(effect), push, sourceOwner)) {
+      offset = advanceCalleeOffset(state, offset, effect, target, counted, sourceOwner);
     }
   }
   return offset;
@@ -2304,14 +2268,8 @@ function instantiateParameterWrites(
     const slots = transferredPushSlots(state, fact, write, sourceOwner, node, owner, write.path);
     const effects = mutationEffectsFromFact(state, fact, write.path, node, owner,
       `mutates caller-owned value ${actual.getText(state.sourceFile)}`, false, true, slots);
-    return { ...effects, writes: effects.writes.map((forwarded) => ({ ...forwarded, ...forwardedThrough(write, node, actual) })) };
+    return { ...effects, writes: effects.writes.map((forwarded) => ({ ...forwarded, writeNode: write.writeNode ?? write.node })) };
   }));
-}
-
-function forwardedThrough(write: ParameterWrite, site: ts.Node, argument: ts.Expression): Pick<ParameterWrite, "writeNode" | "via"> {
-  const via = write.via ?? [];
-  return { writeNode: write.writeNode ?? write.node,
-    via: via.some((hop) => hop.site === site) ? via : [{ site, argument }, ...via] };
 }
 
 function instantiateParameterCalls(

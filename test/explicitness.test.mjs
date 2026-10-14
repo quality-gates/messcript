@@ -2626,6 +2626,29 @@ function outer() { return table[0]; }
   ]);
 });
 
+test("a helper push into a module array may land at any slot from the array's literal length onward", () => {
+  assert.deepEqual(messages("module-nested-array.ts", `const table: number[][] = [[], [0, 0]];
+function add(acc: number[], v: number) { acc.push(v); }
+function grow() { add(table[0], 9); }
+function outer() { return table[0][0]; }
+`), [
+    "2:ImplicitOutput: The function add() mutates argument acc, an implicit output.",
+    "3:ImplicitOutput: The function grow() mutates caller-owned value table[0], an implicit output.",
+    "4:ImplicitInput: The function outer() reads table, an implicit input.",
+  ]);
+  assert.deepEqual(messages("module-two-pushers.ts", `const table = [0];
+function add(acc: number[], v: number) { acc.push(v); }
+function grow() { add(table, 9); }
+function again() { add(table, 7); }
+function outer() { return table[2]; }
+`), [
+    "2:ImplicitOutput: The function add() mutates argument acc, an implicit output.",
+    "3:ImplicitOutput: The function grow() mutates caller-owned value table, an implicit output.",
+    "4:ImplicitOutput: The function again() mutates caller-owned value table, an implicit output.",
+    "5:ImplicitInput: The function outer() reads table, an implicit input.",
+  ]);
+});
+
 test("module code that calls a helper writing module storage owns that write at the call", () => {
   assert.deepEqual(messages("top-call.ts", `const log: number[] = [];
 function boot() { log.push(1); }
