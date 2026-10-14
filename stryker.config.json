@@ -25,6 +25,8 @@
       "test/rulesets.test.mjs",
       "test/overload-naming.test.mjs",
       "test/explicitness.test.mjs",
+      "test/explicitness-provenance.test.mjs",
+      "test/explicitness-dispatch.test.mjs",
       "test/rule-registry.test.mjs"
     ]
   },
