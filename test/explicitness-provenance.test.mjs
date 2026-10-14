@@ -133,3 +133,116 @@ test("a constant alias of a same-file logger is not a host sink", () => {
   const source = ["const sink = { log(m: string) { return m.length; } };", "const out = sink;", "function outer() {", "  return out.log(\"x\");", "}", ""];
   assert.deepEqual(ownerMessages("outer", "local-alias.ts", source.join("\n")), []);
 });
+
+test("re-aliasing a console alias without calling it is quiet", () => {
+  const source = ["const out = console;", "function outer() {", "  const log = out;", "  return 1;", "}", ""];
+  assert.deepEqual(ownerMessages("outer", "console-realias.ts", source.join("\n")), []);
+});
+
+test("a let initialized with console is not a constant alias of the sink", () => {
+  const source = ["let out = console;", "function outer() {", "  out.log(\"x\");", "}", ""];
+  assert.deepEqual(ownerMessages("outer", "console-let.ts", source.join("\n")), [
+    "3:UnknownEffect: The function outer() calls unresolved callable, an unknown effect.",
+  ]);
+});
+
+test("a constant alias of document is written by member writes and read by member reads", () => {
+  const source = ["const doc = document;", "function writer() {", "  doc.title = \"x\";", "}", "function reader() {", "  return doc.title;", "}", ""];
+  assert.deepEqual(messages("document-alias.ts", source.join("\n")), [
+    "1:ImplicitInput: The module reads document, an implicit input.",
+    "3:ImplicitOutput: The function writer() writes document, an implicit output.",
+    "6:ImplicitInput: The function reader() reads document, an implicit input.",
+  ]);
+});
+
+const generatorUse = (lines) => [...generator, "function outer() {", "  const it = gen();", ...lines, "}", ""].join("\n");
+
+test("passing a generator's next method to a fresh library call does not run the body", () => {
+  assert.deepEqual(ownerMessages("outer", "next-string.ts", generatorUse(["  return String(it.next);"])), []);
+});
+
+test("using a generator as a computed key does not run the body", () => {
+  const lines = ["  const table: Record<string, number> = {};", "  return typeof table[it as any];"];
+  assert.deepEqual(ownerMessages("outer", "generator-key.ts", generatorUse(lines)), []);
+});
+
+test("a generator escaping into a library result transfers its effects to the escape", () => {
+  const concat = ["  const xs = ([] as Generator<number>[]).concat(it);", "  return [...xs[0]];"];
+  assert.deepEqual(ownerMessages("outer", "escape-concat.ts", generatorUse(concat)), [
+    "8:ImplicitOutput: The function outer() writes log, an implicit output.",
+    "9:UnknownEffect: The function outer() uses unresolved iterate protocol, an unknown effect.",
+  ]);
+  const assign = ["  const box: { g?: Generator<number> } = {};", "  Object.assign(box, { g: it });", "  return [...box.g!];"];
+  assert.deepEqual(ownerMessages("outer", "escape-assign.ts", generatorUse(assign)), [
+    "9:ImplicitOutput: The function outer() writes log, an implicit output.",
+    "10:UnknownEffect: The function outer() uses unresolved iterate protocol, an unknown effect.",
+  ]);
+  const replacer = ["  return JSON.stringify(it, (key, value) => (value && typeof value.next === \"function\" ? value.next().value : value));"];
+  assert.deepEqual(ownerMessages("outer", "escape-json.ts", generatorUse(replacer)), [
+    "8:UnknownEffect: The function outer() calls unresolved callable, an unknown effect.",
+    "8:ImplicitOutput: The function outer() writes log, an implicit output.",
+  ]);
+  const all = [...generator, "async function outer() {", "  const [x] = await Promise.all([gen()]);", "  return [...x];", "}", ""];
+  assert.deepEqual(ownerMessages("outer", "escape-all.ts", all.join("\n")), [
+    "7:UnknownEffect: The function outer() uses unresolved iterate protocol, an unknown effect.",
+    "7:ImplicitOutput: The function outer() writes log, an implicit output.",
+  ]);
+});
+
+test("a call's returned literal resolves methods through arrow bodies and nested branches but not nested functions", () => {
+  const source = [
+    "const arrow = () => ({ emit(): void { console.log(\"a\"); } });",
+    "function branch(flag: boolean) {",
+    "  if (flag) {",
+    "    return { emit(): void { console.log(\"b\"); } };",
+    "  }",
+    "  return { emit(): void {} };",
+    "}",
+    "function nested() {",
+    "  const helper = (p: any) => { return p; };",
+    "  class Holder { get(p: any) { return p; } }",
+    "  return { emit(): void {}, helper, Holder };",
+    "}",
+    "function useArrow() { arrow().emit(); }",
+    "function useBranch() { branch(true).emit(); }",
+    "function useNested() { nested().emit(); }",
+    "",
+  ];
+  assert.deepEqual(messages("returned-literal.ts", source.join("\n")), [
+    "1:ImplicitOutput: The method emit() uses console, an implicit output.",
+    "4:ImplicitOutput: The method emit() uses console, an implicit output.",
+    "13:ImplicitOutput: The function useArrow() uses console, an implicit output.",
+    "14:ImplicitOutput: The function useBranch() uses console, an implicit output.",
+  ]);
+});
+
+test("generator, async, empty and partly unresolved returns leave method calls unresolved", () => {
+  const source = [
+    "function* gen() { return { emit(): void {} }; }",
+    "async function later() { return { emit(): void {} }; }",
+    "const lazy = async () => ({ emit(): void {} });",
+    "function none(): any { }",
+    "const nothing: any = null;",
+    "function partial(p: any) {",
+    "  if (p) {",
+    "    return p;",
+    "  }",
+    "  return { emit(): void {} };",
+    "}",
+    "function useGen() { (gen() as any).emit(); }",
+    "function useLater() { (later() as any).emit(); }",
+    "function useLazy() { (lazy() as any).emit(); }",
+    "function useNone() { none().emit(); }",
+    "function useNothing() { nothing().emit(); }",
+    "function usePartial(p: any) { partial(p).emit(); }",
+    "",
+  ];
+  assert.deepEqual(messages("returned-unresolved.ts", source.join("\n")), [
+    "12:UnknownEffect: The function useGen() calls overridable method, an unknown effect.",
+    "13:UnknownEffect: The function useLater() calls overridable method, an unknown effect.",
+    "14:UnknownEffect: The function useLazy() calls overridable method, an unknown effect.",
+    "15:UnknownEffect: The function useNone() calls overridable method, an unknown effect.",
+    "16:UnknownEffect: The function useNothing() calls overridable method, an unknown effect.",
+    "17:UnknownEffect: The function usePartial() calls overridable method, an unknown effect.",
+  ]);
+});

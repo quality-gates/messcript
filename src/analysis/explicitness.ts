@@ -2046,7 +2046,7 @@ function factoryRelativeCaptures(
   factory: EffectOwner,
   actualFact: (index: number) => StorageFact,
 ): ReadonlyMap<Binding, StorageFact> {
-  const closures = state.callables.filter((callable) => callable !== factory && inside(callable, factory));
+  const closures = state.callables.filter((callable) => inside(callable, factory));
   return joinCaptures(closures.map((closure) => new Map(state.model.bindings
     .filter((binding) => inside(binding.scope.node, factory) && !inside(binding.scope.node, closure) &&
       binding.references.some((reference) => inside(reference, closure)))
@@ -2596,7 +2596,7 @@ function holderSites(state: AnalysisState, holder: ts.Expression, owner: EffectO
 
 function isInertUse(model: ScopeModel, expression: ts.Expression): boolean {
   const parent = expression.parent;
-  if ((ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) && parent.expression === expression) {
+  if (ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) {
     const member = outerExpression(parent);
     return !isCallee(member) && isInertUse(model, member);
   }
@@ -2606,13 +2606,13 @@ function isInertUse(model: ScopeModel, expression: ts.Expression): boolean {
   if (ts.isPrefixUnaryExpression(parent)) {
     return parent.operator === ts.SyntaxKind.ExclamationToken;
   }
-  return ts.isCallExpression(parent) && parent.expression !== expression ? isInertArgument(model, parent) : isDiscarded(parent);
+  return ts.isCallExpression(parent) ? isInertArgument(model, parent) : isDiscarded(parent);
 }
 
 function isInertArgument(model: ScopeModel, call: ts.CallExpression): boolean {
   const known = libraryCall(call, model);
-  if (known?.kind === "mutating" && known.target === "receiver" && known.stores !== "none") {
-    return known.callbacks.length === 0;
+  if (known?.kind === "mutating") {
+    return known.target === "receiver";
   }
   return known?.kind === "pure" && known.result === "fresh" && known.callbacks.length === 0 && iteratedArgument(call, model) === undefined;
 }
