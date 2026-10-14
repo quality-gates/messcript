@@ -160,6 +160,9 @@ function cellMatchesSlot(cellSlot: string, selectedSlot: string | undefined): bo
   if (selectedSlot === undefined || selectedSlot === "*" || cellSlot === "*" || cellSlot === selectedSlot) {
     return true;
   }
+  if (cellSlot.startsWith(EXCEPT)) {
+    return !exceptedSlots(cellSlot).includes(selectedSlot);
+  }
   const start = cellSlot.startsWith("append:") ? Number(cellSlot.slice(7)) : undefined;
   const index = arrayIndexForSlot(selectedSlot);
   return start !== undefined && index !== undefined && index >= start;
@@ -205,7 +208,7 @@ export function allocatedFact(value: ts.Node, parts: readonly { slot: string; fa
       heap.set(cellKey(cell), cell);
     }
     applyHeapWrite(heap, { target: { outer: [allocation], reachable: [] }, value: fact,
-      slot, replace: slot !== "*" });
+      slot, replace: !isWildcardSlot(slot) });
   }
   const cells = pruneCells([allocation], [...heap.values()]);
   return { outer: [allocation], reachable: reachableOrigins([allocation], cells), cells };
@@ -291,7 +294,24 @@ export function objectLiteralFact(value: ts.Expression, resolve: (value: ts.Expr
   if (!ts.isObjectLiteralExpression(value)) {
     return { outer: ["unknown"], reachable: ["unknown"] };
   }
-  return allocatedFact(value, value.properties.flatMap((property) => propertyParts(property, resolve)));
+  const parts = value.properties.flatMap((property) => propertyParts(property, resolve));
+  return allocatedFact(value, parts.map((part, index) => isWildcardSlot(part.slot)
+    ? { ...part, slot: exceptSlot(part.slot, parts.slice(index + 1).map((later) => later.slot)) } : part));
+}
+
+const EXCEPT = "*-except:";
+
+function isWildcardSlot(slot: string): boolean {
+  return slot === "*" || slot.startsWith(EXCEPT);
+}
+
+function exceptedSlots(slot: string): string[] {
+  return slot.startsWith(EXCEPT) ? slot.slice(EXCEPT.length).split(",").map(decodeURIComponent) : [];
+}
+
+function exceptSlot(slot: string, later: readonly string[]): string {
+  const excepted = [...new Set([...exceptedSlots(slot), ...later.filter((name) => name.startsWith("property:"))])].sort();
+  return excepted.length ? `${EXCEPT}${excepted.map(encodeURIComponent).join(",")}` : slot;
 }
 
 function propertyParts(property: ts.ObjectLiteralElementLike, resolve: (value: ts.Expression) => StorageFact): { slot: string; fact: StorageFact }[] {

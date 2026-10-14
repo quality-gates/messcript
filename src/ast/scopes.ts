@@ -409,13 +409,14 @@ class ScopeBuilder {
   }
 }
 
-type MemberWrites = { readonly targets: ReadonlySet<ts.Node>; readonly names: ReadonlySet<string> };
+type MemberWrites = { readonly targets: ReadonlySet<ts.Node>; readonly names: ReadonlySet<string>; readonly anyName: boolean };
 
 const definingCalls = new Set(["Object.defineProperty", "Reflect.defineProperty", "Reflect.set"]);
 
 function memberWrites(sourceFile: ts.SourceFile): MemberWrites {
   const targets = new Set<ts.Node>();
   const names = new Set<string>();
+  let anyName = false;
   const visit = (node: ts.Node): void => {
     for (const target of writeTargets(node)) {
       const value = unwrapExpression(target);
@@ -425,31 +426,46 @@ function memberWrites(sourceFile: ts.SourceFile): MemberWrites {
         names.add(name);
       }
     }
-    for (const name of definedNames(node)) {
+    const defined = definedNames(node);
+    anyName ||= defined === undefined;
+    for (const name of defined ?? []) {
       names.add(name);
     }
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
-  return { targets, names };
+  return { targets, names, anyName };
 }
 
-function definedNames(node: ts.Node): string[] {
+function definedNames(node: ts.Node): string[] | undefined {
   if (!ts.isCallExpression(node)) {
     return [];
   }
   const callee = unwrapExpression(node.expression);
   const library = ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) ? `${callee.expression.text}.${callee.name.text}` : "";
-  const key = node.arguments[1] && unwrapExpression(node.arguments[1]);
-  if (key && ts.isStringLiteralLike(key) && definingCalls.has(library)) {
-    return [key.text];
+  const target = node.arguments[0] && unwrapExpression(node.arguments[0]);
+  return target && !ts.isObjectLiteralExpression(target) ? libraryNames(library, node.arguments) : [];
+}
+
+function libraryNames(library: string, args: readonly ts.Expression[]): string[] | undefined {
+  if (definingCalls.has(library)) {
+    const key = args[1] && unwrapExpression(args[1]);
+    return key && ts.isStringLiteralLike(key) ? [key.text] : undefined;
   }
-  return library === "Object.assign"
-    ? node.arguments.slice(1).flatMap((source) => {
-      const value = unwrapExpression(source);
-      return ts.isObjectLiteralExpression(value) ? value.properties.flatMap((property) => declarationName(property) ?? []) : [];
-    })
-    : [];
+  return library === "Object.assign" ? sourceNames(args.slice(1)) : [];
+}
+
+function sourceNames(sources: readonly ts.Expression[]): string[] | undefined {
+  const names: string[] = [];
+  for (const source of sources) {
+    const value = unwrapExpression(source);
+    const properties = ts.isObjectLiteralExpression(value) ? value.properties.map(declarationName) : [undefined];
+    if (properties.some((name) => name === undefined)) {
+      return undefined;
+    }
+    names.push(...properties as string[]);
+  }
+  return names;
 }
 
 // messcript-disable-next-line GlobalVariable
@@ -467,7 +483,7 @@ function buildModel(sourceFile: ts.SourceFile): ScopeModel {
     resolveType: resolveLocalType,
     writeOf: (node) => builder.writes.get(node),
     writesMember: (access) => writes().targets.has(access),
-    writesMemberName: (name) => writes().names.has(name),
+    writesMemberName: (name) => writes().anyName || writes().names.has(name),
   };
 }
 

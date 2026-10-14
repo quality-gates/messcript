@@ -67,6 +67,9 @@ export function supportsProtocol(
   if (ts.isArrayLiteralExpression(value)) {
     return protocol !== "convert";
   }
+  if (ts.isPropertyAccessExpression(value)) {
+    return memberSupports(model, value.expression, value.name.text, protocol);
+  }
   if (ts.isNewExpression(value)) {
     return protocol === "iterate" && ITERABLE_TYPES.has(globalName(value.expression, model) ?? "");
   }
@@ -113,6 +116,42 @@ function bindingSupports(model: ScopeModel, value: ts.Identifier, protocol: Prot
   const assigned = assignments.bindingAssignments(binding);
   return assigned.length > 0 ? assigned.every((assignment) => assignment.value !== undefined &&
     supportsProtocol(model, assignment.value, protocol, next)) : parameters.length > 0;
+}
+
+function memberSupports(model: ScopeModel, owner: ts.Expression, name: string, protocol: Protocol): boolean {
+  const value = expressions.unwrapExpression(owner);
+  const binding = ts.isIdentifier(value) ? model.resolve(value) : undefined;
+  return !!binding && assignments.bindingAssignments(binding).length === 0 && binding.declarations.every((declaration) =>
+    ts.isParameter(declaration.node) && declaration.node.type !== undefined &&
+    memberTypeSupports(model, declaration.node.type, name, protocol, new Set()));
+}
+
+function memberTypeSupports(model: ScopeModel, type: ts.TypeNode, name: string, protocol: Protocol, seen: ReadonlySet<ts.TypeNode>): boolean {
+  if (seen.has(type)) {
+    return false;
+  }
+  const next = new Set(seen).add(type);
+  const parts = memberTypeParts(model, type);
+  return parts ? parts.every((part) => memberTypeSupports(model, part, name, protocol, next)) : literalMemberSupports(model, type, name, protocol);
+}
+
+function memberTypeParts(model: ScopeModel, type: ts.TypeNode): readonly ts.TypeNode[] | undefined {
+  if (ts.isParenthesizedTypeNode(type)) {
+    return [type.type];
+  }
+  if (ts.isUnionTypeNode(type)) {
+    return type.types;
+  }
+  const local = ts.isTypeReferenceNode(type) && ts.isIdentifier(type.typeName) && !model.resolve(type.typeName)
+    ? model.resolveType(type.typeName) : undefined;
+  return local?.kind === "alias" ? [local.type] : undefined;
+}
+
+function literalMemberSupports(model: ScopeModel, type: ts.TypeNode, name: string, protocol: Protocol): boolean {
+  const members = ts.isTypeLiteralNode(type) ? type.members.filter((member) => member.name && ts.isIdentifier(member.name) && member.name.text === name) : [];
+  const [member] = members;
+  return members.length === 1 && ts.isPropertySignature(member) && !member.questionToken && member.type !== undefined &&
+    typeSupports(model, member.type, protocol);
 }
 
 function declarationSupports(model: ScopeModel, node: ts.Node, protocol: Protocol): boolean {

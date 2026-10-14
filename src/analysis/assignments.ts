@@ -56,7 +56,7 @@ function reaching(assignment: Assignment, owner: EffectOwner, site: ts.Node): As
   if (assignment.node.end > site.getStart()) {
     return [];
   }
-  return [unconditional(assignment.node, owner) ? assignment : { ...assignment, join: true }];
+  return [dominates(assignment.node, owner, site) ? assignment : { ...assignment, join: true }];
 }
 
 export function canReachSite(node: ts.Node, owner: EffectOwner, site: ts.Node): boolean {
@@ -66,7 +66,7 @@ export function canReachSite(node: ts.Node, owner: EffectOwner, site: ts.Node): 
 function repeated(assignment: Assignment, owner: EffectOwner, site: ts.Node): boolean {
   for (let current: ts.Node | undefined = site.parent; current && current !== owner; current = current.parent) {
     if (ts.isIterationStatement(current, false) && inside(assignment.node, current)) {
-      return assignment.node.end > site.getStart() || !unconditional(assignment.node, owner);
+      return assignment.node.end > site.getStart() || !dominates(assignment.node, owner, site);
     }
   }
   return false;
@@ -121,7 +121,26 @@ export function referenceAssignment(reference: ts.Identifier): Assignment | unde
     }
     return isLogicalAssignment(operator) ? { node: parent, value: parent.right, join: true } : undefined;
   }
-  return patternOrLoopTarget(target) ? { node: target, join: true } : undefined;
+  return patternOrLoopTarget(target) ? elementValue(target) ?? { node: target, join: true } : undefined;
+}
+
+function elementValue(node: ts.Expression): { readonly node: ts.Node; readonly value: ts.Expression } | undefined {
+  const parent = node.parent;
+  if (ts.isBinaryExpression(parent) && parent.left === node && !isPatternPart(parent.parent)) {
+    return { node: parent, value: parent.right };
+  }
+  if (!ts.isArrayLiteralExpression(parent)) {
+    return undefined;
+  }
+  const outer = elementValue(parent);
+  const value = outer && positionalElement(outer.value, parent.elements.indexOf(node));
+  return outer && value ? { node: outer.node, value } : undefined;
+}
+
+function positionalElement(value: ts.Expression, index: number): ts.Expression | undefined {
+  const source = unwrapExpression(value);
+  const elements = ts.isArrayLiteralExpression(source) ? source.elements.slice(0, index + 1) : [];
+  return elements.some((element) => ts.isSpreadElement(element) || ts.isOmittedExpression(element)) ? undefined : elements[index];
 }
 
 function isLogicalAssignment(operator: number): boolean {
@@ -185,6 +204,18 @@ export function unconditional(node: ts.Node, owner: EffectOwner): boolean {
   for (let current: ts.Node | undefined = node.parent; current && current !== owner; current = current.parent) {
     if (isBranch(current) && !knownBranch(current)) {
       return false;
+    }
+  }
+  return true;
+}
+
+function dominates(node: ts.Node, owner: EffectOwner, site: ts.Node): boolean {
+  for (let current: ts.Node | undefined = node.parent; current && current !== owner; current = current.parent) {
+    if (isBranch(current) && !knownBranch(current)) {
+      return false;
+    }
+    if (inside(site, current)) {
+      return true;
     }
   }
   return true;

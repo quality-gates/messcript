@@ -9,8 +9,9 @@ import { reachableChildren } from "./control-flow";
 import { bindingAssignments, canReachSite, inside, referenceAssignment, unconditional, type Assignment } from "./assignments";
 import { callableTargets as resolveTargets, memberTargets, type Dispatch, type Targets } from "./dispatch";
 import { classTargets } from "./shapes";
-import { ambientFlow, isPureConstructor, iteratedArgument, libraryCall, libraryCallback, movesElements, type LibraryCall, type LibraryStorage } from "./library";
+import { ambientFlow, isLibraryMethodName, isPureConstructor, iteratedArgument, libraryCall, libraryCallback, movesElements, type LibraryCall, type LibraryStorage } from "./library";
 import { protocolExpressions, supportsProtocol } from "./protocols";
+import { standardReceiver } from "./standard-receivers";
 import { readSites, storageSlot, writeAffectsRead, type ReadSite } from "./reads";
 import {
   baseClassExpression, collectOwners, enclosingClass, explicitConstructor, instanceInitializers, isConstruction,
@@ -60,6 +61,7 @@ export type ImplicitFlow = {
   path?: StoragePath;
   receiver?: "read" | "write";
   defaultParameterIndex?: number;
+  parameterIndex?: number;
   /** The write in a deeper callee that this flow forwards; set once a flow passes through a call it does not own. */
   writeNode?: ts.Node;
   /** The external storage an output flow mutates, so a caller that owns one of those bindings can re-resolve it. */
@@ -1569,6 +1571,7 @@ function isExposedOwner(state: AnalysisState, owner: EffectOwner): boolean {
 function dispatchFor(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>): Dispatch {
   return {
     model: state.model, owners: state.callables, assignments: (binding) => cachedAssignments(state, binding),
+    libraryMethod: (receiver, name) => isLibraryMethodName(name) && standardReceiver(state.model, receiver),
     returns: (call, seen) => {
       const targets = resolveTargets(dispatchFor(state, summaries), call.expression, seen);
       const returned = targets.targets.flatMap((target) => summaries.get(target)?.returnedCallables ?? []);
@@ -1908,7 +1911,9 @@ function resolvedCallEffects(
     const instantiate = (part: CallableSummary, site: ts.Node) =>
       instantiateCallableSummary(state, summaries, part, call.arguments, site, owner, receiver, captures);
     if (isGenerator(target)) {
-      return sites.map((site) => instantiate(summary, site));
+      const body = defaultEffects(summary, false);
+      return [instantiate(runSummary(summary, defaultEffects(summary, true)), call.expression), ...sites.map((site) =>
+        instantiate({ ...summary, flows: body.flows, parameterWrites: body.writes, parameterCalls: body.parameterCalls }, site))];
     }
     const runs = summary.returnedRuns;
     return [instantiate(summary, call.expression), ...(runs ? sites.map((site) => instantiate(runSummary(summary, runs), site)) : [])];
@@ -1933,6 +1938,12 @@ function callReceiver(
 
 function returnsIterator(summaries: ReadonlyMap<EffectOwner, CallableSummary>, target: EffectOwner): boolean {
   return isGenerator(target) || summaries.get(target)?.returnedRuns !== undefined;
+}
+
+function defaultEffects(summary: CallableSummary, defaults: boolean): CallEffects {
+  const keep = <T extends { readonly defaultParameterIndex?: number }>(effects: readonly T[]) =>
+    effects.filter((effect) => (effect.defaultParameterIndex !== undefined) === defaults);
+  return { flows: keep(summary.flows), writes: keep(summary.parameterWrites), parameterCalls: keep(summary.parameterCalls) };
 }
 
 function runSummary(summary: CallableSummary, runs: CallEffects): CallableSummary {
@@ -3283,6 +3294,7 @@ function analyzeImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): 
       node: write.node,
       owner: summary.owner,
       description: write.description,
+      parameterIndex: write.parameterIndex,
     })));
     flows.push(...summary.parameterCalls.map((call) => ({
       kind: "unknown" as const,
@@ -3291,7 +3303,28 @@ function analyzeImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): 
       description: "calls unresolved callable",
     })));
   }
-  return uniqueLines(uniqueFlows(withoutPassedReads(state.model, flows)));
+  return uniqueLines(uniqueFlows(firstStorageSites(withoutPassedReads(state.model, flows))));
+}
+
+function firstStorageSites(flows: readonly ImplicitFlow[]): ImplicitFlow[] {
+  const first = new Map<string, ImplicitFlow>();
+  for (const flow of flows) {
+    const key = flowStorageKey(flow);
+    const earlier = key === undefined ? undefined : first.get(key);
+    if (key !== undefined && (!earlier || flow.node.getStart() < earlier.node.getStart())) {
+      first.set(key, flow);
+    }
+  }
+  return flows.filter((flow) => {
+    const key = flowStorageKey(flow);
+    return key === undefined || first.get(key) === flow;
+  });
+}
+
+function flowStorageKey(flow: ImplicitFlow): string | undefined {
+  const storage = flow.binding ? `binding:${flow.binding.declarations[0]?.identifier.getStart()}`
+    : flow.parameterIndex === undefined ? undefined : `parameter:${flow.parameterIndex}`;
+  return storage && `${ownerKey(flow.owner)}:${flow.kind}:${storage}`;
 }
 
 function withoutPassedReads(model: ScopeModel, flows: readonly ImplicitFlow[]): ImplicitFlow[] {

@@ -3239,8 +3239,7 @@
   "name": "mut-e2-sort-alias",
   "source": "export function change(items: number[]) {\n  const sorted = items.sort();\n  sorted.push(1);\n}\n",
   "findings": [
-   "2:ImplicitOutput: function change(): The function change() mutates argument items, an implicit output.",
-   "3:ImplicitOutput: function change(): The function change() mutates caller-owned value sorted, an implicit output."
+   "2:ImplicitOutput: function change(): The function change() mutates argument items, an implicit output."
   ]
  },
  {
@@ -3550,9 +3549,7 @@
  {
   "name": "mut-e3-iter-member",
   "source": "export function run(box: { items: number[] }) {\n  for (const x of box.items) {\n    void x;\n  }\n}\n",
-  "findings": [
-   "2:UnknownEffect: function run(): The function run() uses unresolved iterate protocol, an unknown effect."
-  ]
+  "findings": []
  },
  {
   "name": "mut-e3-iter-reassigned",
@@ -3984,9 +3981,7 @@
  {
   "name": "mut-s1-object-computed-dynamic",
   "source": "const store: number[] = [];\nexport function change(key: string): void {\n  const holder = { [key]: store, b: [0] };\n  holder.b.push(1);\n}\n",
-  "findings": [
-   "4:ImplicitOutput: function change(): The function change() mutates caller-owned value holder, an implicit output."
-  ]
+  "findings": []
  },
  {
   "name": "mut-s1-set-add-stores",
@@ -4296,9 +4291,7 @@
  {
   "name": "mut-s2-cyclic-callee",
   "source": "export function run() {\n  let first = () => 1;\n  let second = first;\n  first = second;\n  return first();\n}\n",
-  "findings": [
-   "5:UnknownEffect: function run(): The function run() calls overridable method, an unknown effect."
-  ]
+  "findings": []
  },
  {
   "name": "mut-s2-nested-pattern-callee",
@@ -4795,9 +4788,7 @@
  {
   "name": "mut-s3-loop-earlier-unconditional-reassign",
   "source": "const store: number[] = [];\nexport function fill() {\n  let target: number[] = store;\n  for (let i = 0; i < 2; i++) {\n    target = [];\n    target.push(i);\n  }\n  return 0;\n}\n",
-  "findings": [
-   "6:ImplicitOutput: function fill(): The function fill() mutates caller-owned value target, an implicit output."
-  ]
+  "findings": []
  },
  {
   "name": "mut-s3-catch-write",
@@ -4872,10 +4863,7 @@
  {
   "name": "mut-s3-pattern-assign-after-store",
   "source": "const store: number[] = [];\nexport function fill() {\n  let target: number[] = store;\n  [target] = [[0]];\n  target.push(1);\n  return 0;\n}\n",
-  "findings": [
-   "5:ImplicitOutput: function fill(): The function fill() mutates caller-owned value target, an implicit output.",
-   "5:UnknownEffect: function fill(): The function fill() mutates value with unknown ownership, an unknown effect."
-  ]
+  "findings": []
  },
  {
   "name": "mut-s3-array-literal-compare",

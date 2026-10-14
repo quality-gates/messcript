@@ -37,6 +37,10 @@ export function standardMethod(model: ScopeModel, expression: ts.Expression, met
   return receivers.length > 0 && receivers.every((receiver) => receiverMethod(receiver, method));
 }
 
+export function standardReceiver(model: ScopeModel, expression: ts.Expression): boolean {
+  return standardReceivers(model, expression, new Set()).length > 0;
+}
+
 function receiverMethod(receiver: StandardReceiver, method: string): boolean {
   if (method === "toString") {
     return true;
