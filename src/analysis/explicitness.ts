@@ -6,7 +6,7 @@ import { methodName, outerExpression, unwrapExpression } from "../ast/expression
 import { analyzeScopes, isAmbient, writeTargets } from "../ast/scopes";
 import type { Binding, ScopeModel, Write } from "../ast/scopes";
 import { reachableChildren } from "./control-flow";
-import { bindingAssignments, canReachSite, inside, referenceAssignment, unconditional } from "./assignments";
+import { bindingAssignments, canReachSite, inside, referenceAssignment, unconditional, type Assignment } from "./assignments";
 import { callableTargets as resolveTargets, memberTargets, type Dispatch, type Targets } from "./dispatch";
 import { classTargets } from "./shapes";
 import { ambientFlow, isPureConstructor, iteratedArgument, libraryCall, libraryCallback, movesElements, type LibraryCall, type LibraryStorage } from "./library";
@@ -123,7 +123,12 @@ type AnalysisState = {
   readonly sharedLocalBindings: Map<Binding, Map<string, SharedWrite>>;
   readonly bindingOrigins: ReadonlyMap<StorageOrigin, Binding>;
   readonly arrayLiterals: ReadonlyMap<number, ts.ArrayLiteralExpression>;
+  readonly exposedOwners: ReadonlySet<ts.Node>;
+  readonly ownerReferences: Map<EffectOwner, readonly OwnerReferences[]>;
+  readonly assignments: Map<Binding, Assignment[]>;
 };
+
+type OwnerReferences = { readonly binding: Binding; readonly references: readonly ts.Identifier[] };
 
 const privateFact: StorageFact = { outer: ["private"], reachable: ["private"] };
 const unknownFact: StorageFact = { outer: ["unknown"], reachable: ["unknown"] };
@@ -717,8 +722,19 @@ function collectCallables(sourceFile: ts.SourceFile, model: ScopeModel, includeT
     factCache: new Map(), insertionCache: new Map(), cycles: { count: 0 }, includeThis,
     sharedBindings: new Map(), sharedLocalBindings: new Map(),
     bindingOrigins: new Map(model.bindings.map((binding) => [externalBindingOrigin(binding), binding])),
-    arrayLiterals,
+    arrayLiterals, exposedOwners: exposedOwners(model), ownerReferences: new Map(), assignments: new Map(),
   };
+}
+
+function exposedOwners(model: ScopeModel): Set<ts.Node> {
+  const owners = new Set<ts.Node>();
+  for (const declaration of model.bindings.filter(isExportedBinding).flatMap((binding) => binding.declarations)) {
+    owners.add(declaration.node);
+    if (ts.isVariableDeclaration(declaration.node) && declaration.node.initializer) {
+      owners.add(unwrapExpression(declaration.node.initializer));
+    }
+  }
+  return owners;
 }
 
 function shareOrigins(state: AnalysisState, origins: readonly StorageOrigin[], slots: readonly string[] = ["*"]): void {
@@ -1132,18 +1148,28 @@ type ArrayReference = { readonly reference: ts.Identifier; readonly fact: Storag
 
 function priorArrayReferences(state: AnalysisState, owner: EffectOwner, call: ts.Node, origin: StorageOrigin): ArrayReference[] {
   const references: { reference: ts.Identifier; fact: StorageFact }[] = [];
-  for (const binding of state.model.bindings) {
-    const bindingFact = storageFactForBinding(state, state.summaries, binding, owner, call);
-    if (![...bindingFact.outer, ...bindingFact.reachable].includes(origin)) {
+  for (const { binding, references: owned } of referencesWithin(state, owner)) {
+    const prior = owned.filter((reference) => referenceBefore(reference, call, owner));
+    if (prior.length === 0) {
       continue;
     }
-    for (const reference of binding.references) {
-      if (referenceBefore(reference, call, owner)) {
-        references.push({ reference, fact: bindingFact });
-      }
+    const bindingFact = storageFactForBinding(state, state.summaries, binding, owner, call);
+    if ([...bindingFact.outer, ...bindingFact.reachable].includes(origin)) {
+      references.push(...prior.map((reference) => ({ reference, fact: bindingFact })));
     }
   }
   return references.sort((left, right) => left.reference.getStart() - right.reference.getStart());
+}
+
+function referencesWithin(state: AnalysisState, owner: EffectOwner): readonly OwnerReferences[] {
+  let owned = state.ownerReferences.get(owner);
+  if (!owned) {
+    owned = state.model.bindings
+      .map((binding) => ({ binding, references: binding.references.filter((reference) => inside(reference, owner)) }))
+      .filter((item) => item.references.length > 0);
+    state.ownerReferences.set(owner, owned);
+  }
+  return owned;
 }
 
 function referenceBefore(reference: ts.Identifier, call: ts.Node, owner: EffectOwner): boolean {
@@ -1494,22 +1520,28 @@ function shareExposedReturns(state: AnalysisState, summary: CallableSummary): vo
 }
 
 function isExposedOwner(state: AnalysisState, owner: EffectOwner): boolean {
-  if (hasExportModifier(owner)) {
-    return true;
-  }
-  return state.model.bindings.some((binding) => isExportedBinding(binding) && binding.declarations.some((declaration) =>
-    declaration.node === owner || ts.isVariableDeclaration(declaration.node) && declaration.node.initializer &&
-      unwrapExpression(declaration.node.initializer) === owner,
-  ));
+  return hasExportModifier(owner) || state.exposedOwners.has(owner);
 }
 
 function dispatchFor(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>): Dispatch {
-  return { model: state.model, owners: state.callables, returns: (call, seen) => {
-    const targets = resolveTargets(dispatchFor(state, summaries), call.expression, seen);
-    const returned = targets.targets.flatMap((target) => summaries.get(target)?.returnedCallables ?? []);
-    const complete = targets.complete && targets.targets.every((target) => !summaries.get(target)?.opaqueReturn);
-    return { targets: uniqueCallables(returned), complete };
-  } };
+  return {
+    model: state.model, owners: state.callables, assignments: (binding) => cachedAssignments(state, binding),
+    returns: (call, seen) => {
+      const targets = resolveTargets(dispatchFor(state, summaries), call.expression, seen);
+      const returned = targets.targets.flatMap((target) => summaries.get(target)?.returnedCallables ?? []);
+      const complete = targets.complete && targets.targets.every((target) => !summaries.get(target)?.opaqueReturn);
+      return { targets: uniqueCallables(returned), complete };
+    },
+  };
+}
+
+function cachedAssignments(state: AnalysisState, binding: Binding): Assignment[] {
+  let assigned = state.assignments.get(binding);
+  if (!assigned) {
+    assigned = bindingAssignments(binding);
+    state.assignments.set(binding, assigned);
+  }
+  return assigned;
 }
 
 function callableTargets(

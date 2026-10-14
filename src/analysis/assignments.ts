@@ -156,6 +156,9 @@ function isPatternPart(node: ts.Node): boolean {
 
 /** Tells if the node is the ancestor or the node itself. */
 export function inside(node: ts.Node, ancestor: ts.Node): boolean {
+  if (node.pos >= 0 && ancestor.pos >= 0 && (node.pos < ancestor.pos || node.end > ancestor.end)) {
+    return false;
+  }
   for (let current: ts.Node | undefined = node; current; current = current.parent) {
     if (current === ancestor) {
       return true;

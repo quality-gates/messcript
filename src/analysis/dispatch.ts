@@ -10,6 +10,7 @@ export type Dispatch = {
   readonly model: ScopeModel;
   readonly owners: readonly owners.EffectOwner[];
   readonly returns: (call: ts.CallExpression, seen: ReadonlySet<Binding>) => Targets;
+  readonly assignments: typeof assignments.bindingAssignments;
 };
 
 type MemberKind = "call" | "get" | "set";
@@ -71,7 +72,7 @@ function bindingTargets(dispatch: Dispatch, binding: Binding, seen: ReadonlySet<
   const functions = binding.declarations.flatMap((declaration) =>
     ts.isFunctionDeclaration(declaration.node) && declaration.node.body ? [declaration.node] : [],
   );
-  const assigned = assignments.bindingAssignments(binding);
+  const assigned = dispatch.assignments(binding);
   const groups = assigned.map((assignment) => !assignment.value ? UNKNOWN
     : assignment.element ? elementTargets(dispatch, binding, assignment.node, assignment.value, next)
       : callableTargets(dispatch, assignment.value, next));
