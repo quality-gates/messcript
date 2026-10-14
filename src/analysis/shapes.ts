@@ -44,7 +44,7 @@ export function receiverShapes(model: ScopeModel, expression: ts.Expression, see
     return closedShapes(model, classTargets(model, value.expression));
   }
   if (ts.isObjectLiteralExpression(value)) {
-    return closedShapes(model, [value]);
+    return setsPrototype(value) ? undefined : closedShapes(model, [value]);
   }
   if (!ts.isIdentifier(value)) {
     return undefined;
@@ -58,6 +58,11 @@ export function receiverShapes(model: ScopeModel, expression: ts.Expression, see
     return undefined;
   }
   return bindingShapes(model, binding, new Set(seen).add(binding), site);
+}
+
+function setsPrototype(literal: ts.ObjectLiteralExpression): boolean {
+  return literal.properties.some((property) => ts.isPropertyAssignment(property) && !ts.isComputedPropertyName(property.name) &&
+    expressions.keyName(property.name) === "__proto__");
 }
 
 function bindingShapes(model: ScopeModel, binding: Binding, seen: ReadonlySet<Binding>, site: ts.Node): readonly Shape[] | undefined {

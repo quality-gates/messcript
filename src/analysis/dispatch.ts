@@ -11,6 +11,7 @@ export type Dispatch = {
   readonly owners: readonly owners.EffectOwner[];
   readonly returns: (call: ts.CallExpression, seen: ReadonlySet<Binding>) => Targets;
   readonly assignments: typeof assignments.bindingAssignments;
+  readonly libraryMethod: (receiver: ts.Expression, name: string) => boolean;
 };
 
 type MemberKind = "call" | "get" | "set";
@@ -66,7 +67,7 @@ function isNonCallable(value: ts.Expression): boolean {
 
 function bindingTargets(dispatch: Dispatch, binding: Binding, seen: ReadonlySet<Binding>): Targets {
   if (seen.has(binding)) {
-    return UNKNOWN;
+    return EMPTY;
   }
   const next = new Set(seen).add(binding);
   const functions = binding.declarations.flatMap((declaration) =>
@@ -123,7 +124,7 @@ function namedTargets(dispatch: Dispatch, receiver: ts.Expression, name: string,
     return UNKNOWN;
   }
   const candidates = dispatch.owners.filter((owner) => memberMatches(owner, name, kind));
-  return { targets: candidates, complete: false };
+  return { targets: dispatch.libraryMethod(receiver, name) ? candidates.filter(derivedMember) : candidates, complete: false };
 }
 
 function patchedTargets(dispatch: Dispatch, name: string, kind: MemberKind): Targets {
@@ -185,6 +186,10 @@ function entryTargets(dispatch: Dispatch, member: ts.Node, name: string, kind: M
   }
   const value = shapes.memberValue(member);
   return kind === "call" && value ? [callableTargets(dispatch, value, seen)] : [];
+}
+
+function derivedMember(owner: owners.EffectOwner): boolean {
+  return ts.isClassLike(owner.parent) && owners.baseClassExpression(owner.parent) !== undefined;
 }
 
 function memberMatches(node: ts.Node, name: string, kind: MemberKind): node is owners.EffectOwner {
