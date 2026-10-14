@@ -2679,7 +2679,6 @@
   "findings": [
    "2:ImplicitOutput: function add(): The function add() mutates argument list, an implicit output.",
    "3:ImplicitOutput: function run(): The function run() mutates caller-owned value log, an implicit output.",
-   "4:ImplicitInput: function first(): The function first() reads log, an implicit input.",
    "5:ImplicitInput: function third(): The function third() reads log, an implicit input."
   ]
  },

@@ -75,7 +75,11 @@ type ParameterWrite = {
   readonly node: ts.Node;
   readonly description: string;
   readonly defaultParameterIndex?: number;
+  readonly writeNode?: ts.Node;
+  readonly via?: readonly ForwardingHop[];
 };
+
+type ForwardingHop = { readonly site: ts.Node; readonly argument: ts.Expression };
 
 type ParameterCall = {
   readonly parameterIndex: number;
@@ -683,7 +687,7 @@ function mutationEffectsFromFact(
       description: parameterDescription ? `mutates argument ${parameterName(owner, projection.parameterIndex)}` : description,
     }] : [];
   });
-  return { flows: originFlows(state, origins, node, owner, description, receiverReported), writes, parameterCalls: [] };
+  return { flows: originFlows(state, origins, node, owner, description, receiverReported, slots), writes, parameterCalls: [] };
 }
 
 function originFlows(
@@ -693,10 +697,11 @@ function originFlows(
   owner: EffectOwner,
   description: string,
   receiverReported = false,
+  slots?: readonly (string | undefined)[],
 ): ImplicitFlow[] {
   const flows: ImplicitFlow[] = [];
   if (hasExternalOrigin(origins)) {
-    shareOrigins(state, origins);
+    shareOrigins(state, origins, slots?.map((slot) => slot ?? "*"));
     flows.push({ kind: "output", node, owner, description, origins: origins.filter((origin) => origin.startsWith("external:")) });
   }
   if (hasReceiverOrigin(origins) && !receiverReported) {
@@ -918,7 +923,9 @@ function pushSlots(call: ts.CallExpression, owner: EffectOwner, start: PushStart
     : Array.from(call.arguments.keys(), (index) => `property:${start.lowerBound + index}`))];
 }
 
-type TransferSource = { readonly node: ts.Node; readonly writeNode?: ts.Node; readonly repeated?: boolean };
+type TransferSource = {
+  readonly node: ts.Node; readonly writeNode?: ts.Node; readonly repeated?: boolean; readonly via?: readonly ForwardingHop[];
+};
 
 /**
  * Gives the slots a callee's push changes in the caller's array, or undefined for every slot.
@@ -999,7 +1006,33 @@ function iteratorStep(call: ts.CallExpression): boolean {
 }
 
 function transferOffset(state: AnalysisState, source: TransferSource, push: ts.CallExpression, sourceOwner: EffectOwner): PushStart | undefined {
+  if (source.via) {
+    return forwardedPushOffset(state, source.via, push);
+  }
   return source.writeNode || source.repeated ? { lowerBound: 0, exact: false } : calleePushOffset(state, push, sourceOwner);
+}
+
+/** A forwarded push lands after every push its hops make first, and is unbounded when any hop may shrink the array first. */
+function forwardedPushOffset(state: AnalysisState, via: readonly ForwardingHop[], push: ts.CallExpression): PushStart | undefined {
+  const pushOwner = enclosingFunction(push);
+  let lowerBound = 0;
+  for (const offset of [
+    ...via.map((hop) => hopOffset(state, hop)),
+    pushOwner && calleePushOffset(state, push, pushOwner),
+  ]) {
+    if (!offset) {
+      return undefined;
+    }
+    lowerBound += offset.lowerBound;
+  }
+  return { lowerBound, exact: false };
+}
+
+function hopOffset(state: AnalysisState, hop: ForwardingHop): PushStart | undefined {
+  const owner = enclosingFunction(hop.site);
+  const call = invocationAt(hop.site);
+  const target = storageKey(state, hop.argument);
+  return owner && call && target ? writeOffsetBefore(state, call, target, owner, new Set()) : undefined;
 }
 
 function invocationResets(state: AnalysisState, fact: StorageFact, invocation: Invocation): boolean {
@@ -1012,16 +1045,21 @@ function sharedWrites(state: AnalysisState): SharedWrite[] {
 }
 
 function calleePushOffset(state: AnalysisState, push: ts.CallExpression, sourceOwner: EffectOwner): PushStart | undefined {
-  const summary = state.summaries.get(sourceOwner);
   const target = pushReceiverKey(state, push);
-  if (!summary || !target) {
+  return target ? writeOffsetBefore(state, push, target, sourceOwner, new Set([push])) : undefined;
+}
+
+function writeOffsetBefore(
+  state: AnalysisState, point: ts.Node, target: string, owner: EffectOwner, counted: Set<ts.CallExpression>,
+): PushStart | undefined {
+  const summary = state.summaries.get(owner);
+  if (!summary) {
     return undefined;
   }
   let offset: PushStart | undefined = { lowerBound: 0, exact: true };
-  const counted = new Set<ts.CallExpression>([push]);
   for (const effect of [...summary.flows.filter(isWritingFlow), ...summary.parameterWrites]) {
-    if (offset && mayRunBefore(writeEnd(effect), push, sourceOwner)) {
-      offset = advanceCalleeOffset(state, offset, effect, target, counted, sourceOwner);
+    if (offset && mayRunBefore(writeEnd(effect), point, owner)) {
+      offset = advanceCalleeOffset(state, offset, effect, target, counted, owner);
     }
   }
   return offset;
@@ -1130,6 +1168,11 @@ function knownPushStartFromFact(state: AnalysisState, fact: StorageFact, owner: 
     return undefined;
   }
   const origin = fact.outer[0];
+  const external = originBinding(state, origin);
+  if (external) {
+    const length = external.path.length === 0 ? literalArrayLength(external.binding) : undefined;
+    return length === undefined ? undefined : { lowerBound: length, exact: false };
+  }
   const length = literalAllocationLength(state, origin);
   return length === undefined ? undefined : priorPushStart(state, owner, call, origin, length);
 }
@@ -2255,9 +2298,16 @@ function instantiateParameterWrites(
     }
     const fact = actualFact(write.parameterIndex);
     const slots = transferredPushSlots(state, fact, write, sourceOwner, node, owner, write.path);
-    return mutationEffectsFromFact(state, fact, write.path, node, owner,
+    const effects = mutationEffectsFromFact(state, fact, write.path, node, owner,
       `mutates caller-owned value ${actual.getText(state.sourceFile)}`, false, true, slots);
+    return { ...effects, writes: effects.writes.map((forwarded) => ({ ...forwarded, ...forwardedThrough(write, node, actual) })) };
   }));
+}
+
+function forwardedThrough(write: ParameterWrite, site: ts.Node, argument: ts.Expression): Pick<ParameterWrite, "writeNode" | "via"> {
+  const via = write.via ?? [];
+  return { writeNode: write.writeNode ?? write.node,
+    via: via.some((hop) => hop.site === site) ? via : [{ site, argument }, ...via] };
 }
 
 function instantiateParameterCalls(
@@ -2770,10 +2820,14 @@ function instantiateInsertion(
   invocation: StorageInvocation, sourceOwner: EffectOwner, node: ts.Node, owner: EffectOwner, mayReplace: boolean,
   repeated = false,
 ): StorageInsertion {
-  const target = invocationStorageFact(state, summaries, insertion.target, invocation, owner);
+  const target = invocationStorageFact(state, summaries, calleeOwnCellsRemoved(insertion.target), invocation, owner);
   const slot = transferredInsertionSlot(state, insertion, target, invocation, sourceOwner, node, owner, repeated);
   return { ...insertion, node, target, value: invocationStorageFact(state, summaries, insertion.value, invocation, owner), slot,
     replace: mayReplace && (insertion.appendCall ? slot !== undefined && !slot.startsWith("append:") : insertion.replace) };
+}
+
+function calleeOwnCellsRemoved(fact: StorageFact): StorageFact {
+  return fact.cells ? { ...fact, cells: fact.cells.filter((cell) => !parameterProjection(cell.allocation)) } : fact;
 }
 
 function transferredInsertionSlot(
@@ -3144,7 +3198,7 @@ function uniqueSummaryFlows(flows: readonly ImplicitFlow[]): readonly ImplicitFl
 function uniqueWrites(writes: readonly ParameterWrite[]): readonly ParameterWrite[] {
   const seen = new Set<string>();
   return writes.filter((write) => {
-    const key = `${write.parameterIndex}:${write.path}:${write.description}:${write.node.getStart()}`;
+    const key = `${write.parameterIndex}:${write.path}:${write.description}:${write.node.getStart()}:${write.writeNode?.getStart()}`;
     if (seen.has(key)) {
       return false;
     }

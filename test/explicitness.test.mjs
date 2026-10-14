@@ -2573,6 +2573,59 @@ function trimmed(items: number[]) {
 `), []);
 });
 
+test("an element a helper appends after the caller's own elements does not hold them, unless a helper shrinks the array first", () => {
+  const caller = (helpers, call) => `type Box = { n: number };
+${helpers}
+function outer(o: Box) {
+  const xs: Box[] = [{ n: 0 }];
+  ${call};
+  xs[0].n = 5;
+}
+`;
+  assert.deepEqual(messages("push-twice.ts", caller("function fill(acc: Box[], b: Box) { acc.push(b); acc.push(b); }", "fill(xs, o)")), [
+    "2:ImplicitOutput: The function fill() mutates argument acc, an implicit output.",
+  ]);
+  assert.deepEqual(messages("push-recursive.ts", caller("function fill(acc: Box[], b: Box, n: number): void { if (n > 0) { acc.push(b); fill(acc, b, n - 1); } }", "fill(xs, o, 2)")), [
+    "2:ImplicitOutput: The function fill() mutates argument acc, an implicit output.",
+  ]);
+  const forwarded = "function add(acc: Box[], b: Box) { acc.push(b); }\n";
+  assert.deepEqual(messages("push-forwarded.ts", caller(`${forwarded}function put(acc: Box[], b: Box) { add(acc, b); }`, "put(xs, o)")), [
+    "2:ImplicitOutput: The function add() mutates argument acc, an implicit output.",
+    "3:ImplicitOutput: The function put() mutates argument acc, an implicit output.",
+  ]);
+  assert.deepEqual(messages("shrink-forwarded.ts", caller(`${forwarded}function put(acc: Box[], b: Box) { acc.length = 0; add(acc, b); }`, "put(xs, o)")), [
+    "2:ImplicitOutput: The function add() mutates argument acc, an implicit output.",
+    "3:ImplicitOutput: The function put() mutates argument acc, an implicit output.",
+    "7:ImplicitOutput: The function outer() mutates caller-owned value xs, an implicit output.",
+  ]);
+  assert.deepEqual(messages("shrink-sibling.ts", caller(`${forwarded}function clear(acc: Box[]) { acc.length = 0; }
+function put(acc: Box[], b: Box) { clear(acc); add(acc, b); }`, "put(xs, o)")), [
+    "2:ImplicitOutput: The function add() mutates argument acc, an implicit output.",
+    "3:ImplicitOutput: The function clear() mutates argument acc, an implicit output.",
+    "4:ImplicitOutput: The function put() mutates argument acc, an implicit output.",
+    "8:ImplicitOutput: The function outer() mutates caller-owned value xs, an implicit output.",
+  ]);
+  assert.deepEqual(messages("module-push-forwarded.ts", `const table = [0];
+function inner(acc: number[], v: number) { acc.push(v); }
+function mid(acc: number[], v: number) { inner(acc, v); }
+function grow() { mid(table, 9); }
+function outer() { return table[0]; }
+`), [
+    "2:ImplicitOutput: The function inner() mutates argument acc, an implicit output.",
+    "3:ImplicitOutput: The function mid() mutates argument acc, an implicit output.",
+    "4:ImplicitOutput: The function grow() mutates caller-owned value table, an implicit output.",
+  ]);
+  assert.deepEqual(messages("module-shrink-forwarded.ts", `const table = [0];
+function inner(acc: number[], v: number) { acc.length = 0; acc.push(v); }
+function grow() { inner(table, 9); }
+function outer() { return table[0]; }
+`), [
+    "2:ImplicitOutput: The function inner() mutates argument acc, an implicit output.",
+    "3:ImplicitOutput: The function grow() mutates caller-owned value table, an implicit output.",
+    "4:ImplicitInput: The function outer() reads table, an implicit input.",
+  ]);
+});
+
 test("the reviewed explicitness corpus keeps its contract findings", () => {
   const corpus = JSON.parse(readFileSync(new URL("./fixtures/explicitness-corpus.json", import.meta.url), "utf8"));
   const directory = join(workspace, "corpus");
