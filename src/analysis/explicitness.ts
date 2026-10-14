@@ -2201,7 +2201,7 @@ function reboundFlow(
   if (captured) {
     return capturedFlow(state, flow, captured, node, owner);
   }
-  if (flow.binding && inside(flow.binding.scope.node, owner)) {
+  if (flow.binding && ownsStorage(flow.binding, owner)) {
     return ownedBindingFlow(state, summaries, flow, flow.binding, node, owner);
   }
   return forwardedFlow(state, summaries, flow, node, owner);
@@ -2235,7 +2235,11 @@ function movedFlow(flow: ImplicitFlow, node: ts.Node, owner: EffectOwner, origin
 
 function ownedOrigin(state: AnalysisState, origin: StorageOrigin, owner: EffectOwner): { binding: Binding; path: readonly string[] } | undefined {
   const external = originBinding(state, origin);
-  return external && inside(external.binding.scope.node, owner) ? external : undefined;
+  return external && ownsStorage(external.binding, owner) ? external : undefined;
+}
+
+function ownsStorage(binding: Binding, owner: EffectOwner): boolean {
+  return ts.isSourceFile(owner) ? !isModuleScope(binding) : inside(binding.scope.node, owner);
 }
 
 function ownedBindingFlow(

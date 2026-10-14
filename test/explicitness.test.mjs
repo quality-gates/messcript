@@ -2626,6 +2626,25 @@ function outer() { return table[0]; }
   ]);
 });
 
+test("module code that calls a helper writing module storage owns that write at the call", () => {
+  assert.deepEqual(messages("top-call.ts", `const log: number[] = [];
+function boot() { log.push(1); }
+boot();
+`), [
+    "2:ImplicitOutput: The function boot() writes log, an implicit output.",
+    "3:ImplicitOutput: The module writes log, an implicit output.",
+  ]);
+  assert.deepEqual(messages("static-block.ts", `const log: number[] = [];
+class Svc {
+  static boot() { log.push(1); }
+  static { Svc.boot(); }
+}
+`), [
+    "3:ImplicitOutput: The method Svc.boot() writes log, an implicit output.",
+    "4:ImplicitOutput: The module writes log, an implicit output.",
+  ]);
+});
+
 test("the reviewed explicitness corpus keeps its contract findings", () => {
   const corpus = JSON.parse(readFileSync(new URL("./fixtures/explicitness-corpus.json", import.meta.url), "utf8"));
   const directory = join(workspace, "corpus");
