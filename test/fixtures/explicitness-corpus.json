@@ -1000,7 +1000,6 @@
   "source": "function change(items: number[]) {\n  const values: number[][] = [[]];\n  [0, 1].forEach(() => values.push(items));\n  values[2].push(1);\n}\n",
   "findings": [
    "3:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes values, an implicit output.",
-   "3:ImplicitInput: arrow function anonymous(): The arrow function anonymous() reads items, an implicit input.",
    "4:ImplicitOutput: function change(): The function change() mutates caller-owned value values, an implicit output."
   ]
  },
@@ -3998,7 +3997,6 @@
   "name": "mut-s1-set-add-stores",
   "source": "const store: number[] = [];\nexport function change(): void {\n  const items = new Set<number[]>();\n  items.add(store);\n  for (const item of items) {\n    item.push(1);\n  }\n}\n",
   "findings": [
-   "4:ImplicitInput: function change(): The function change() reads store, an implicit input.",
    "6:ImplicitOutput: function change(): The function change() mutates caller-owned value item, an implicit output."
   ]
  },
@@ -4006,7 +4004,6 @@
   "name": "mut-s1-fill-stores",
   "source": "const store: number[] = [];\nexport function change(): void {\n  const rows = [[0]];\n  rows.fill(store);\n  rows[0].push(1);\n}\n",
   "findings": [
-   "4:ImplicitInput: function change(): The function change() reads store, an implicit input.",
    "5:ImplicitOutput: function change(): The function change() mutates caller-owned value rows, an implicit output."
   ]
  },
@@ -4014,7 +4011,6 @@
   "name": "mut-s1-unshift-stores",
   "source": "const store: number[] = [];\nexport function change(): void {\n  const rows: number[][] = [];\n  rows.unshift(store);\n  rows[0].push(1);\n}\n",
   "findings": [
-   "4:ImplicitInput: function change(): The function change() reads store, an implicit input.",
    "5:ImplicitOutput: function change(): The function change() mutates caller-owned value rows, an implicit output."
   ]
  },
@@ -5318,6 +5314,27 @@
   "source": "const a = { value: 0 };\nfunction pick(flag: boolean) { return flag ? a : { value: 0 }; }\nfunction outer(flag: boolean) {\n  pick(flag).value = 1;\n  return 0;\n}\n",
   "findings": [
    "4:ImplicitOutput: function outer(): The function outer() mutates caller-owned value, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-set-add-exposed-size",
+  "source": "const shared: number[] = [1];\nexport function g() {\n  const local = new Set<number[]>();\n  const same = local.add(shared);\n  return same.size;\n}\n",
+  "findings": []
+ },
+ {
+  "name": "mut-s1-map-values-spread-deep-read",
+  "source": "const rows: number[] = [1, 2];\nexport function bump() {\n  rows[0] = 9;\n}\nexport function first() {\n  const box = new Map([[\"r\", rows]]);\n  const copy = [...box.values()];\n  return copy[0][0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes rows, an implicit output.",
+   "8:ImplicitInput: function first(): The function first() reads rows, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-sorted-copy-comparator-read",
+  "source": "const a: number[] = [1];\nconst b: number[] = [2];\nexport function bump() {\n  a[0] = 9;\n}\nexport function order() {\n  const box = [a, b];\n  const copy = [...box];\n  copy.sort((l, r) => l[0] - r[0]);\n  return copy[0] === a ? 0 : 1;\n}\n",
+  "findings": [
+   "4:ImplicitOutput: function bump(): The function bump() writes a, an implicit output.",
+   "9:ImplicitInput: function order(): The function order() reads a, an implicit input."
   ]
  }
 ]

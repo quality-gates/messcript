@@ -197,6 +197,12 @@ function memberCall(name: string | undefined): LibraryCall | undefined {
   return pure ? { kind: "pure", result: pure, target: "receiver", callbacks, stores: "none" } : undefined;
 }
 
+/** Tells if a standard library call keeps its arguments as references without reading their contents. */
+export function storesArguments(call: ts.CallExpression, model: ScopeModel): boolean {
+  const known = libraryCall(call, model);
+  return known?.kind === "mutating" && known.stores !== "none" && known.stores !== "sources";
+}
+
 /** Tells if the method can move what one index of its receiver holds to another index. */
 export function movesElements(call: LibraryCall, name: string | undefined): boolean {
   return call.kind === "mutating" && call.target === "receiver" && MOVING_METHODS.has(name ?? "");

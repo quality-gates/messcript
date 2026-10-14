@@ -9,7 +9,7 @@ import { reachableChildren } from "./control-flow";
 import { bindingAssignments, canReachSite, inside, referenceAssignment, unconditional, type Assignment } from "./assignments";
 import { callableTargets as resolveTargets, memberTargets, type Dispatch, type Targets } from "./dispatch";
 import { classTargets } from "./shapes";
-import { ambientFlow, isLibraryMethodName, isPureConstructor, iteratedArgument, libraryCall, libraryCallback, movesElements, type LibraryCall, type LibraryStorage } from "./library";
+import { ambientFlow, isLibraryMethodName, isPureConstructor, iteratedArgument, libraryCall, libraryCallback, movesElements, storesArguments, type LibraryCall, type LibraryStorage } from "./library";
 import { protocolExpressions, supportsProtocol } from "./protocols";
 import { standardReceiver } from "./standard-receivers";
 import { readSites, storageSlot, writeAffectsRead, type ReadSite } from "./reads";
@@ -367,9 +367,13 @@ function boundFlows(state: AnalysisState, binding: Binding, node: ts.Identifier,
   return read ? [{ kind: "input", node, owner, description: `reads ${read.name}` }] : [];
 }
 
-/** Finds shared storage that a function-local value reads, including through a callback its own write hands elements to. */
+/** Finds shared storage that a function-local value reads, including the elements its own write hands to a callback. */
 function localStorageRead(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner, write: Write | undefined): Binding | undefined {
-  return (!write || callbackReadsReceiver(state, node)) && inside(binding.scope.node, owner) ? sharedStorageRead(state, node, owner) : undefined;
+  const sites = !write ? storageReadSites(state, node) : callbackReadsReceiver(state, node) ? [{ path: ["*"], reference: false }] : [];
+  if (!sites.length || !inside(binding.scope.node, owner)) {
+    return undefined;
+  }
+  return externalReads(state, storageFactForExpression(state, state.summaries, node, owner, node), sites, owner, false);
 }
 
 /** Tells if a receiver write, as in copy.sort(compare), also hands the receiver's elements to a callback that reads them. */
@@ -377,11 +381,6 @@ function callbackReadsReceiver(state: AnalysisState, node: ts.Identifier): boole
   const call = methodCallOn(node);
   const known = call && libraryCall(call, state.model);
   return known?.kind === "mutating" && known.target === "receiver" && known.callbacks.length > 0;
-}
-
-function sharedStorageRead(state: AnalysisState, node: ts.Identifier, owner: EffectOwner): Binding | undefined {
-  const fact = storageFactForExpression(state, state.summaries, node, owner, node);
-  return externalReads(state, fact, storageReadSites(state, node), owner, false);
 }
 
 function externalReads(
@@ -465,7 +464,8 @@ function storageReadAffected(state: AnalysisState, binding: Binding, site: ReadS
 }
 
 function storageReadSites(state: AnalysisState, node: ts.Expression, seen = new Set<string>()): ReadSite[] {
-  return readSites(node, (site, index) => argumentReadSites(state, site, index, seen));
+  return readSites(node, (site, index) => ts.isCallExpression(site) && index !== "this" && storesArguments(site, state.model)
+    ? [{ path: [], reference: true }] : argumentReadSites(state, site, index, seen));
 }
 
 function argumentReadSites(

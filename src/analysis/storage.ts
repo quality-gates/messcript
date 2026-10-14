@@ -283,7 +283,8 @@ export function arrayLiteralFact(value: ts.Expression, resolve: (value: ts.Expre
   }
   const only = value.elements.length === 1 ? value.elements[0] : undefined;
   if (only && ts.isSpreadElement(only)) {
-    return shallowStorageFact(value, resolve(only.expression));
+    const source = resolve(only.expression);
+    return entryCells(source) ? allocatedFact(value, [{ slot: "*", fact: iteratedFact(source) }]) : shallowStorageFact(value, source);
   }
   return allocatedFact(value, value.elements.map((element, index) => ts.isSpreadElement(element)
     ? { slot: "*", fact: elementFact(resolve(element.expression)) }

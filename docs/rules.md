@@ -137,7 +137,9 @@ never changes is quiet. Exported containers and mutable captured or module state
 are shared inputs. Shallow copies retain the ownership of their elements, while
 copied scalar elements have no mutable storage. Sorting a copy with a comparator
 reads its elements. A closure that returns captured storage shares it with the
-closures beside it, so their reads of that storage become inputs.
+closures beside it, so their reads of that storage become inputs. Storing a
+value with `push`, `add`, `set` or `splice` keeps its reference and reads none of
+its contents.
 
 Imported functions, unresolved property calls, dynamic callable lookup, injected
 callbacks, and writes with unknown ownership stay `UnknownEffect`. Unresolved
