@@ -41,7 +41,10 @@ import {
   shallowStorageFact,
   invokedStorageFact,
   isCellAllocation,
+  isWildcardSlot,
   joinStorageFacts,
+  KEY_SLOT,
+  visitedElementFact,
   joinStorageOrigins,
   originsForPath,
   parameterOriginIndexes,
@@ -388,12 +391,13 @@ function writtenReadSites(state: AnalysisState, node: ts.Identifier, write: Writ
   if (write.compound) {
     return [{ path: selectedSlots(node), reference: false }];
   }
-  return callbackReadsReceiver(state, node) ? [{ path: ["*"], reference: false }] : [];
+  const call = methodCallOn(node);
+  return (call && callbackReadSites(state, call, "this", new Set())) ?? [];
 }
 
 function derivedRead(state: AnalysisState, node: ts.Expression, home: EffectOwner, owner: EffectOwner): Binding | undefined {
   const derived = derivedValue(state, selectedRead(node).expression);
-  return derived && (externalReads(state, storageFactForExpression(state, state.summaries, derived, home, derived), derivedReadSites(state, derived), owner, false) ??
+  return derived && (externalReads(state, storageFactForExpression(state, state.summaries, derived, home, derived), storageReadSites(state, derived), owner, false) ??
     derivedRead(state, derived, home, owner));
 }
 
@@ -411,26 +415,33 @@ function resultHolds(state: AnalysisState, call: ts.CallExpression, target: ts.E
   return !!known && known.kind !== "effect" && known.result !== "fresh" && libraryTarget(call, known) === target;
 }
 
-function derivedReadSites(state: AnalysisState, derived: ts.Expression): ReadSite[] {
-  const { path, expression } = selectedRead(derived);
-  const user = receiverCall(expression);
-  const known = user && libraryCall(user, state.model);
-  if (known?.kind !== "mutating" || known.target !== "receiver") {
-    return storageReadSites(state, derived);
-  }
-  return known.callbacks.length ? [{ path: [...path, "*"], reference: false }] : path.length ? [{ path, reference: true }] : [];
-}
-
 function declaringOwner(state: AnalysisState, binding: Binding): EffectOwner | undefined {
   return state.callables.filter((callable) => isLocalBindingOfOwner(binding, callable))
     .reduce<EffectOwner | undefined>((innermost, callable) => !innermost || inside(callable, innermost) ? callable : innermost, undefined);
 }
 
-/** Tells if a receiver write, as in copy.sort(compare), also hands the receiver's elements to a callback that reads them. */
-function callbackReadsReceiver(state: AnalysisState, node: ts.Identifier): boolean {
-  const call = methodCallOn(node);
-  const known = call && libraryCall(call, state.model);
-  return known?.kind === "mutating" && known.target === "receiver" && known.callbacks.length > 0;
+function callbackReadSites(state: AnalysisState, call: ts.CallExpression, index: number | "this", seen: Set<string>): ReadSite[] | undefined {
+  const known = libraryCall(call, state.model);
+  if (!known || known.kind === "effect" || !known.callbacks.length || index !== (known.target === "receiver" ? "this" : 0)) {
+    return undefined;
+  }
+  const roles = callbackRoles(methodName(unwrapExpression(call.expression)));
+  const dispatch = dispatchFor(state, state.summaries);
+  return [{ path: [], reference: false }, ...known.callbacks.flatMap((position) => {
+    const resolved = call.arguments[position] ? resolveTargets(dispatch, call.arguments[position]) : undefined;
+    if (!resolved?.complete) {
+      return resolved ? [{ path: ["*"], reference: false }] : [];
+    }
+    return resolved.targets.flatMap((target) => roles.flatMap((role, parameter) => {
+      const key = `${ownerKey(target)}:${parameter}`;
+      if (role === "index" || seen.has(key)) {
+        return [];
+      }
+      seen.add(key);
+      const prefix = role === "receiver" ? [] : ["*"];
+      return parameterReadSites(state, target, parameter, seen).map((site) => ({ path: [...prefix, ...site.path], reference: site.reference }));
+    }));
+  })];
 }
 
 function externalReads(
@@ -515,19 +526,32 @@ function storageReadAffected(state: AnalysisState, binding: Binding, site: ReadS
 }
 
 function storageReadSites(state: AnalysisState, node: ts.Expression, seen = new Set<string>()): ReadSite[] {
-  return readSites(node, (site, index) => ts.isCallExpression(site) && index !== "this" && storesArguments(site, state.model)
-    ? [{ path: [], reference: true }] : elementReadSites(state, site, index, seen) ?? argumentReadSites(state, site, index, seen));
+  return readSites(node, (site, index) => ts.isCallExpression(site) ? callReadSites(state, site, index, seen) : argumentReadSites(state, site, index, seen));
+}
+
+function callReadSites(state: AnalysisState, site: ts.CallExpression, index: number | "this", seen: Set<string>): ReadSite[] | undefined {
+  if (index !== "this" && storesArguments(site, state.model)) {
+    return [{ path: [], reference: true }];
+  }
+  const known = libraryCall(site, state.model);
+  if (index === "this" && known?.kind === "mutating" && known.target === "receiver") {
+    return callbackReadSites(state, site, index, seen) ?? [{ path: [], reference: true }];
+  }
+  return joinedSites(elementReadSites(state, site, index, seen), callbackReadSites(state, site, index, seen)) ??
+    argumentReadSites(state, site, index, seen);
+}
+
+function joinedSites(left: ReadSite[] | undefined, right: ReadSite[] | undefined): ReadSite[] | undefined {
+  return left && right ? [...left, ...right] : left ?? right;
 }
 
 /** Follows a read through a library call that returns an element the receiver holds, as in map.get(key)[0]. */
-function elementReadSites(
-  state: AnalysisState, site: ts.CallExpression | ts.AccessExpression, index: number | "this", seen: Set<string>,
-): ReadSite[] | undefined {
-  const known = index === "this" && ts.isCallExpression(site) ? libraryCall(site, state.model) : undefined;
+function elementReadSites(state: AnalysisState, site: ts.CallExpression, index: number | "this", seen: Set<string>): ReadSite[] | undefined {
+  const known = index === "this" ? libraryCall(site, state.model) : undefined;
   if (known?.kind !== "pure" || known.result !== "element") {
     return undefined;
   }
-  return storageReadSites(state, site, seen).map((read) => ({ path: ["*", ...read.path], reference: read.reference }));
+  return storageReadSites(state, site, seen).map((read) => ({ path: [entrySlot(site) ?? "*", ...read.path], reference: read.reference }));
 }
 
 function argumentReadSites(
@@ -1722,8 +1746,12 @@ function libraryReturnFact(
 }
 
 function libraryElementFact(call: ts.CallExpression, receiver: StorageFact): StorageFact {
+  return memberStorageFact(receiver, entrySlot(call));
+}
+
+function entrySlot(call: ts.CallExpression): string | undefined {
   const key = methodName(call.expression) === "get" && call.arguments[0] ? literalStorageKey(call.arguments[0]) : undefined;
-  return memberStorageFact(receiver, key === undefined ? undefined : `entry:${key}`);
+  return key === undefined ? undefined : `entry:${key}`;
 }
 
 function libraryTarget(call: ts.CallExpression, known: Exclude<LibraryCall, { kind: "effect" }>): ts.Expression | undefined {
@@ -2176,15 +2204,22 @@ function libraryCallbackFacts(
   return elementCallbackFacts(name, receiver, initial);
 }
 
-function elementCallbackFacts(name: string | undefined, receiver: StorageFact, initial: StorageFact | undefined): StorageFact[] {
-  const element = elementFact(receiver);
+type CallbackRole = "accumulator" | "element" | "index" | "receiver";
+
+function callbackRoles(name: string | undefined): readonly CallbackRole[] {
   if (name === "reduce" || name === "reduceRight") {
-    return [joinStorageFacts([initial ?? element, element]), element, privateFact, receiver];
+    return ["accumulator", "element", "index", "receiver"];
   }
   if (name === "sort" || name === "toSorted") {
-    return [element, element];
+    return ["element", "element"];
   }
-  return [element, privateFact, receiver];
+  return ["element", name === "forEach" ? "element" : "index", "receiver"];
+}
+
+function elementCallbackFacts(name: string | undefined, receiver: StorageFact, initial: StorageFact | undefined): StorageFact[] {
+  const element = visitedElementFact(receiver);
+  const facts = { accumulator: joinStorageFacts([initial ?? element, element]), element, index: privateFact, receiver };
+  return callbackRoles(name).map((role) => facts[role]);
 }
 
 function callbackEffects(
@@ -2517,7 +2552,7 @@ function computedWriteEffects(
   const fact = storageFactForExpression(state, summaries, member.expression, owner, node);
   const indexes = parameterOriginIndexes(fact.outer);
   return mutationEffectsFromFact(state, fact, "outer", member, owner,
-    indexes.length === 1 ? `mutates argument ${parameterName(owner, indexes[0])}` : "mutates caller-owned value");
+    indexes.length === 1 ? `mutates argument ${parameterName(owner, indexes[0])}` : "mutates caller-owned value", false, false, [storageSlot(member)]);
 }
 
 function namedRoot(expression: ts.Expression): boolean {
@@ -2991,7 +3026,7 @@ function libraryStorageInsertions(
     return { kind: "cell", node: call, origin: part.expression, target: targetFact,
       value: part.path === "reachable" ? elementFact(value) : value, slot: part.slot,
       appendCall: known.stores === "arguments" && method === "push" ? call : undefined,
-      replace: part.slot !== undefined && !part.slot.startsWith("append:") && unconditional(call, owner) };
+      replace: part.slot !== undefined && !part.slot.startsWith("append:") && !isWildcardSlot(part.slot) && unconditional(call, owner) };
   })];
 }
 
@@ -3020,7 +3055,9 @@ type StoredArgument = { readonly expression: ts.Expression; readonly path: Stora
 function storedArguments(call: ts.CallExpression, args: readonly ts.Expression[], stores: LibraryStorage): StoredArgument[] {
   if (stores === "entry") {
     const key = call.arguments[0] && literalStorageKey(call.arguments[0]);
-    return call.arguments.slice(1).map((expression) => ({ expression, path: "outer", slot: key === undefined ? undefined : `entry:${key}` }));
+    const [first, ...values] = call.arguments;
+    return [...first && key === undefined ? [{ expression: first, path: "outer" as const, slot: KEY_SLOT }] : [],
+      ...values.map((expression) => ({ expression, path: "outer" as const, slot: key === undefined ? undefined : `entry:${key}` }))];
   }
   return args.flatMap<StoredArgument>((expression) => stores === "sources" ? assignedProperties(expression) : [{ expression, path: "outer" }]);
 }

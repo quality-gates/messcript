@@ -141,7 +141,7 @@ function allocationMemberOrigins(fact: StorageFact, allocation: StorageOrigin, s
   if (!cells?.length) {
     return projected;
   }
-  const matched = cells.filter((cell) => cell.slot !== "@allocation" && cellMatchesSlot(cell.slot, slot)).flatMap((cell) => cell.origins);
+  const matched = cells.filter((cell) => cell.slot !== "@allocation" && (cell.slot !== KEY_SLOT || slot === "*") && cellMatchesSlot(cell.slot, slot)).flatMap((cell) => cell.origins);
   return isClosedMemberSlot(cells, slot) ? matched : [...matched, ...projected];
 }
 
@@ -304,9 +304,11 @@ export function objectLiteralFact(value: ts.Expression, resolve: (value: ts.Expr
 }
 
 const EXCEPT = "*-except:";
+/** Holds a map's keys: iteration reaches them, but no member lookup selects them, so get(key) stays precise. */
+export const KEY_SLOT = "@key";
 
-function isWildcardSlot(slot: string): boolean {
-  return slot === "*" || slot.startsWith(EXCEPT);
+export function isWildcardSlot(slot: string): boolean {
+  return slot === "*" || slot === KEY_SLOT || slot.startsWith(EXCEPT);
 }
 
 function exceptedSlots(slot: string): string[] {
@@ -345,11 +347,14 @@ function mapEntries(value: ts.NewExpression): ts.ArrayLiteralExpression | undefi
 
 function mapEntryParts(entry: ts.Expression, resolve: (value: ts.Expression) => StorageFact): { slot: string; fact: StorageFact }[] {
   const pair = unwrapExpression(entry);
-  if (!ts.isArrayLiteralExpression(pair) || !pair.elements[1]) {
-    return [];
+  const [first, value] = ts.isArrayLiteralExpression(pair) ? pair.elements : [];
+  if (first && value && !ts.isSpreadElement(first) && !ts.isSpreadElement(value)) {
+    const key = literalKey(first);
+    return key === undefined ? [{ slot: KEY_SLOT, fact: resolve(first) }, { slot: "*", fact: resolve(value) }]
+      : [{ slot: `entry:${key}`, fact: resolve(value) }];
   }
-  const key = literalKey(pair.elements[0]);
-  return [{ slot: key === undefined ? "*" : `entry:${key}`, fact: resolve(pair.elements[1]) }];
+  const fact = resolve(ts.isSpreadElement(pair) ? pair.expression : pair);
+  return [{ slot: "*", fact: { ...fact, outer: fact.reachable } }];
 }
 
 export function literalKey(value: ts.Expression): string | undefined {
@@ -498,7 +503,7 @@ export function pairsStorageFact(value: ts.CallExpression, pair: ts.Node, source
 }
 
 function entryPairFact(node: ts.Node, source: StorageFact): StorageFact {
-  const element = entryCells(source) ? reachedFact(source) : elementFact(source);
+  const element = visitedElementFact(source);
   return allocatedFact(node, [{ slot: "property:0", fact: element }, { slot: "property:1", fact: element }]);
 }
 
@@ -524,8 +529,12 @@ function arrayStep(fact: StorageFact, element: ts.BindingElement): StorageFact {
   return entryCells(fact) ? entryPairFact(element.name, fact) : memberStorageFact(fact, `property:${element.parent.elements.indexOf(element)}`);
 }
 
+export function visitedElementFact(source: StorageFact): StorageFact {
+  return entryCells(source) ? reachedFact(source) : elementFact(source);
+}
+
 function entryCells(fact: StorageFact): boolean {
-  return !!fact.cells?.some((cell) => fact.outer.includes(cell.allocation) && cell.slot.startsWith("entry:"));
+  return !!fact.cells?.some((cell) => fact.outer.includes(cell.allocation) && (cell.slot.startsWith("entry:") || cell.slot === KEY_SLOT));
 }
 
 function reachedFact(fact: StorageFact): StorageFact {

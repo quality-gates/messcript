@@ -5705,5 +5705,93 @@
    "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
    "8:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
   ]
+ },
+ {
+  "name": "mut-s1-held-result-sort-callback",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const xs: number[][] = [shared, shared];\n  let seen = 0;\n  xs.slice().sort((a, b) => {\n    seen = a[0];\n    return 0;\n  });\n  return seen;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "8:ImplicitInput: function outer(): The function outer() reads shared, an implicit input.",
+   "9:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes seen, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-held-result-push-element",
+  "source": "const shared: number[][] = [[1]];\nfunction bump() {\n  shared[0] = [2];\n}\nfunction outer() {\n  const xs: number[][][] = [shared];\n  xs.slice()[0][0].push(3);\n  return 0;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "7:ImplicitInput: function outer(): The function outer() reads shared, an implicit input.",
+   "7:ImplicitOutput: function outer(): The function outer() mutates receiver of push, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-rest-copy-length",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared.push(2);\n}\nfunction outer() {\n  const xs: number[][] = [shared];\n  const [...rest] = xs;\n  return rest.length;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-concat-iterate-numbers",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const xs: number[] = [1, 2];\n  let total = 0;\n  for (const x of xs.concat([3])) {\n    total += x;\n  }\n  return total;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-held-result-concat-object",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const xs: { s: number[] }[] = [];\n  const box = { s: shared };\n  return xs.concat(box)[0].s[0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "8:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-held-result-set-spread",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const xs: number[][] = [shared];\n  const s = new Set(xs);\n  const ys = [...s];\n  return ys[0][0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "9:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-held-result-entries-index",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const m = new Map<string, number[]>([[\"k\", shared]]);\n  const pairs = [...m.entries()];\n  return pairs[0][1][0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "8:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-held-map-key-foreach",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const m = new Map<number[], number>();\n  m.set(shared, 1);\n  let seen = 0;\n  m.forEach((v, k) => {\n    seen = k[0];\n  });\n  return seen;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "9:ImplicitInput: function outer(): The function outer() reads shared, an implicit input.",
+   "10:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes seen, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-held-callback-map-element",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const xs = [shared];\n  return xs.map((v) => v[0])[0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "7:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-literal-holds-shared-index",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  return [shared][0][0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "6:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-held-map-get-object-key-value",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const held = [shared];\n  const m = new Map<number[][], number[]>();\n  m.set(held, [5]);\n  return m.get(held)![0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
  }
 ]

@@ -89,7 +89,7 @@ const REFERENCE: ReadSite[] = [{ path: [], reference: true }];
 function consumerSites(expression: ts.Expression, argumentSites: ArgumentSites): ReadSite[] {
   const parent = expression.parent;
   if (holdsReference(parent, expression)) {
-    return REFERENCE;
+    return [...REFERENCE, ...literalMemberSites(parent, expression, argumentSites)];
   }
   if (ts.isSpreadElement(parent) || ts.isSpreadAssignment(parent)) {
     return ts.isCallExpression(parent.parent) || ts.isNewExpression(parent.parent) ? [{ path: ["*"], reference: false }]
@@ -117,6 +117,25 @@ function callSites(expression: ts.Expression, argumentSites: ArgumentSites): Rea
 function holdsReference(parent: ts.Node, expression: ts.Expression): boolean {
   return ts.isArrayLiteralExpression(parent) || ts.isShorthandPropertyAssignment(parent) || ts.isReturnStatement(parent) ||
     (ts.isPropertyAssignment(parent) && parent.initializer === expression) || (ts.isArrowFunction(parent) && parent.body === expression);
+}
+
+function literalMemberSites(parent: ts.Node, expression: ts.Expression, argumentSites: ArgumentSites): ReadSite[] {
+  const held = heldMember(parent, expression);
+  return held ? readSites(held.literal, argumentSites).flatMap((site) =>
+    site.path.length > 0 && pathsOverlap(site.path.slice(0, 1), [held.slot]) ? [{ path: site.path.slice(1), reference: site.reference }] : []) : [];
+}
+
+function heldMember(parent: ts.Node, expression: ts.Expression): { literal: ts.Expression; slot: string } | undefined {
+  if (ts.isArrayLiteralExpression(parent)) {
+    return { literal: parent, slot: elementSlot(parent, expression) };
+  }
+  return (ts.isPropertyAssignment(parent) || ts.isShorthandPropertyAssignment(parent)) && ts.isObjectLiteralExpression(parent.parent)
+    ? { literal: parent.parent, slot: keySlot(parent.name) } : undefined;
+}
+
+function elementSlot(literal: ts.ArrayLiteralExpression, element: ts.Expression): string {
+  const index = literal.elements.indexOf(element);
+  return literal.elements.slice(0, index).some(ts.isSpreadElement) ? "*" : `property:${index}`;
 }
 
 function initializedName(parent: ts.Node, expression: ts.Expression): ts.BindingName | undefined {
