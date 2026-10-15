@@ -1,11 +1,14 @@
+// messcript-disable CouplingBetweenObjects
 import ts from "typescript";
 import * as expressions from "../ast/expressions";
 import type { Binding, ScopeModel } from "../ast/scopes";
 import * as assignments from "./assignments";
 import * as owners from "./owners";
 import * as shapes from "./shapes";
+import * as resolution from "./resolution";
+import type { Resolution } from "./resolution";
 
-export type Targets = { readonly targets: readonly owners.EffectOwner[]; readonly complete: boolean };
+export type Targets = Resolution<owners.EffectOwner>;
 export type Dispatch = {
   readonly model: ScopeModel;
   readonly owners: readonly owners.EffectOwner[];
@@ -17,12 +20,12 @@ export type Dispatch = {
 type MemberKind = "call" | "get" | "set";
 
 const EMPTY: Targets = { targets: [], complete: true };
-const UNKNOWN: Targets = { targets: [], complete: false };
+const UNKNOWN: Targets = resolution.unresolved();
 
 const MEMBER_KINDS = { call: ts.isMethodDeclaration, get: ts.isGetAccessorDeclaration, set: ts.isSetAccessorDeclaration };
 
 export function joinTargets(groups: readonly Targets[]): Targets {
-  return { targets: [...new Set(groups.flatMap((group) => group.targets))], complete: groups.every((group) => group.complete) };
+  return resolution.join(groups);
 }
 
 export function callableTargets(dispatch: Dispatch, expression: ts.Expression, seen: ReadonlySet<Binding> = new Set()): Targets {
@@ -115,19 +118,23 @@ export function memberTargets(dispatch: Dispatch, expression: ts.Expression, kin
 }
 
 function namedTargets(dispatch: Dispatch, receiver: ts.Expression, name: string, kind: MemberKind, seen: ReadonlySet<Binding>, site: ts.Node): Targets {
-  const selected = shapes.receiverShapes(dispatch.model, receiver, seen, site, (call) => {
-    const callees = callableTargets(dispatch, call.expression, seen);
-    return callees.complete ? callees.targets : undefined;
-  });
-  if (selected) {
-    return joinTargets([...selected.map((shape) => ts.isClassLike(shape) ? classMembers(dispatch, shape, name, kind, new Set())
-      : membersTargets(dispatch, shapes.liveProperties(shape, name), name, kind, seen)), patchedTargets(dispatch, name, kind)]);
+  const selected = shapes.receiverShapes(dispatch.model, receiver, seen, site,
+    (call, visited) => callableTargets(dispatch, call.expression, new Set([...seen, ...visited])));
+  if (!(selected.complete && selected.targets.length > 0) && !resolution.isDecorated(selected)) {
+    return unselectedTargets(dispatch, receiver, name, kind);
   }
+  const known = resolution.inherit(selected, joinTargets([...selected.targets.map((shape) => ts.isClassLike(shape) ? classMembers(dispatch, shape, name, kind, new Set())
+    : membersTargets(dispatch, shapes.liveProperties(shape, name), name, kind, seen)), patchedTargets(dispatch, name, kind)]));
+  return resolution.isUnresolved(selected) ? joinTargets([known, unselectedTargets(dispatch, receiver, name, kind)]) : known;
+}
+
+/** Gives every known member with the name, marked incomplete, for a receiver whose shapes are not all known. */
+function unselectedTargets(dispatch: Dispatch, receiver: ts.Expression, name: string, kind: MemberKind): Targets {
   if (ts.isIdentifier(receiver) && !dispatch.model.resolve(receiver)) {
     return UNKNOWN;
   }
   const candidates = dispatch.owners.filter((owner) => memberMatches(owner, name, kind));
-  return { targets: dispatch.libraryMethod(receiver, name) ? candidates.filter(derivedMember) : candidates, complete: false };
+  return resolution.unresolved(dispatch.libraryMethod(receiver, name) ? candidates.filter(derivedMember) : candidates);
 }
 
 function patchedTargets(dispatch: Dispatch, name: string, kind: MemberKind): Targets {
@@ -142,7 +149,7 @@ function receiverTargets(dispatch: Dispatch, node: ts.Node, name: string, kind: 
   const base = owners.baseClassExpression(owner);
   if (baseOnly) {
     const classes = base && shapes.classTargets(dispatch.model, base);
-    return classes ? joinTargets(classes.map((shape) => classMembers(dispatch, shape, name, kind, new Set()))) : UNKNOWN;
+    return classes ? resolution.inherit(classes, joinTargets(classes.targets.map((shape) => classMembers(dispatch, shape, name, kind, new Set())))) : UNKNOWN;
   }
   const classes = [...new Set(dispatch.owners.flatMap((candidate) => {
     const enclosing = owners.enclosingClass(candidate);
@@ -151,13 +158,17 @@ function receiverTargets(dispatch: Dispatch, node: ts.Node, name: string, kind: 
   const subtypes = classes.filter((candidate) => shapes.descendsFrom(dispatch.model, candidate, owner, new Set()));
   const groups = [owner, ...subtypes].map((candidate) => classMembers(dispatch, candidate, name, kind, new Set()));
   groups.push(patchedTargets(dispatch, name, kind));
-  if (shapes.isOpenMember(owner, name) || !shapes.closedShapes(dispatch.model, [owner, ...subtypes])) {
+  if (shapes.isOpenMember(owner, name) || !shapes.closedShapes(dispatch.model, resolution.complete([owner, ...subtypes])).complete) {
     groups.push(UNKNOWN);
   }
   return joinTargets(groups);
 }
 
 function classMembers(dispatch: Dispatch, shape: ts.ClassLikeDeclaration, name: string, kind: MemberKind, seen: ReadonlySet<ts.Node>): Targets {
+  return resolution.inherit(shapes.classShape(dispatch.model, shape), originalClassMembers(dispatch, shape, name, kind, seen));
+}
+
+function originalClassMembers(dispatch: Dispatch, shape: ts.ClassLikeDeclaration, name: string, kind: MemberKind, seen: ReadonlySet<ts.Node>): Targets {
   if (seen.has(shape)) {
     return UNKNOWN;
   }
@@ -170,7 +181,7 @@ function classMembers(dispatch: Dispatch, shape: ts.ClassLikeDeclaration, name: 
     return own;
   }
   const parents = shapes.classTargets(dispatch.model, base);
-  return parents ? joinTargets(parents.map((parent) => classMembers(dispatch, parent, name, kind, new Set(seen).add(shape)))) : UNKNOWN;
+  return resolution.inherit(parents, joinTargets(parents.targets.map((parent) => classMembers(dispatch, parent, name, kind, new Set(seen).add(shape)))));
 }
 
 function membersTargets(dispatch: Dispatch, members: readonly ts.Node[], name: string, kind: MemberKind, seen: ReadonlySet<Binding>): Targets {

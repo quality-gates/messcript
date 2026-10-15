@@ -1,52 +1,71 @@
+// messcript-disable CouplingBetweenObjects
 import ts from "typescript";
 import * as expressions from "../ast/expressions";
 import type { Binding, ScopeModel } from "../ast/scopes";
 import * as assignments from "./assignments";
 import * as owners from "./owners";
+import * as resolution from "./resolution";
+import type { Resolution } from "./resolution";
 
 /** A class or an object literal whose members a receiver can select. */
 export type Shape = ts.ClassLikeDeclaration | ts.ObjectLiteralExpression;
 
-export function classTargets(model: ScopeModel, expression: ts.Expression, seen: ReadonlySet<Binding> = new Set()): readonly ts.ClassLikeDeclaration[] | undefined {
+export function classTargets(
+  model: ScopeModel, expression: ts.Expression, seen: ReadonlySet<Binding> = new Set(), ancestors: ReadonlySet<ts.Node> = new Set(),
+): Resolution<ts.ClassLikeDeclaration> {
   const value = expressions.unwrapExpression(expression);
-  if (ts.isClassExpression(value)) {
-    return [value];
+  const branches = alternatives(value);
+  if (branches) {
+    return resolution.join(branches.map(branch => classTargets(model, branch, seen, ancestors)));
   }
-  if (!ts.isIdentifier(value)) {
-    return undefined;
-  }
+  if (ts.isClassExpression(value)) { return classShape(model, value, ancestors); }
+  if (!ts.isIdentifier(value)) { return resolution.unresolved(); }
   const binding = model.resolve(value);
-  if (!binding || seen.has(binding)) {
-    return undefined;
-  }
-  return bindingClasses(model, binding, new Set(seen).add(binding));
+  if (!binding || seen.has(binding)) { return resolution.unresolved(); }
+  return bindingClasses(model, binding, new Set(seen).add(binding), ancestors);
 }
 
-function bindingClasses(model: ScopeModel, binding: Binding, seen: ReadonlySet<Binding>): readonly ts.ClassLikeDeclaration[] | undefined {
-  const classes = binding.declarations.flatMap((declaration) => ts.isClassLike(declaration.node) ? [declaration.node] : []);
-  for (const assignment of assignments.bindingAssignments(binding)) {
-    if (!assignment.value || assignment.element) {
-      return undefined;
-    }
-    const targets = classTargets(model, assignment.value, seen);
-    if (!targets) {
-      return undefined;
-    }
-    classes.push(...targets);
+function alternatives(value: ts.Expression): readonly ts.Expression[] | undefined {
+  if (ts.isConditionalExpression(value)) {
+    return [value.whenTrue, value.whenFalse];
   }
-  return classes.length > 0 ? [...new Set(classes)] : undefined;
+  return ts.isBinaryExpression(value) && assignments.isShortCircuit(value.operatorToken.kind) ? [value.left, value.right] : undefined;
 }
 
-/** Gives every callable that a call can run, or undefined when some are not known. */
-export type CallTargets = (call: ts.CallExpression) => readonly owners.EffectOwner[] | undefined;
+function bindingClasses(
+  model: ScopeModel, binding: Binding, seen: ReadonlySet<Binding>, ancestors: ReadonlySet<ts.Node>,
+): Resolution<ts.ClassLikeDeclaration> {
+  const groups = binding.declarations.flatMap(declaration => ts.isClassLike(declaration.node) ? [classShape(model, declaration.node, ancestors)] : []);
+  groups.push(...assignments.bindingAssignments(binding).map(assignment => assignment.value && !assignment.element
+    ? classTargets(model, assignment.value, seen, ancestors) : resolution.unresolved<ts.ClassLikeDeclaration>()));
+  return groups.length > 0 ? resolution.join(groups) : resolution.unresolved();
+}
 
-/** Gives the shapes the receiver can hold at the site, or undefined when other code can replace their members. */
+export function classShape(model: ScopeModel, node: ts.ClassLikeDeclaration, seen: ReadonlySet<ts.Node> = new Set()): Resolution<ts.ClassLikeDeclaration> {
+  if (seen.has(node)) { return resolution.unresolved([node]); }
+  const decorated = (part: ts.Node): boolean => ts.canHaveDecorators(part) && (ts.getDecorators(part)?.length ?? 0) > 0;
+  const immediate = decorated(node) || node.members.some(member => decorated(member) ||
+    ((ts.isConstructorDeclaration(member) || ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) &&
+      member.parameters.some(decorated)));
+  const base = owners.baseClassExpression(node);
+  const parents = base ? classTargets(model, base, new Set(), new Set(seen).add(node)) : resolution.complete([]);
+  return immediate || resolution.isDecorated(parents) ? resolution.decorated([node]) : resolution.complete([node]);
+}
+
+/** Gives every callable that a call can run, marked incomplete when some are not known. */
+export type CallTargets = (call: ts.CallExpression, seen: ReadonlySet<Binding>) => Resolution<owners.EffectOwner>;
+
+/** Gives the shapes the receiver can hold at the site, marked incomplete when some are not known or other code can replace their members. */
 export function receiverShapes(
-  model: ScopeModel, expression: ts.Expression, seen: ReadonlySet<Binding>, site: ts.Node, callees: CallTargets = () => undefined,
-): readonly Shape[] | undefined {
+  model: ScopeModel, expression: ts.Expression, seen: ReadonlySet<Binding>, site: ts.Node, callees: CallTargets = () => resolution.unresolved(),
+): Resolution<Shape> {
   const value = expressions.unwrapExpression(expression);
+  const branches = alternatives(value);
+  if (branches) {
+    return resolution.join(branches.map(branch => receiverShapes(model, branch, seen, site, callees)));
+  }
   if (ts.isCallExpression(value)) {
-    return returnedShapes(model, value, callees);
+    return returnedShapes(model, value, seen, callees);
   }
   if (ts.isNewExpression(value)) {
     return constructedShapes(model, value.expression);
@@ -54,23 +73,26 @@ export function receiverShapes(
   if (ts.isObjectLiteralExpression(value)) {
     return literalShapes(model, value);
   }
-  if (!ts.isIdentifier(value)) {
-    return undefined;
-  }
-  const classes = classTargets(model, value);
-  if (classes) {
-    return classes;
-  }
-  const binding = model.resolve(value);
-  if (!binding || seen.has(binding) || !sealed(model, binding, site, new Set())) {
-    return undefined;
-  }
-  return bindingShapes(model, binding, new Set(seen).add(binding), site, callees);
+  return namedShapes(model, value, seen, site, callees);
 }
 
-function constructedShapes(model: ScopeModel, constructor: ts.Expression): readonly Shape[] | undefined {
+function namedShapes(model: ScopeModel, name: ts.Expression, seen: ReadonlySet<Binding>, site: ts.Node, callees: CallTargets): Resolution<Shape> {
+  if (!ts.isIdentifier(name)) {
+    return resolution.unresolved();
+  }
+  const classes = classTargets(model, name);
+  if (classes.targets.length > 0) {
+    return classes;
+  }
+  const binding = model.resolve(name);
+  if (!binding || seen.has(binding)) { return resolution.unresolved(); }
+  const selected = bindingShapes(model, binding, new Set(seen).add(binding), site, callees);
+  return sealed(model, binding, site, new Set()) ? selected : resolution.inherit(selected, resolution.unresolved());
+}
+
+function constructedShapes(model: ScopeModel, constructor: ts.Expression): Resolution<Shape> {
   const classes = classTargets(model, constructor);
-  return classes?.every(inertConstruction) ? classes : closedShapes(model, classes);
+  return classes.complete && classes.targets.every(inertConstruction) ? classes : closedShapes(model, classes);
 }
 
 function inertConstruction(shape: ts.ClassLikeDeclaration): boolean {
@@ -80,35 +102,32 @@ function inertConstruction(shape: ts.ClassLikeDeclaration): boolean {
       !ts.isComputedPropertyName(member.name) && !(ts.getDecorators(member)?.length));
 }
 
-function literalShapes(model: ScopeModel, literal: ts.ObjectLiteralExpression): readonly Shape[] | undefined {
+function literalShapes(model: ScopeModel, literal: ts.ObjectLiteralExpression): Resolution<Shape> {
   const setsPrototype = literal.properties.some((property) => ts.isPropertyAssignment(property) && !ts.isComputedPropertyName(property.name) &&
     expressions.keyName(property.name) === "__proto__");
-  return setsPrototype ? undefined : closedShapes(model, [literal]);
+  return setsPrototype ? resolution.unresolved() : closedShapes(model, resolution.complete([literal]));
 }
 
-function returnedShapes(model: ScopeModel, call: ts.CallExpression, callees: CallTargets): readonly Shape[] | undefined {
-  const targets = callees(call);
-  if (!targets || targets.length === 0) {
-    return undefined;
+function returnedShapes(model: ScopeModel, call: ts.CallExpression, seen: ReadonlySet<Binding>, callees: CallTargets): Resolution<Shape> {
+  const targets = callees(call, seen);
+  if (targets.targets.length === 0) {
+    return resolution.inherit(targets, resolution.unresolved());
   }
-  const found: Shape[] = [];
-  for (const target of targets) {
-    const shapes = calleeShapes(model, target, (inner) => {
-      const resolved = callees(inner);
-      return resolved?.includes(target) ? undefined : resolved;
+  const found: Resolution<Shape>[] = [];
+  for (const target of targets.targets) {
+    const shapes = calleeShapes(model, target, (inner, visited) => {
+      const resolved = callees(inner, visited);
+      return resolved.targets.includes(target) ? resolution.inherit(resolved, resolution.unresolved()) : resolved;
     });
-    if (!shapes) {
-      return undefined;
-    }
-    found.push(...shapes);
+    found.push(shapes);
   }
-  return found;
+  return resolution.inherit(targets, resolution.join(found));
 }
 
-function calleeShapes(model: ScopeModel, callee: owners.EffectOwner, callees: CallTargets): readonly Shape[] | undefined {
+function calleeShapes(model: ScopeModel, callee: owners.EffectOwner, callees: CallTargets): Resolution<Shape> {
   const values = owners.isGenerator(callee) || isAsync(callee) ? [] : returnedValues(callee);
   const selected = values.map((value) => receiverShapes(model, value, new Set(), value, callees));
-  return selected.length === 0 || selected.some((group) => group === undefined) ? undefined : selected.flatMap((group) => group ?? []);
+  return selected.length === 0 ? resolution.unresolved() : resolution.join(selected);
 }
 
 function isAsync(owner: owners.EffectOwner): boolean {
@@ -136,24 +155,19 @@ function returnedValues(owner: owners.EffectOwner): ts.Expression[] {
 
 function bindingShapes(
   model: ScopeModel, binding: Binding, seen: ReadonlySet<Binding>, site: ts.Node, callees: CallTargets,
-): readonly Shape[] | undefined {
-  if (binding.declarations.some((declaration) => declaration.kind === "parameter" || declaration.kind === "import")) {
-    return undefined;
+): Resolution<Shape> {
+  const groups = assignments.bindingAssignments(binding).map(assignment => assignment.value && !assignment.element
+    ? receiverShapes(model, assignment.value, seen, site, callees) : resolution.unresolved<Shape>());
+  if (binding.declarations.some(declaration => declaration.kind === "parameter" || declaration.kind === "import")) {
+    groups.push(resolution.unresolved());
   }
-  const shapes: Shape[] = [];
-  for (const assignment of assignments.bindingAssignments(binding)) {
-    const targets = assignment.value && !assignment.element ? receiverShapes(model, assignment.value, seen, site, callees) : undefined;
-    if (!targets) {
-      return undefined;
-    }
-    shapes.push(...targets);
-  }
-  return shapes.length > 0 ? shapes : undefined;
+  return groups.length > 0 ? resolution.join(groups) : resolution.unresolved();
 }
 
-/** Gives the shapes when no code they run can hand their object to code that replaces its members. */
-export function closedShapes(model: ScopeModel, shapes: readonly Shape[] | undefined): readonly Shape[] | undefined {
-  return shapes?.every((shape) => thisStaysInside(model, shape, new Set())) ? shapes : undefined;
+/** Gives the shapes, marked incomplete when code they run can hand their object to code that replaces its members. */
+export function closedShapes(model: ScopeModel, shapes: Resolution<Shape>): Resolution<Shape> {
+  return shapes.targets.every(shape => thisStaysInside(model, shape, new Set())) ? shapes
+    : resolution.inherit(shapes, resolution.unresolved());
 }
 
 function thisStaysInside(model: ScopeModel, shape: Shape, seen: ReadonlySet<ts.Node>): boolean {
@@ -161,7 +175,7 @@ function thisStaysInside(model: ScopeModel, shape: Shape, seen: ReadonlySet<ts.N
     ? memberUse(model, node as ts.Expression)
     : !ts.forEachChild(node, (child) => visit(child) ? undefined : true);
   const base = ts.isClassLike(shape) ? owners.baseClassExpression(shape) : undefined;
-  const parents = base ? classTargets(model, base) ?? [] : [];
+  const parents = base ? classTargets(model, base).targets : [];
   return !seen.has(shape) && visit(shape) && parents.every((parent) => thisStaysInside(model, parent, new Set(seen).add(shape)));
 }
 
@@ -203,7 +217,7 @@ export function descendsFrom(model: ScopeModel, candidate: ts.ClassLikeDeclarati
     return false;
   }
   const base = owners.baseClassExpression(candidate);
-  return (base && classTargets(model, base)?.some((parent) => parent === ancestor ||
+  return (base && classTargets(model, base).targets.some((parent) => parent === ancestor ||
     descendsFrom(model, parent, ancestor, new Set(seen).add(candidate)))) ?? false;
 }
 

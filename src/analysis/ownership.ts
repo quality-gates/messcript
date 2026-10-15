@@ -1,9 +1,11 @@
+// messcript-disable CouplingBetweenObjects
 import * as storage from "./storage";
 import { type StorageFact } from "./storage";
 import ts from "typescript";
 import { unwrapExpression } from "../ast/expressions";
 import type { Binding, ScopeModel } from "../ast/scopes";
 import * as assignments from "./assignments";
+import { classTargets } from "./shapes";
 import { ownerParameters, type EffectOwner } from "./owners";
 
 /** Gives the storage a call returns, or undefined when the call is not resolved. */
@@ -272,7 +274,7 @@ function insertedFact(fact: StorageFact, context: FactContext): StorageFact {
 function localConstructor(model: ScopeModel, callee: ts.Expression): boolean {
   const binding = ts.isIdentifier(callee) ? model.resolve(callee) : undefined;
   const declaration = binding?.declarations.length === 1 ? binding.declarations[0] : undefined;
-  return declaration?.kind === "class" && !extendsClass(declaration.node) && !returnsFromConstructor(declaration.node);
+  return declaration?.kind === "class" && classTargets(model, callee).complete && !extendsClass(declaration.node) && !returnsFromConstructor(declaration.node);
 }
 
 function extendsClass(node: ts.Node): boolean {

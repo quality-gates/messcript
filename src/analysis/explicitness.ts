@@ -9,6 +9,7 @@ import { reachableChildren } from "./control-flow";
 import { bindingAssignments, canReachSite, inside, referenceAssignment, unconditional, isShortCircuit, type Assignment } from "./assignments";
 import { callableTargets as resolveTargets, memberTargets, type Dispatch, type Targets } from "./dispatch";
 import { classTargets, receiverShapes } from "./shapes";
+import * as resolution from "./resolution";
 import { ambientFlow, isLibraryMethodName, isPureConstructor, iteratedArgument, libraryCall, libraryCallbackNamed, hostReference, isHostRoot, movesElements, storesArguments, type LibraryCall, type LibraryCallback, type LibraryStorage } from "./library";
 import { protocolExpressions, supportsProtocol } from "./protocols";
 import { standardReceiver } from "./standard-receivers";
@@ -1564,7 +1565,7 @@ function invocationTargets(state: AnalysisState, summaries: ReadonlyMap<EffectOw
     return resolveTargets(dispatchFor(state, summaries), call.expression);
   }
   const classes = classTargets(state.model, call.expression);
-  return classes ? { targets: classes.map((created) => explicitConstructor(created) ?? created), complete: true } : { targets: [], complete: false };
+  return resolution.map(classes, created => explicitConstructor(created) ?? created);
 }
 
 function advanceResolvedPushes(
@@ -1842,7 +1843,7 @@ function dispatchFor(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, C
         return instance?.kind === "source" ? [instance.target] : [];
       });
       const complete = targets.complete && origins.length > 0 && origins.every((origin) => state.callableRegistry.has(origin));
-      return { targets: uniqueCallables(returned), complete };
+      return resolution.inherit(targets, complete ? resolution.complete(uniqueCallables(returned)) : resolution.unresolved(uniqueCallables(returned)));
     },
   };
 }
@@ -2891,15 +2892,19 @@ function constructorEffects(
   owner: EffectOwner,
 ): CallEffects {
   const classes = classTargets(state.model, expression);
-  if (!classes) {
-    if (isPureConstructor(globalName(expression, state.model))) {
+  if (!classes.complete) {
+    if (classes.targets.length === 0 && isPureConstructor(globalName(expression, state.model))) {
       return emptyCallEffects();
     }
     escapeStorage(state, actuals.map((actual) =>
       storageFactForExpression(state, summaries, ts.isSpreadElement(actual) ? actual.expression : actual, owner, node)), node, owner);
-    return unknownEffects(node, owner, "constructs unresolved class");
+    const effects = classes.targets.flatMap(created => {
+      const summary = summaries.get(explicitConstructor(created) ?? created);
+      return summary ? [instantiateCallableSummary(state, summaries, summary, actuals, node, owner, unknownFact)] : [];
+    });
+    return combineEffects([...effects, unknownEffects(node, owner, "constructs unresolved class")]);
   }
-  return combineEffects(classes.map((created) => {
+  return combineEffects(classes.targets.map((created) => {
     const target = explicitConstructor(created) ?? created;
     const active = state.invocation;
     if (active) {
@@ -2975,7 +2980,7 @@ function accessorKindEffects(
   kind: "get" | "set",
 ): CallEffects {
   const resolved = memberTargets(dispatchFor(state, summaries), node, kind);
-  if (resolved.targets.length === 0) {
+  if (resolved.targets.length === 0 && !resolution.isDecorated(resolved)) {
     return emptyCallEffects();
   }
   const receiver = isAccessExpression(node)
@@ -3216,7 +3221,7 @@ function moduleCallableShape(state: AnalysisState, binding: Binding, site: ts.No
   const literal = moduleObjectInitializer(binding);
   const reference = binding.references[0];
   if (!active || !literal || !reference || !closedContainerBinding(state.model, binding, literal, new Set()) ||
-      !receiverShapes(state.model, reference, new Set(), site)) { return undefined; }
+      !receiverShapes(state.model, reference, new Set(), site).complete) { return undefined; }
   const origin = externalBindingOrigin(binding);
   const base: StorageFact = { outer: [origin], reachable: [origin] };
   return moduleLiteralFact(state, active, literal, base);
@@ -4958,11 +4963,9 @@ function inheritedConstructorEffects(
     return emptyCallEffects();
   }
   const parents = classTargets(state.model, base);
-  if (!parents) {
-    return isPureConstructor(globalName(base, state.model)) ? emptyCallEffects()
-      : unknownEffects(base, owner, "constructs unresolved base class");
-  }
-  return combineEffects(parents.map((parent) => {
+  const unknown = !parents.complete ? [unknownEffects(base, owner, "constructs unresolved base class")] : [];
+  if (parents.targets.length === 0 && isPureConstructor(globalName(base, state.model))) { return emptyCallEffects(); }
+  return combineEffects([...unknown, ...parents.targets.map((parent) => {
     const summary = summaries.get(explicitConstructor(parent) ?? parent);
     return summary ? {
       flows: summary.flows.flatMap((flow) => reboundFlow(state, summaries, flow, base, owner, privateFact).flows
@@ -4972,7 +4975,7 @@ function inheritedConstructorEffects(
         owner: call.owner === summary.owner ? owner : call.owner,
         argumentOwner: call.argumentOwner === summary.owner ? owner : call.argumentOwner })),
     } : unknownEffects(base, owner, "constructs unresolved base class");
-  }));
+  })]);
 }
 
 function returnedExpression(node: ts.Node, owner: EffectOwner): ts.Expression | undefined {
