@@ -6207,5 +6207,33 @@
   "findings": [
    "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
   ]
+ },
+ {
+  "name": "r11-callee-has-bound-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction inner(p: [string, number[]][]) {\n  const m = new Map(p);\n  return m.has(\"a\");\n}\nfunction outer() {\n  return inner([[\"a\", shared]]);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r11-callee-has-bound-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction inner(p: [string, number[]][]) {\n  const m = new Map(p);\n  return m.has(\"a\");\n}\nfunction outer() {\n  return inner([[\"a\", [1]]]);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r11-callee-has-inline-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction inner(p: [string, number[]][]) {\n  return new Map(p).has(\"a\");\n}\nfunction outer() {\n  return inner([[\"a\", shared]]);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r11-callee-has-inline-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction inner(p: [string, number[]][]) {\n  return new Map(p).has(\"a\");\n}\nfunction outer() {\n  return inner([[\"a\", [1]]]);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
  }
 ]

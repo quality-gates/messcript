@@ -476,7 +476,7 @@ function readOrigins(fact: StorageFact, site: ReadSite): { origin: StorageOrigin
   const selected = Array.from({ length: site.path.length + (site.reference ? 0 : 1) }, (_, length) =>
     originsForPath(fact, length ? site.path.slice(0, length) : "outer").map((origin) => ({ origin, rest: site.path.slice(length) })));
   const held = site.reference ? [] : site.path.reduce((value, slot) => memberStorageFact(value, slot), fact).reachable
-    .filter((origin) => ((externalProjection(origin) ?? parameterProjection(origin))?.path.length ?? 0) > 0);
+    .filter((origin) => (externalProjection(origin)?.path.length ?? 0) > 0);
   return [...selected.flat(), ...held.map((origin) => ({ origin, rest: [] }))];
 }
 
