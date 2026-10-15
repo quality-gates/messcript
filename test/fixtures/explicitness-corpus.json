@@ -5888,5 +5888,36 @@
   "findings": [
    "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
   ]
+ },
+ {
+  "name": "mut-r9-map-constructor-single-element-pair",
+  "source": "const shared = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const m = new Map([[shared]]);\n  return [...m.keys()][0][0];\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "5:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-r9-array-from-callback-reads-element",
+  "source": "const shared = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const held = [shared];\n  return Array.from(held, (x) => x[0])[0];\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "5:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-r9-reduce-initial-length",
+  "source": "const shared = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const held = [shared];\n  return [1].reduce((acc) => acc, held).length;\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-r9-push-spread-append-range",
+  "source": "const shared = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const held: number[][] = [];\n  held.push(shared, ...[[7]]);\n  held.push(...[[5]]);\n  return held[0][0];\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "7:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
  }
 ]
