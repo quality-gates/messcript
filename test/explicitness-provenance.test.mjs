@@ -348,6 +348,102 @@ export function outer() {
   ]);
 });
 
+test("a module constant built from shared storage keeps the nested storage it holds", () => {
+  const copy = `const rows: number[][] = [[1], [0]];
+function bump() { rows[0][0] = 2; }
+const copy = [...rows];
+function outer() {
+  const inner = () => copy[0][0];
+  return inner();
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "module-copy.ts", copy), [
+    "6:ImplicitInput: The function outer() reads rows, an implicit input.",
+  ]);
+  assert.deepEqual(ownerMessages("outer", "module-copy-direct.ts", copy.replace("const inner = () => copy[0][0];\n  return inner();", "return copy[0][0];")), [
+    "5:ImplicitInput: The function outer() reads rows, an implicit input.",
+  ]);
+  assert.deepEqual(ownerMessages("outer", "module-copy-quiet.ts", copy.replace("[...rows]", "[[1]]")), []);
+  const table = `const shared: number[] = [1];
+function bump() { shared[0] = 2; }
+const table: [string, number[]][] = [["a", shared]];
+function outer() {
+  return new Map(table).get("a")![0];
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "module-table.ts", table), [
+    "5:ImplicitInput: The function outer() reads shared, an implicit input.",
+  ]);
+  assert.deepEqual(ownerMessages("outer", "module-table-quiet.ts", table.replace('["a", shared]', '["a", [1]]')), []);
+});
+
+test("writing storage nested in a module constant stays an output", () => {
+  const source = `const table: number[][] = [[1]];
+function outer() {
+  const row = table[0];
+  row[0] = 2;
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "module-nested-write.ts", source), [
+    "4:ImplicitOutput: The function outer() mutates caller-owned value row, an implicit output.",
+  ]);
+  assert.deepEqual(messages("module-copy-write.ts", `const rows: number[][] = [[1], [0]];
+const copy = [...rows];
+function outer() { copy[0][0] = 2; }
+function reader() { return rows[0][0]; }
+`), [
+    "3:ImplicitOutput: The function outer() writes copy, an implicit output.",
+    "4:ImplicitInput: The function reader() reads rows, an implicit input.",
+  ]);
+});
+
+test("a module constant keeps its literal members and the values it copied apart", () => {
+  assert.deepEqual(ownerMessages("read", "module-rows.ts", `const rows = [[1], [2]];
+function bump() { rows[0][0] = 5; }
+function read() { return rows[1][0]; }
+`), []);
+  assert.deepEqual(ownerMessages("read", "module-items.ts", `const ITEMS = [{ x: 1, y: 2 }, { x: 3, y: 4 }];
+function bump() { ITEMS[0].x = 5; }
+function read() { return ITEMS[1].y; }
+`), []);
+  assert.deepEqual(ownerMessages("when", "module-date.ts", `let ts = 0;
+function tick() { ts = 1; }
+const started = new Date(ts);
+function when() { return started.getTime(); }
+`), []);
+});
+
+test("a module constant filled from a reassigned name keeps the value it was filled with", () => {
+  assert.deepEqual(ownerMessages("read", "module-history.ts", `let cur = { n: 1 };
+function swap() { cur = { n: 2 }; }
+const hist = [cur];
+function read() { return hist[0].n; }
+`), []);
+  assert.deepEqual(ownerMessages("reset", "module-snapshot.ts", `let width = 800;
+function resize() { width = 1024; }
+const initial = [width];
+function reset() { return initial[0] + 1; }
+`), []);
+  assert.deepEqual(ownerMessages("read", "module-history-mutated.ts", `let cur = { n: 1 };
+function bump() { cur.n = 2; }
+const hist = [cur];
+function read() { return hist[0].n; }
+`), [
+    "4:ImplicitInput: The function read() reads cur, an implicit input.",
+  ]);
+});
+
+test("a module map keeps the storage its entries hold", () => {
+  const source = `const x: number[] = [1], y: number[] = [1];
+function bumpY() { y[0] = 2; }
+const m = new Map([["a", [x]], ["b", [y]]]);
+function read() { return m.get("b")![0][0]; }
+`;
+  assert.deepEqual(ownerMessages("read", "module-map.ts", source), [
+    "4:ImplicitInput: The function read() reads y, an implicit input.",
+  ]);
+});
+
 test("captured mutators read existing slots while append only retains references", () => {
   const source = `function outer() {
   const values = [0, 7];

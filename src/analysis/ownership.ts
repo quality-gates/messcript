@@ -127,6 +127,12 @@ function replayBindingEvents(binding: Binding, context: FactContext, fact: Stora
 }
 
 function ambientBindingFact(binding: Binding, context: FactContext, initial: StorageFact): StorageFact {
+  const base = externalBindingOrigin(binding);
+  const contents = initial.reachable.includes(base) ? assignments.ambientContents(binding, context.owner, context.model) : undefined;
+  const fresh = contents && expressionFact(contents.value, context);
+  if (fresh?.outer.every((origin) => origin.startsWith("private:"))) {
+    return storage.joinFacts(initial, storage.rebasedFact(fresh, base));
+  }
   const alias = assignments.ambientAlias(binding, context.owner);
   if (!alias) { return initial; }
   const resolve = (part: ts.Expression): StorageFact => expressionFact(part, context);

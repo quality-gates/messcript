@@ -104,6 +104,64 @@ export function ambientAlias(binding: Binding, owner: EffectOwner): (Assignment 
   return assignment?.value && ts.isVariableDeclaration(assignment.node) && isNameOrMember(assignment.value) ? { ...assignment, value: assignment.value } : undefined;
 }
 
+/** The most names a module constant's contents may refer to and still be tracked member by member. */
+const MAX_HELD_NAMES = 64;
+/** Resolves a name to its binding and tells if a reference to it replaces its value. */
+type NameLookup = {
+  resolve(identifier: ts.Identifier): Binding | undefined;
+  writeOf(node: ts.Node): { readonly reassign: boolean } | undefined;
+};
+
+/** Constructors whose fresh instance holds the storage its arguments supply, unlike "new Date(time)". */
+const CONTAINER_CONSTRUCTORS = new Set(["Array", "Map", "Set", "WeakMap", "WeakSet"]);
+
+/**
+ * Gives the declaration that fills a module constant with a fresh array or container of other names, as in
+ * "const copy = [...rows]". A container filled from a name that is later reassigned is left out, since it keeps the old value.
+ */
+export function ambientContents(binding: Binding, owner: EffectOwner, model: NameLookup): (Assignment & { readonly value: ts.Expression }) | undefined {
+  if (!ts.isSourceFile(binding.scope.node) || inside(binding.scope.node, owner)) { return undefined; }
+  const node = binding.declarations.map((item) => item.node).find(ts.isVariableDeclaration);
+  const value = node && freshConstant(node);
+  return node && value && holdsStableNames(value, model) ? { node, value } : undefined;
+}
+
+/** Tells if a value refers to a few names, none of them reassigned later. */
+function holdsStableNames(value: ts.Expression, model: NameLookup): boolean {
+  const names = referencedNames(value, []);
+  return names.length > 0 && names.length <= MAX_HELD_NAMES && !names.some((name) => reassignedName(model, name));
+}
+
+function freshConstant(node: ts.VariableDeclaration): ts.Expression | undefined {
+  const value = ts.isIdentifier(node.name) && node.parent.flags & ts.NodeFlags.Const ? node.initializer : undefined;
+  const fresh = value && unwrapExpression(value);
+  return fresh && (ts.isArrayLiteralExpression(fresh) || isContainerConstruction(fresh)) ? value : undefined;
+}
+
+/**
+ * Gives the names a value refers to, leaving out property keys such as "x" in "{ x: 1 }". Stops once there are more than
+ * MAX_HELD_NAMES, since a large table is read at every use and is not worth tracking member by member.
+ */
+function referencedNames(value: ts.Node, names: ts.Identifier[]): ts.Identifier[] {
+  ts.forEachChild(value, (child) => {
+    if (ts.isIdentifier(child) && !(ts.isPropertyAssignment(value) && value.name === child)) {
+      names.push(child);
+    } else if (!ts.isIdentifier(child)) {
+      referencedNames(child, names);
+    }
+    return names.length > MAX_HELD_NAMES || undefined;
+  });
+  return names;
+}
+
+function reassignedName(model: NameLookup, name: ts.Identifier): boolean {
+  return model.resolve(name)?.references.some((reference) => model.writeOf(reference)?.reassign) ?? false;
+}
+
+function isContainerConstruction(value: ts.Expression): boolean {
+  return ts.isNewExpression(value) && ts.isIdentifier(value.expression) && CONTAINER_CONSTRUCTORS.has(value.expression.text);
+}
+
 function isNameOrMember(expression: ts.Expression): boolean {
   const value = unwrapExpression(expression);
   return ts.isIdentifier(value) || ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value);

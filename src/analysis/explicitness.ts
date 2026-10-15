@@ -6,7 +6,7 @@ import { keyName, methodName, outerExpression, unwrapExpression } from "../ast/e
 import { analyzeScopes, isAmbient, writeTargets } from "../ast/scopes";
 import type { Binding, ScopeModel, Write } from "../ast/scopes";
 import { reachableChildren } from "./control-flow";
-import { bindingAssignments, canReachSite, inside, referenceAssignment, unconditional, isShortCircuit, type Assignment } from "./assignments";
+import { ambientContents, bindingAssignments, canReachSite, inside, referenceAssignment, unconditional, isShortCircuit, type Assignment } from "./assignments";
 import { callableTargets as resolveTargets, memberTargets, type Dispatch, type Targets } from "./dispatch";
 import { classTargets, receiverShapes } from "./shapes";
 import * as resolution from "./resolution";
@@ -429,7 +429,7 @@ function boundFlows(state: AnalysisState, binding: Binding, node: ts.Identifier,
   if (target && aliased) {
     return accessFlows(aliased, target, node, owner, write);
   }
-  const read = localStorageRead(state, binding, node, owner, write);
+  const read = localStorageRead(state, binding, node, owner, write, ambientContents(binding, owner, state.model) !== undefined);
   return read ? [{ kind: "input", node, owner, description: `reads ${read.name}` }] : [];
 }
 
@@ -454,8 +454,12 @@ function invocationBindingFlows(state: AnalysisState, binding: Binding, node: ts
     description: description ?? `reads ${read.name}` }];
 }
 
-function localStorageRead(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner, write: Write | undefined): Binding | undefined {
-  const home = inside(binding.scope.node, owner) ? owner : declaringOwner(state, binding);
+/**
+ * Gives the shared binding the read reaches. A module constant filled with a fresh array is read in the owner, where the
+ * storage that array holds stays outside.
+ */
+function localStorageRead(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner, write: Write | undefined, filled = false): Binding | undefined {
+  const home = inside(binding.scope.node, owner) || filled ? owner : declaringOwner(state, binding);
   if (!home) {
     return undefined;
   }

@@ -252,6 +252,32 @@ export function allocatedFact(value: ts.Node, parts: readonly { slot: string; fa
   return { outer: [allocation], reachable: reachableOrigins([allocation], cells), cells };
 }
 
+/**
+ * Renames the fresh storage a fact holds as storage selected from the base, as a module constant's array is reached from
+ * outside the module. Each renamed allocation stays open, since other code can store into it.
+ */
+export function rebasedFact(fact: StorageFact, base: StorageOrigin): StorageFact {
+  const names = new Map<StorageOrigin, StorageOrigin>();
+  const pending = fact.outer.map((origin) => ({ origin, name: base }));
+  for (const { origin, name } of pending) {
+    if (!names.has(origin)) {
+      names.set(origin, name);
+      pending.push(...(fact.cells ?? []).filter((cell) => cell.allocation === origin).flatMap((cell) => heldNames(cell, name)));
+    }
+  }
+  const rename = (origins: readonly StorageOrigin[]): readonly StorageOrigin[] => joinOrigins(origins.map((origin) => names.get(origin) ?? origin));
+  const renamed = new Set(names.values());
+  const cells = mapStorageFact(fact, rename, rename).cells?.filter((cell) => cell.slot !== "@allocation" || !renamed.has(cell.allocation)) ?? [];
+  const outer = rename(fact.outer);
+  return { outer, reachable: reachableOrigins(outer, cells), cells };
+}
+
+/** Names the fresh storage a cell holds by the member that holds it, so "rows[0]" and "rows[1]" stay apart. */
+function heldNames(cell: StorageCell, name: StorageOrigin): { origin: StorageOrigin; name: StorageOrigin }[] {
+  const slot = cell.slot.startsWith("property:") ? cell.slot : "*";
+  return cell.origins.filter((item) => item.startsWith("private:")).map((item) => ({ origin: item, name: projectedOrigin(name, slot) }));
+}
+
 export function knownMemberFact(base: StorageFact, members: readonly { slot: string; fact: StorageFact }[]): StorageFact {
   const residual = base.outer.map((allocation) => ({ allocation, slot: "*", origins: base.reachable }));
   return withInsertions({ ...base, cells: [...(base.cells ?? []), ...residual] },
