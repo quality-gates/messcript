@@ -4181,9 +4181,11 @@ function advanceArrayMemberWrite(state: AnalysisState, summaries: ReadonlyMap<Ef
     if (movesArrayLength(slot)) { setArrayLength(active, fact, undefined); }
     return;
   }
+  const prior = new Map(active.arrays);
   advanceArrayIndex(state, active, fact, index);
   if (isLogicalAssignmentTarget(target)) {
-    fact.outer.forEach((origin) => { const start = active.arrays.get(origin); active.arrays.set(origin, start && { ...start, exact: false }); });
+    // A logical assignment may not write at all, as "&&=" on a missing index, so the length is either one.
+    active.arrays = joinArrayStates(state, prior, [prior, active.arrays]);
   }
 }
 

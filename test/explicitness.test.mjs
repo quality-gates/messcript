@@ -2826,6 +2826,30 @@ function outer(flag: boolean) {
   ]);
 });
 
+test("a logical assignment that may not write leaves an array's length either way", () => {
+  const expected = [
+    "1:ImplicitOutput: The function append() mutates argument list, an implicit output.",
+    "4:ImplicitInput: The arrow function head() reads values, an implicit input.",
+  ];
+  assert.deepEqual(messages("and-assign-missing.ts", `function append(list: number[], item: number) { list[list.length] = item; }
+function outer() {
+  const values = [5];
+  const head = () => values[1] ?? -1;
+  values[3] &&= 1;
+  append(values, 6);
+  return head();
+}
+`), expected);
+  assert.deepEqual(messages("helper-and-assign.ts", `function append(list: number[], item: number) { list[3] &&= 1; list[list.length] = item; }
+function outer() {
+  const values = [5];
+  const head = () => values[1] ?? -1;
+  append(values, 6);
+  return head();
+}
+`), expected);
+});
+
 test("the reviewed explicitness corpus keeps its contract findings", () => {
   const corpus = JSON.parse(readFileSync(new URL("./fixtures/explicitness-corpus.json", import.meta.url), "utf8"));
   const adjudications = JSON.parse(readFileSync(new URL("./fixtures/explicitness-adjudications.json", import.meta.url), "utf8"));
