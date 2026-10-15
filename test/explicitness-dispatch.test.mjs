@@ -527,6 +527,6 @@ function outer(box: { a: number[] }) {
 `), [
     "2:ImplicitOutput: The function custom() writes shared, an implicit output.",
     "4:ImplicitOutput: The function outer() mutates argument box, an implicit output.",
-    "5:UnknownEffect: The function outer() calls unresolved callable, an unknown effect.",
+    "5:ImplicitOutput: The function outer() writes shared, an implicit output.",
   ]);
 });
