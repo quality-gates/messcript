@@ -2092,6 +2092,48 @@ test("array slots stay exact only for provably ordered pushes and otherwise over
   }
 });
 
+test("a helper that writes at its array's length appends like push", () => {
+  const append = "function append(list: number[], item: number) { list[list.length] = item; }\n";
+  const read = (index) => `function outer() {\n  const values = [5];\n  const head = () => values[${index}] ?? -1;\n  append(values, 6);\n  return head();\n}\n`;
+  const output = ["function append()", "ImplicitOutput", 1];
+  const cases = [
+    ["index-append-earlier.ts", append + read(0), [output]],
+    ["index-append-new.ts", append + read(1), [["arrow function head()", "ImplicitInput", 4], output]],
+    ["index-append-after-pop.ts", "function append(list: number[], item: number) { list.pop(); list[list.length] = item; }\n" + read(0),
+      [["arrow function head()", "ImplicitInput", 4], output]],
+    ["index-append-after-clear.ts", "function append(list: number[], item: number) { list.length = 0; list[list.length] = item; }\n" + read(0),
+      [["arrow function head()", "ImplicitInput", 4], output]],
+    ["index-append-looped.ts", append + "function outer() {\n  const values = [5];\n  const head = () => values[2] ?? -1;\n  for (let i = 0; i < 2; i++) append(values, 6);\n  return head();\n}\n",
+      [["arrow function head()", "ImplicitInput", 4], output]],
+  ];
+  for (const [name, source, expected] of cases) {
+    assert.deepEqual(contextRecords(name, source, []), expected, name);
+  }
+});
+
+test("element writes other than plain assignment move an array's length for a later append", () => {
+  const read = (statement, call = "append(values, 6);") => `function outer() {\n  const values = [5];\n  const head = () => values[2] ?? -1;\n  ${statement}\n  ${call}\n  return head();\n}\n`;
+  const helper = (body) => `function append(list: number[], item: number) { ${body} }\n`;
+  const index = helper("list[list.length] = item;");
+  const expected = [["arrow function head()", "ImplicitInput", 4], ["function append()", "ImplicitOutput", 1]];
+  const cases = [
+    ["grown-by-compound.ts", index + read("values[1] += 1;")],
+    ["grown-by-increment.ts", index + read("values[1]++;")],
+    ["grown-by-nullish.ts", index + read("values[1] ??= 0;")],
+    ["grown-by-destructure.ts", index + read("[values[1]] = [0];")],
+    ["grown-by-loop-target.ts", index + read("for (values[1] of [0]) {}")],
+    ["grown-before-push.ts", helper("list.push(item);") + read("values[1] += 1;")],
+    ["helper-nullish-then-index.ts", helper("list[list.length] ??= 0; list[list.length] = item;") + read("")],
+    ["helper-destructure-then-index.ts", helper("[list[list.length]] = [item]; list[list.length] = item;") + read("")],
+    ["helper-loop-target.ts", helper("for (list[list.length] of [item, item]) {}") + read("")],
+  ];
+  for (const [name, source] of cases) {
+    assert.deepEqual(contextRecords(name, source, []), expected, name);
+  }
+  const deleted = index + read("delete values[3];").replace("values[2]", "values[1]");
+  assert.deepEqual(contextRecords("delete-keeps-length.ts", deleted, []), expected);
+});
+
 test("pushes keep sound slots through bound methods, captured paths, object methods, index writes, generators and constructions", () => {
   const cases = [
     ["bound-push-a.ts", "function outer() {\n  const values = [0];\n  const push = values.push.bind(values);\n  function read() { return values[1] ?? -1; }\n  push(1);\n  return read();\n}\n", [["function outer()", "UnknownEffect", 3], ["function read()", "ImplicitInput", 4]], []],

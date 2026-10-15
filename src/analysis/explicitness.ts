@@ -1084,11 +1084,22 @@ function assignedSlots(state: AnalysisState, site: ts.Identifier): readonly (str
   if (slot === "property:length") {
     return assignedLengthSlots(state, site, access, slot);
   }
-  if (ts.isElementAccessExpression(member) && member.expression === outerExpression(site) && literalArray(state, site) &&
-      appendIndex(state, member)) {
-    return [`append:${appendStart(state, site, member)}`, "property:length"];
+  if (ts.isElementAccessExpression(member) && member.expression === outerExpression(site) && appendIndex(state, member)) {
+    return appendSlots(state, site, member);
   }
   return arrayIndexForSlot(slot) === undefined ? [slot] : [slot, "property:length"];
+}
+
+/**
+ * Gives the slots "list[list.length] = item" writes. A run of a helper knows the caller's array length, so a parameter
+ * gets the same start a push through it would. A for-of target writes once per item, so it gets no single slot.
+ */
+function appendSlots(state: AnalysisState, site: ts.Identifier, member: ts.ElementAccessExpression): readonly (string | undefined)[] {
+  if (literalArray(state, site)) {
+    return [`append:${appendStart(state, site, member)}`, "property:length"];
+  }
+  const owner = !loopTarget(outerExpression(member)) && enclosingFunction(site);
+  return [owner ? evaluatedSlot(state, state.summaries, member, owner, member) : undefined, "property:length"];
 }
 
 function assignedLengthSlots(state: AnalysisState, site: ts.Identifier, access: ts.Expression, slot: string): readonly (string | undefined)[] {
@@ -4019,8 +4030,9 @@ function propertyArrayLength(state: AnalysisState, summaries: ReadonlyMap<Effect
   const fact = storageFactForExpression(state, summaries, expression, owner, point);
   const call = invocationAt(point);
   const start = call ? knownPushStartFromFact(state, fact, owner, call) : fact.outer.length === 1
-    ? state.invocation?.arrays.get(fact.outer[0]) ?? (literalAllocationLength(state, fact.outer[0]) === undefined ? undefined
-      : { lowerBound: literalAllocationLength(state, fact.outer[0]) ?? 0, exact: true }) : undefined;
+    ? state.invocation?.arrays.has(fact.outer[0]) ? state.invocation.arrays.get(fact.outer[0])
+      : (literalAllocationLength(state, fact.outer[0]) === undefined ? undefined
+        : { lowerBound: literalAllocationLength(state, fact.outer[0]) ?? 0, exact: true }) : undefined;
   return start?.exact ? start.lowerBound : undefined;
 }
 
@@ -4045,7 +4057,63 @@ function advanceArrayState(state: AnalysisState, summaries: ReadonlyMap<EffectOw
     advanceArrayCall(state, summaries, node, owner, active);
   } else if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
     advanceArrayAssignment(state, summaries, node, owner, active);
+  } else if (ts.isIdentifier(node)) {
+    advanceArrayMemberWrite(state, summaries, node, owner, active);
   }
+}
+
+/**
+ * Moves an array's length for a member write that is not a plain assignment, as "list[1] += 1", "list[1]++",
+ * "[list[1]] = [0]" or "for (list[i] of items)". A conditional write such as "??=" may leave the length alone, and a
+ * loop target writes once per item, so neither keeps an exact length.
+ */
+function advanceArrayMemberWrite(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, node: ts.Identifier, owner: EffectOwner, active: InvocationState): void {
+  const access = memberWriteOn(state, node);
+  if (!access) { return; }
+  const target = outerExpression(access);
+  const fact = storageFactForExpression(state, summaries, access.expression, owner, node);
+  const slot = evaluatedSlot(state, summaries, access, owner, node);
+  const index = arrayIndexForSlot(slot);
+  if (index === undefined || loopTarget(target)) {
+    if (movesArrayLength(slot)) { setArrayLength(active, fact, undefined); }
+    return;
+  }
+  advanceArrayIndex(state, active, fact, index);
+  if (isLogicalAssignmentTarget(target)) {
+    fact.outer.forEach((origin) => { const start = active.arrays.get(origin); active.arrays.set(origin, start && { ...start, exact: false }); });
+  }
+}
+
+/** Gives the member a write through the identifier targets, unless it is a plain assignment or a delete, which keep their own length rules. */
+function memberWriteOn(state: AnalysisState, node: ts.Identifier): ts.AccessExpression | undefined {
+  const receiver = outerExpression(node);
+  const access = receiver.parent;
+  const write = writeOf(state, node);
+  if (!write || write.contents || !isAccessExpression(access) || access.expression !== receiver) { return undefined; }
+  const target = outerExpression(access);
+  const plain = ts.isBinaryExpression(target.parent) && target.parent.left === target && target.parent.operatorToken.kind === ts.SyntaxKind.EqualsToken;
+  return plain || ts.isDeleteExpression(target.parent) ? undefined : access;
+}
+
+/** Tells if writing the slot may change an array's length: an index, the length itself, or a slot not known. */
+function movesArrayLength(slot: string | undefined): boolean {
+  return slot === undefined || !slot.startsWith("property:") || slot === "property:length" || arrayIndexForSlot(slot) !== undefined;
+}
+
+/** Tells if a write target sits in a for-of or for-in head, alone or inside a destructuring pattern. */
+function loopTarget(target: ts.Expression): boolean {
+  let current: ts.Node = target;
+  while (ts.isArrayLiteralExpression(current.parent) || ts.isSpreadElement(current.parent) || ts.isPropertyAssignment(current.parent) ||
+      ts.isShorthandPropertyAssignment(current.parent) || ts.isObjectLiteralExpression(current.parent)) {
+    current = current.parent;
+  }
+  return (ts.isForOfStatement(current.parent) || ts.isForInStatement(current.parent)) && current.parent.initializer === current;
+}
+
+function isLogicalAssignmentTarget(target: ts.Expression): boolean {
+  const parent = target.parent;
+  return ts.isBinaryExpression(parent) && parent.left === target && [ts.SyntaxKind.QuestionQuestionEqualsToken,
+    ts.SyntaxKind.BarBarEqualsToken, ts.SyntaxKind.AmpersandAmpersandEqualsToken].includes(parent.operatorToken.kind);
 }
 
 function advanceArrayCall(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, node: ts.CallExpression, owner: EffectOwner, active: InvocationState): void {
