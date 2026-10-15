@@ -91,8 +91,14 @@ type ParameterWrite = {
   readonly writeNode?: ts.Node;
 };
 
-type ParameterCall = {
-  readonly parameterIndex: number;
+type DeferredCallable =
+  | { readonly kind: "parameter"; readonly parameterIndex: number }
+  | { readonly kind: "capture"; readonly binding: Binding };
+
+type DeferredCall = {
+  readonly owner: EffectOwner;
+  readonly argumentOwner: EffectOwner;
+  readonly callee: DeferredCallable;
   readonly node: ts.Node;
   readonly argumentFacts: readonly StorageFact[];
   readonly defaultParameterIndex?: number;
@@ -102,7 +108,7 @@ type CallableSummary = {
   readonly owner: EffectOwner;
   readonly flows: readonly ImplicitFlow[];
   readonly parameterWrites: readonly ParameterWrite[];
-  readonly parameterCalls: readonly ParameterCall[];
+  readonly deferredCalls: readonly DeferredCall[];
   readonly storageInsertions: readonly StorageInsertion[];
   readonly returnedAliases: readonly StorageFact[];
   readonly yieldedAliases: readonly StorageFact[];
@@ -118,7 +124,7 @@ type StorageInvocation = {
 type CallEffects = {
   readonly flows: ImplicitFlow[];
   readonly writes: ParameterWrite[];
-  readonly parameterCalls: ParameterCall[];
+  readonly deferredCalls: DeferredCall[];
 };
 
 type SharedWrite = { readonly fact: StorageFact; readonly origin: StorageOrigin; readonly site: ts.Node; readonly slot?: string };
@@ -900,7 +906,7 @@ function mutationEffectsFromFact(
   });
   const argumentWrite = argumentWriteForOrigins(state, origins, owner);
   return { flows: originFlows(state, origins, node, owner, description, receiverReported, slots)
-    .map((flow) => argumentWrite ? { ...flow, argumentWrite } : flow), writes, parameterCalls: [] };
+    .map((flow) => argumentWrite ? { ...flow, argumentWrite } : flow), writes, deferredCalls: [] };
 }
 
 function argumentWriteForOrigins(state: AnalysisState, origins: readonly StorageOrigin[], owner: EffectOwner): ImplicitFlow["argumentWrite"] {
@@ -2081,8 +2087,19 @@ function parameterCallableIndex(state: AnalysisState, expression: ts.Expression,
   return binding ? parameterIndexOf(binding, owner) : undefined;
 }
 
+function deferredCallable(state: AnalysisState, expression: ts.Expression, owner: EffectOwner): DeferredCallable | undefined {
+  const value = unwrapExpression(expression);
+  const binding = ts.isIdentifier(value) ? state.model.resolve(value) : undefined;
+  if (!binding) { return undefined; }
+  const parameterIndex = parameterIndexOf(binding, owner);
+  if (parameterIndex !== undefined) { return { kind: "parameter", parameterIndex }; }
+  const home = declaringOwner(state, binding);
+  return home && !ts.isSourceFile(home) && home !== owner && inside(owner, home)
+    ? { kind: "capture", binding } : undefined;
+}
+
 function emptyCallEffects(): CallEffects {
-  return { flows: [], writes: [], parameterCalls: [] };
+  return { flows: [], writes: [], deferredCalls: [] };
 }
 
 function callEffects(
@@ -2101,11 +2118,11 @@ function callEffects(
   if (resolved.targets.length > 0) {
     return resolvedCallEffects(state, summaries, resolved, call, owner);
   }
-  const parameterIndex = parameterCallableIndex(state, call.expression, owner);
-  if (parameterIndex !== undefined) {
+  const callee = deferredCallable(state, call.expression, owner);
+  if (callee) {
     const argumentFacts = call.arguments.map((argument) => storageFactForExpression(state, summaries, argument, owner, call));
     escapeStorage(state, argumentFacts, call, owner);
-    return { flows: [], writes: [], parameterCalls: [{ parameterIndex, node: call.expression, argumentFacts }] };
+    return { flows: [], writes: [], deferredCalls: [{ owner, argumentOwner: invocationFactOwner(state, owner), callee, node: call.expression, argumentFacts }] };
   }
   const known = libraryCall(call, state.model);
   if (known) {
@@ -2180,14 +2197,14 @@ function isIteratorAdvance(state: AnalysisState, summaries: ReadonlyMap<EffectOw
 }
 
 function unknownEffects(node: ts.Node, owner: EffectOwner, description: string): CallEffects {
-  return { flows: [{ kind: "unknown", node, owner, description }], writes: [], parameterCalls: [] };
+  return { flows: [{ kind: "unknown", node, owner, description }], writes: [], deferredCalls: [] };
 }
 
 function combineEffects(groups: readonly CallEffects[]): CallEffects {
   return {
     flows: groups.flatMap((group) => group.flows),
     writes: groups.flatMap((group) => group.writes),
-    parameterCalls: groups.flatMap((group) => group.parameterCalls),
+    deferredCalls: groups.flatMap((group) => group.deferredCalls),
   };
 }
 
@@ -2212,7 +2229,7 @@ function resolvedCallEffects(
     if (isGenerator(target)) {
       const body = defaultEffects(summary, false);
       return [instantiate(runSummary(summary, defaultEffects(summary, true)), call.expression), ...sites.map((site) =>
-        instantiate({ ...summary, flows: body.flows, parameterWrites: body.writes, parameterCalls: body.parameterCalls }, site))];
+        instantiate({ ...summary, flows: body.flows, parameterWrites: body.writes, deferredCalls: body.deferredCalls }, site))];
     }
     const runs = summary.returnedRuns;
     return [instantiate(summary, call.expression), ...(runs ? sites.map((site) => instantiate(runSummary(summary, runs), site)) : [])];
@@ -2242,12 +2259,12 @@ function returnsIterator(summaries: ReadonlyMap<EffectOwner, CallableSummary>, t
 function defaultEffects(summary: CallableSummary, defaults: boolean): CallEffects {
   const keep = <T extends { readonly defaultParameterIndex?: number }>(effects: readonly T[]) =>
     effects.filter((effect) => (effect.defaultParameterIndex !== undefined) === defaults);
-  return { flows: keep(summary.flows), writes: keep(summary.parameterWrites), parameterCalls: keep(summary.parameterCalls) };
+  return { flows: keep(summary.flows), writes: keep(summary.parameterWrites), deferredCalls: keep(summary.deferredCalls) };
 }
 
 function runSummary(summary: CallableSummary, runs: CallEffects): CallableSummary {
   return {
-    owner: summary.owner, flows: runs.flows, parameterWrites: runs.writes, parameterCalls: runs.parameterCalls,
+    owner: summary.owner, flows: runs.flows, parameterWrites: runs.writes, deferredCalls: runs.deferredCalls,
     storageInsertions: [], returnedAliases: [], yieldedAliases: [],
   };
 }
@@ -2362,8 +2379,8 @@ function receiverMutationEffects(state: AnalysisState, summaries: ReadonlyMap<Ef
   const groups: CallEffects[] = [];
   const visit = (node: ts.Node): void => {
     if (ts.isIdentifier(node) && methodCallOn(node) === call && writeOf(state, node)?.contents) {
-      groups.push({ flows: directFlowsFor(state, node, owner, state.includeThis), writes: [], parameterCalls: [] });
-      groups.push({ ...mutationEffectsFor(state, summaries, node, owner), parameterCalls: [] });
+      groups.push({ flows: directFlowsFor(state, node, owner, state.includeThis), writes: [], deferredCalls: [] });
+      groups.push({ ...mutationEffectsFor(state, summaries, node, owner), deferredCalls: [] });
     }
     ts.forEachChild(node, visit);
   };
@@ -2395,7 +2412,7 @@ function libraryEffects(
       });
       if (!complete && !resolveTargets(dispatchFor(state, summaries), callback).complete) {
         const read = externalReads(state, joinStorageFacts(facts), [{ path: [], mode: "deep" }], owner, false);
-        if (read) { groups.push({ flows: [{ kind: "input", node: call.expression, owner, binding: read, access: "read", description: `reads ${read.name}` }], writes: [], parameterCalls: [] }); }
+        if (read) { groups.push({ flows: [{ kind: "input", node: call.expression, owner, binding: read, access: "read", description: `reads ${read.name}` }], writes: [], deferredCalls: [] }); }
       }
     }
   }
@@ -2471,9 +2488,9 @@ function callbackEffects(
   if (resolved.complete) {
     return effects;
   }
-  const index = parameterCallableIndex(state, callback, owner);
-  if (index !== undefined) {
-    effects.parameterCalls.push({ parameterIndex: index, node, argumentFacts: facts });
+  const callee = deferredCallable(state, callback, owner);
+  if (callee) {
+    effects.deferredCalls.push({ owner, argumentOwner: invocationFactOwner(state, owner), callee, node, argumentFacts: facts });
     return effects;
   }
   escapeStorage(state, facts, node, owner);
@@ -2495,7 +2512,7 @@ function instantiateCallableSummary(
   const rebound = active(summary.flows).map((flow) => reboundFlow(state, summaries, flow, node, owner, receiver, captures));
   const flows = rebound.flatMap((effect) => effect.flows);
   const writes = rebound.flatMap((effect) => effect.writes);
-  const parameterCalls: ParameterCall[] = [];
+  const deferredCalls: DeferredCall[] = [];
   const spread = actuals.findIndex(ts.isSpreadElement);
   const actualFact = (index: number): StorageFact => {
     if (spread >= 0 && index >= spread) {
@@ -2509,11 +2526,10 @@ function instantiateCallableSummary(
   const writeEffects = instantiateParameterWrites(state, active(summary.parameterWrites), actuals, actualFact, node, owner, summary.owner);
   flows.push(...writeEffects.flows);
   writes.push(...writeEffects.writes);
-  const callbackEffects = instantiateParameterCalls(
+  const callbackEffects = instantiateDeferredCalls(
     state,
     summaries,
-    active(summary.parameterCalls),
-    actuals,
+    active(summary.deferredCalls),
     actualFact,
     node,
     owner,
@@ -2521,8 +2537,8 @@ function instantiateCallableSummary(
   );
   flows.push(...callbackEffects.flows);
   writes.push(...callbackEffects.writes);
-  parameterCalls.push(...callbackEffects.parameterCalls);
-  return { flows, writes, parameterCalls };
+  deferredCalls.push(...callbackEffects.deferredCalls);
+  return { flows, writes, deferredCalls };
 }
 
 function defaultMayRun(index: number | undefined, actuals: readonly ts.Expression[], model: ScopeModel): boolean {
@@ -2574,12 +2590,12 @@ function forwardedFlow(
 ): CallEffects {
   const origins = flow.origins ?? [];
   if (!origins.some((origin) => ownedOrigin(state, origin, owner))) {
-    return { flows: [movedFlow(flow, node, owner, flow.origins)], writes: [], parameterCalls: [] };
+    return { flows: [movedFlow(flow, node, owner, flow.origins)], writes: [], deferredCalls: [] };
   }
   return combineEffects(origins.map((origin) => {
     const external = ownedOrigin(state, origin, owner);
     if (!external) {
-      return { flows: [movedFlow(flow, node, owner, [origin])], writes: [], parameterCalls: [] };
+      return { flows: [movedFlow(flow, node, owner, [origin])], writes: [], deferredCalls: [] };
     }
     const fact = storageFactForBinding(state, summaries, external.binding, owner, node);
     const subject = isParameterOf(external.binding, owner) ? "argument" : "caller-owned value";
@@ -2666,51 +2682,25 @@ function instantiateParameterWrites(
   }));
 }
 
-function instantiateParameterCalls(
+function instantiateDeferredCalls(
   state: AnalysisState,
   summaries: ReadonlyMap<EffectOwner, CallableSummary>,
-  parameterCalls: readonly ParameterCall[],
-  actuals: readonly ts.Expression[],
+  deferredCalls: readonly DeferredCall[],
   actualFact: (index: number) => StorageFact,
   node: ts.Node,
   owner: EffectOwner,
   sourceOwner: EffectOwner,
 ): CallEffects {
-  const flows: ImplicitFlow[] = [];
-  const writes: ParameterWrite[] = [];
-  const forwardedCalls: ParameterCall[] = [];
-  for (const parameterCall of parameterCalls) {
-    const callback = actuals[parameterCall.parameterIndex] ?? ownerParameters(sourceOwner)[parameterCall.parameterIndex]?.initializer;
-    const argumentFacts = parameterCall.argumentFacts.map((fact) => instantiateStorageFact(fact, actualFact));
-    if (!callback) {
-      escapeStorage(state, argumentFacts, node, owner);
-      flows.push({ kind: "unknown", node, owner, description: "calls unresolved callable" });
-      continue;
+  return combineEffects(deferredCalls.map((call) => {
+    const argumentOwner = call.argumentOwner === sourceOwner ? invocationFactOwner(state, owner) : call.argumentOwner;
+    const facts = call.argumentOwner === sourceOwner ? call.argumentFacts.map((fact) => instantiateStorageFact(fact, actualFact)) : call.argumentFacts;
+    if (call.callee.kind === "parameter" && call.owner !== sourceOwner) {
+      return { flows: [], writes: [], deferredCalls: [{ ...call, node, argumentOwner, argumentFacts: facts }] };
     }
-    const known = libraryCallback(callback, state.model);
-    if (known) {
-      if (known.kind === "effect") {
-        flows.push({ kind: known.flow[0], node, owner, description: known.flow[1] });
-      }
-      continue;
-    }
-    const callbackTargets = callableTargets(state, summaries, callback);
-    if (!callbackTargets) {
-      const callbackParameterIndex = parameterCallableIndex(state, callback, owner);
-      if (callbackParameterIndex === undefined) {
-        escapeStorage(state, argumentFacts, node, owner);
-        flows.push({ kind: "unknown", node, owner, description: "calls unresolved callable" });
-      } else {
-        forwardedCalls.push({ parameterIndex: callbackParameterIndex, node, argumentFacts });
-      }
-      continue;
-    }
-    const effects = instantiateCallbackTargets(state, summaries, callbackTargets, argumentFacts, node, owner);
-    flows.push(...effects.flows);
-    writes.push(...effects.writes);
-    forwardedCalls.push(...effects.parameterCalls);
-  }
-  return { flows, writes, parameterCalls: forwardedCalls };
+    const callee = call.callee.kind === "parameter" ? actualFact(call.callee.parameterIndex) : invocationBinding(state, call.callee.binding);
+    if (!callee) { return { flows: [], writes: [], deferredCalls: [{ ...call, node, argumentOwner, argumentFacts: facts }] }; }
+    return instantiateSummaryDeferredCall(state, summaries, sourceOwner, { callee, facts, point: node, owner });
+  }));
 }
 
 function instantiateCallbackTargets(
@@ -2723,7 +2713,7 @@ function instantiateCallbackTargets(
 ): CallEffects {
   const flows: ImplicitFlow[] = [];
   const writes: ParameterWrite[] = [];
-  const parameterCalls: ParameterCall[] = [];
+  const deferredCalls: DeferredCall[] = [];
   for (const target of targets) {
     const callbackSummary = summaries.get(target);
     if (!callbackSummary) {
@@ -2732,9 +2722,9 @@ function instantiateCallbackTargets(
     const effects = instantiateCallableSummaryFromFacts(state, summaries, callbackSummary, argumentFacts, node, owner);
     flows.push(...effects.flows);
     writes.push(...effects.writes);
-    parameterCalls.push(...effects.parameterCalls);
+    deferredCalls.push(...effects.deferredCalls);
   }
-  return { flows, writes, parameterCalls };
+  return { flows, writes, deferredCalls };
 }
 
 function instantiateCallableSummaryFromFacts(
@@ -2752,13 +2742,8 @@ function instantiateCallableSummaryFromFacts(
     const slots = transferredPushSlots(state, fact, { node: write.node, repeated: true }, summary.owner, node, owner, write.path);
     return mutationEffectsFromFact(state, fact, write.path, node, owner, "mutates caller-owned callback argument", false, true, slots);
   });
-  const callbacks = summary.parameterCalls.map((call) => instantiateSummaryParameterCall(state, summaries, summary.owner, {
-    callee: actualFact(call.parameterIndex),
-    facts: call.argumentFacts.map((fact) => instantiateStorageFact(fact, actualFact)),
-    point: node,
-    owner,
-  }));
-  return combineEffects([...rebound, ...writes, ...callbacks]);
+  const callbacks = instantiateDeferredCalls(state, summaries, summary.deferredCalls, actualFact, node, owner, summary.owner);
+  return combineEffects([...rebound, ...writes, callbacks]);
 }
 
 function bareParameterFactIndex(fact: StorageFact): number | undefined {
@@ -2767,7 +2752,11 @@ function bareParameterFactIndex(fact: StorageFact): number | undefined {
   return parameter?.path.length === 0 ? parameter.parameterIndex : undefined;
 }
 
-function instantiateSummaryParameterCall(
+function invocationFactOwner(state: AnalysisState, owner: EffectOwner): EffectOwner {
+  return state.invocation?.stack[0] ?? owner;
+}
+
+function instantiateSummaryDeferredCall(
   state: AnalysisState,
   summaries: ReadonlyMap<EffectOwner, CallableSummary>,
   summaryOwner: EffectOwner,
@@ -2776,7 +2765,7 @@ function instantiateSummaryParameterCall(
   const { callee, facts, point, owner } = request;
   const parameterIndex = bareParameterFactIndex(callee);
   if (parameterIndex !== undefined) {
-    return { flows: [], writes: [], parameterCalls: [{ parameterIndex, node: point, argumentFacts: facts }] };
+    return { flows: [], writes: [], deferredCalls: [{ owner: invocationFactOwner(state, owner), argumentOwner: invocationFactOwner(state, owner), callee: { kind: "parameter", parameterIndex }, node: point, argumentFacts: facts }] };
   }
   if (state.summarySubstitutions?.has(summaryOwner)) {
     escapeStorage(state, facts, point, owner);
@@ -3488,7 +3477,7 @@ function invocationFlow(state: AnalysisState, summaries: ReadonlyMap<EffectOwner
     return forwardedFlow(state, summaries, flow, point, owner);
   }
   const moved = movedInvocationFlow(state, flow, actuals, point, owner);
-  if (moved.argumentWrite !== "value" || !flow.origins?.length) { return { flows: [moved], writes: [], parameterCalls: [] }; }
+  if (moved.argumentWrite !== "value" || !flow.origins?.length) { return { flows: [moved], writes: [], deferredCalls: [] }; }
   return callerWriteFlow(state, moved, flow.origins, facts, actuals);
 }
 
@@ -3499,7 +3488,7 @@ function callerWriteFlow(state: AnalysisState, moved: ImplicitFlow, origins: rea
     return base !== undefined && roots.includes(base);
   }));
   const actual = actuals[index];
-  return { flows: [actual ? { ...moved, description: `mutates caller-owned value ${actual.getText(state.sourceFile)}` } : moved], writes: [], parameterCalls: [] };
+  return { flows: [actual ? { ...moved, description: `mutates caller-owned value ${actual.getText(state.sourceFile)}` } : moved], writes: [], deferredCalls: [] };
 }
 
 function movedInvocationFlow(state: AnalysisState, flow: ImplicitFlow, actuals: readonly ts.Expression[], point: ts.Node, owner: EffectOwner): ImplicitFlow {
@@ -3649,7 +3638,7 @@ function evaluateLibraryAlternative(context: InvocationContext, instance: Extrac
   const { active, groups, returns } = context;
   const { facts, point, owner } = context.request;
   if (instance.semantics.kind === "effect") {
-    groups.push({ flows: [{ kind: instance.semantics.flow[0], description: instance.semantics.flow[1], node: point, owner }], writes: [], parameterCalls: [] });
+    groups.push({ flows: [{ kind: instance.semantics.flow[0], description: instance.semantics.flow[1], node: point, owner }], writes: [], deferredCalls: [] });
     returns.push(privateFact);
   } else {
     const settled = facts[0] ?? privateFact;
@@ -3664,16 +3653,9 @@ function evaluateLibraryAlternative(context: InvocationContext, instance: Extrac
 }
 
 function evaluateSourceAlternative(context: InvocationContext, instance: Extract<CallableInstance, { kind: "source" }>): void {
-  const { state, summaries, active, groups, returns, stores, arrays, heapPrefix, complete, instances } = context;
-  const { forceGenerator, facts, point, owner, actuals, execution } = context.request;
+  const { state, summaries, active, groups, returns } = context;
+  const { forceGenerator, facts, point, owner, actuals } = context.request;
   const deferred = isGenerator(instance.target) && !forceGenerator;
-  if (!deferred && active.stack.includes(instance.target)) {
-    const approximation = summaries.get(instance.target);
-    groups.push(approximation ? instantiateCallableSummaryFromFacts(state, summaries, approximation, facts, point, owner)
-      : unknownEffects(point, owner, "has effects this analysis did not resolve"));
-    returns.push(approximation ? instantiateStorageFact(joinStorageFacts(approximation.returnedAliases), (index) => facts[index] ?? unknownFact) : unknownFact);
-    return;
-  }
   const invocation = sourceInvocation(context, instance, deferred);
   const frame = invocation.frame;
   const child = { ...state, invocation, factCache: new Map<string, StorageFact>(), insertionCache: new Map<string, readonly StorageInsertion[]>() };
@@ -3683,12 +3665,27 @@ function evaluateSourceAlternative(context: InvocationContext, instance: Extract
       invocation.store.set(cellKey(frame, binding), facts[index] ?? unknownFact);
     }
   });
+  if (!deferred && active.stack.includes(instance.target)) {
+    const approximation = summaries.get(instance.target);
+    groups.push(approximation ? instantiateCallableSummaryFromFacts(child, summaries, approximation, facts, point, owner)
+      : unknownEffects(point, owner, "has effects this analysis did not resolve"));
+    returns.push(approximation ? instantiateStorageFact(joinStorageFacts(approximation.returnedAliases), (index) => facts[index] ?? unknownFact) : unknownFact);
+    mergeSourceState(context, invocation);
+    return;
+  }
   const summary = summarizeCallable(child, summaries, instance.target, state.includeThis);
   groups.push(combineEffects([
     ...[...summary.flows].sort((left, right) => Number(!!right.argumentWrite) - Number(!!left.argumentWrite)).map((flow) => invocationFlow(state, summaries, flow, facts, actuals, point, owner)),
-    { flows: [], writes: summary.parameterWrites.map((write) => ({ ...write, node: point, description: `mutates argument ${parameterName(owner, write.parameterIndex)}` })), parameterCalls: summary.parameterCalls.map((parameterCall) => ({ ...parameterCall, node: point })) },
+    { flows: [], writes: summary.parameterWrites.map((write) => ({ ...write, node: point, description: `mutates argument ${parameterName(owner, write.parameterIndex)}` })), deferredCalls: [] },
   ]));
+  groups.push(instantiateDeferredCalls(child, summaries, summary.deferredCalls, (index) => facts[index] ?? unknownFact, point, owner, instance.target));
   appendSourceReturns(context, instance, invocation, summary, deferred);
+  mergeSourceState(context, invocation);
+}
+
+function mergeSourceState(context: InvocationContext, invocation: InvocationState): void {
+  const { active, stores, arrays, heapPrefix, complete, instances } = context;
+  const { execution } = context.request;
   stores.push(invocation.store);
   arrays.push(invocation.arrays);
   active.heap.push(...invocation.heap.slice(heapPrefix.length).map((insertion) => ({ ...insertion,
@@ -3923,7 +3920,7 @@ function advanceArrayIndex(state: AnalysisState, active: InvocationState, fact: 
 type SummaryDraft = {
   flows: ImplicitFlow[];
   parameterWrites: ParameterWrite[];
-  parameterCalls: ParameterCall[];
+  deferredCalls: DeferredCall[];
   storageInsertions: StorageInsertion[];
   returnedAliases: StorageFact[];
   yieldedAliases: StorageFact[];
@@ -4015,7 +4012,7 @@ function summarizeCallable(
     return summarizeCallable({ ...state, invocation: { frame, store, arrays: new Map(), heap: [], registry: state.callableRegistry, values: new Map(), calls: new Map(), stack: [owner] }, factCache: new Map(), insertionCache: new Map() }, summaries, owner, includeThis);
   }
   const draft: SummaryDraft = {
-    flows: [], parameterWrites: [], parameterCalls: [], storageInsertions: [], returnedAliases: [], yieldedAliases: [],
+    flows: [], parameterWrites: [], deferredCalls: [], storageInsertions: [], returnedAliases: [], yieldedAliases: [],
     returnedRuns: [],
   };
   const context: SummaryContext = { state, summaries, owner, includeThis, draft, visit };
@@ -4030,7 +4027,7 @@ function summarizeCallable(
     owner,
     flows: uniqueSummaryFlows(draft.flows),
     parameterWrites: uniqueWrites(draft.parameterWrites),
-    parameterCalls: uniqueParameterCalls(draft.parameterCalls),
+    deferredCalls: uniqueDeferredCalls(draft.deferredCalls),
     storageInsertions: uniqueInsertions(draft.storageInsertions),
     returnedAliases: uniqueFacts(draft.returnedAliases),
     yieldedAliases: uniqueFacts(draft.yieldedAliases),
@@ -4364,13 +4361,15 @@ function targetStorageInsertions(
     const direct = (summary?.storageInsertions ?? []).map((insertion) => instantiateInsertion(
       state, summaries, insertion, invocation, target, node, owner,
       resolved.targets.length === 1 && resolved.complete && unconditional(node, owner)));
-    const callbacks = (summary?.parameterCalls ?? []).flatMap((parameterCall) => {
-      const callback = args[parameterCall.parameterIndex];
+    const callbacks = (summary?.deferredCalls ?? []).flatMap((parameterCall) => {
+      if (parameterCall.callee.kind !== "parameter" || parameterCall.owner !== target) { return []; }
+      const callback = args[parameterCall.callee.parameterIndex];
       if (!callback) {
         return [];
       }
       const targets = resolveTargets(dispatchFor(state, summaries), callback);
-      const facts = parameterCall.argumentFacts.map((fact) => invocationStorageFact(state, summaries, fact, invocation, owner));
+      const facts = parameterCall.argumentOwner === target
+        ? parameterCall.argumentFacts.map((fact) => invocationStorageFact(state, summaries, fact, invocation, owner)) : parameterCall.argumentFacts;
       const callbackInvocation = { call, callable: callback, argumentFact: (index: number) => facts[index] ?? unknownFact };
       return targets.targets.filter((callbackTarget) => !isGenerator(callbackTarget)).flatMap((callbackTarget) =>
         (summaries.get(callbackTarget)?.storageInsertions ?? []).map((insertion) => instantiateInsertion(
@@ -4588,7 +4587,7 @@ function compareInsertions([leftKey, left]: [string, StorageInsertion], [rightKe
 function appendEffects(draft: SummaryDraft, effects: CallEffects, defaultParameterIndex?: number): void {
   draft.flows.push(...effects.flows.map((flow) => ({ ...flow, defaultParameterIndex: defaultParameterIndex ?? flow.defaultParameterIndex })));
   draft.parameterWrites.push(...effects.writes.map((write) => ({ ...write, defaultParameterIndex: defaultParameterIndex ?? write.defaultParameterIndex })));
-  draft.parameterCalls.push(...effects.parameterCalls.map((call) => ({ ...call, defaultParameterIndex: defaultParameterIndex ?? call.defaultParameterIndex })));
+  draft.deferredCalls.push(...effects.deferredCalls.map((call) => ({ ...call, defaultParameterIndex: defaultParameterIndex ?? call.defaultParameterIndex })));
 }
 
 function defaultParameterIndexFor(node: ts.Node, owner: EffectOwner): number | undefined {
@@ -4611,7 +4610,7 @@ function nodeEffects(
   const directEffects = directReceiverEffects(state, direct, node, owner);
   return combineEffects([
     directEffects,
-    { ...mutation, parameterCalls: [] },
+    { ...mutation, deferredCalls: [] },
     ...writeTargets(node).map((target) => computedWriteEffects(state, summaries, target, node, owner)),
     invocationEffects(state, summaries, node, owner),
     iterationEffects ?? evaluationEffects(state, summaries, node, owner),
@@ -4622,8 +4621,8 @@ function directReceiverEffects(state: AnalysisState, direct: ImplicitFlow[], nod
   const receiver = state.invocation?.receiver;
   return receiver
     ? combineEffects(direct.map((flow) => flow.receiver ? receiverFlow(state, flow, receiver, node, owner)
-      : { flows: [flow], writes: [], parameterCalls: [] }))
-    : { flows: direct, writes: [], parameterCalls: [] };
+      : { flows: [flow], writes: [], deferredCalls: [] }))
+    : { flows: direct, writes: [], deferredCalls: [] };
 }
 
 function invocationEffects(
@@ -4650,7 +4649,7 @@ function callReadEffects(state: AnalysisState, summaries: ReadonlyMap<EffectOwne
   const effects = callEffects(state, summaries, node, owner);
   const result = state.invocation?.calls.get(node)?.value;
   const read = result && externalReads(state, result, storageReadSites(state, node), owner, false);
-  return read ? combineEffects([effects, { flows: [{ kind: "input", node, owner, binding: read, access: "read", description: `reads ${read.name}` }], writes: [], parameterCalls: [] }]) : effects;
+  return read ? combineEffects([effects, { flows: [{ kind: "input", node, owner, binding: read, access: "read", description: `reads ${read.name}` }], writes: [], deferredCalls: [] }]) : effects;
 }
 
 function assignedAccessor(node: ts.Node): ts.AccessExpression | undefined {
@@ -4762,7 +4761,9 @@ function inheritedConstructorEffects(
       flows: summary.flows.flatMap((flow) => reboundFlow(state, summaries, flow, base, owner, privateFact).flows
         .map((rebound) => ({ ...rebound, defaultParameterIndex: flow.defaultParameterIndex }))),
       writes: summary.parameterWrites.map((write) => ({ ...write, node: base })),
-      parameterCalls: summary.parameterCalls.map((call) => ({ ...call, node: base })),
+      deferredCalls: summary.deferredCalls.map((call) => ({ ...call, node: base,
+        owner: call.owner === summary.owner ? owner : call.owner,
+        argumentOwner: call.argumentOwner === summary.owner ? owner : call.argumentOwner })),
     } : unknownEffects(base, owner, "constructs unresolved base class");
   }));
 }
@@ -4829,10 +4830,14 @@ function uniqueWrites(writes: readonly ParameterWrite[]): readonly ParameterWrit
   });
 }
 
-function uniqueParameterCalls(calls: readonly ParameterCall[]): readonly ParameterCall[] {
+function deferredCallableKey(callee: DeferredCallable): string {
+  return callee.kind === "parameter" ? `parameter:${callee.parameterIndex}` : `capture:${externalBindingOrigin(callee.binding)}`;
+}
+
+function uniqueDeferredCalls(calls: readonly DeferredCall[]): readonly DeferredCall[] {
   const seen = new Set<string>();
   return calls.filter((call) => {
-    const key = `${call.parameterIndex}:${call.node.getStart()}:${JSON.stringify(call.argumentFacts)}`;
+    const key = `${ownerKey(call.owner)}:${ownerKey(call.argumentOwner)}:${deferredCallableKey(call.callee)}:${call.node.getStart()}:${JSON.stringify(call.argumentFacts)}`;
     if (seen.has(key)) {
       return false;
     }
@@ -4842,21 +4847,21 @@ function uniqueParameterCalls(calls: readonly ParameterCall[]): readonly Paramet
 }
 
 function summaryKey(summary: CallableSummary): string {
-  const effects = (flows: readonly ImplicitFlow[], writes: readonly ParameterWrite[], calls: readonly ParameterCall[]) => ({
+  const effects = (flows: readonly ImplicitFlow[], writes: readonly ParameterWrite[], calls: readonly DeferredCall[]) => ({
     flows: flows.map((flow) => [flow.kind, flow.description, flow.node.getStart(), flow.defaultParameterIndex,
       flow.binding && externalBindingOrigin(flow.binding), flow.access, flow.path, flow.receiver, flow.parameterIndex,
       flow.writeNode?.getStart(), flow.origins, flow.argumentWrite, flow.readParameterIndex, flow.reads]).sort(),
     writes: writes.map((write) => [write.parameterIndex, write.path, write.description, write.node.getStart(),
       write.defaultParameterIndex, write.writeNode?.getStart()]).sort(),
-    calls: calls.map((call) => [call.parameterIndex, call.node.getStart(), call.argumentFacts, call.defaultParameterIndex]).sort(),
+    calls: calls.map((call) => [ownerKey(call.owner), ownerKey(call.argumentOwner), deferredCallableKey(call.callee), call.node.getStart(), call.argumentFacts, call.defaultParameterIndex]).sort(),
   });
   return JSON.stringify({
-    ...effects(summary.flows, summary.parameterWrites, summary.parameterCalls),
+    ...effects(summary.flows, summary.parameterWrites, summary.deferredCalls),
     insertions: summary.storageInsertions.map((insertion) => [insertion.node.getStart(), insertion.origin.getStart(), insertion.kind,
       insertion.target, insertion.value, insertion.slot, insertion.appendCall?.getStart(), insertion.replace]),
     yielded: summary.yieldedAliases,
     aliases: summary.returnedAliases.map((fact) => [fact.outer, fact.reachable, fact.cells]).sort(),
-    runs: summary.returnedRuns && effects(summary.returnedRuns.flows, summary.returnedRuns.writes, summary.returnedRuns.parameterCalls),
+    runs: summary.returnedRuns && effects(summary.returnedRuns.flows, summary.returnedRuns.writes, summary.returnedRuns.deferredCalls),
   });
 }
 
@@ -4870,7 +4875,7 @@ function analyzeImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): 
   const state = collectCallables(sourceFile, model, includeThis);
   const summaries = new Map<EffectOwner, CallableSummary>(state.callables.map((owner) => [
     owner,
-    { owner, flows: [], parameterWrites: [], parameterCalls: [], storageInsertions: [], returnedAliases: [], yieldedAliases: [] },
+    { owner, flows: [], parameterWrites: [], deferredCalls: [], storageInsertions: [], returnedAliases: [], yieldedAliases: [] },
   ]));
   state.summaries = summaries;
   const keys = new Map<EffectOwner, string>();
@@ -4909,7 +4914,7 @@ function analyzeImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): 
       description: write.description,
       parameterIndex: write.parameterIndex,
     })));
-    flows.push(...summary.parameterCalls.map((call) => ({
+    flows.push(...summary.deferredCalls.map((call) => ({
       kind: "unknown" as const,
       node: call.node,
       owner: summary.owner,

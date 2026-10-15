@@ -1258,3 +1258,134 @@ function outer() { const f = api.run; return f(); }`,
     assert.ok(ownerMessages("outer", `module-method-open-${index}.ts`, source).some((message) => message.includes(":UnknownEffect:")), source);
   }
 });
+
+
+test("recursive callback wrappers retain their captured callable", () => {
+  const source = `function walk(n: number, f: () => number): number {
+  if (n > 0) return walk(n - 1, () => f() + 1);
+  return f();
+}
+function outer() { return walk(3, () => 0); }
+`;
+  assert.deepEqual(ownerMessages("outer", "recursive-captured-wrapper.ts", source), []);
+});
+
+
+test("recursive captured callbacks preserve actions and wrapper actions", () => {
+  const walk = `function walk(n: number, f: () => number): number {
+  if (n > 0) return walk(n - 1, () => f() + 1);
+  return f();
+}
+`;
+  const action = walk + `function outer() { return walk(3, () => { console.log("x"); return 0; }); }`;
+  assert.deepEqual(ownerMessages("outer", "recursive-captured-action.ts", action).map(message => message.split(":")[1]), ["ImplicitOutput"]);
+  const ownAction = walk.replace("() => f() + 1", "() => { console.log('wrapper'); return f() + 1; }") + `function outer() { return walk(3, () => 0); }`;
+  assert.deepEqual(ownerMessages("outer", "recursive-wrapper-action.ts", ownAction).map(message => message.split(":")[1]), ["ImplicitOutput"]);
+});
+
+test("recursive captured callbacks distinguish parameter owners", () => {
+  const walk = `function walk(f: (x: number) => number, n: number): number {
+  if (n > 0) return walk(x => f(x + 1), n - 1);
+  return f(0);
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "recursive-parameter-owner.ts", walk + `function outer() { return walk(x => x, 3); }`), []);
+  assert.deepEqual(ownerMessages("outer", "recursive-parameter-owner-action.ts", walk + `function outer() { return walk(x => { console.log(x); return x; }, 3); }`).map(message => message.split(":")[1]), ["ImplicitOutput"]);
+});
+
+test("recursive wrappers preserve factory instances and current capture cells", () => {
+  const walk = `function walk(n: number, f: () => number): number {
+  if (n > 0) return walk(n - 1, () => f() + 1);
+  return f();
+}
+`;
+  const instances = walk + `function make(f: () => number) { return () => f(); }
+function outer() {
+  const quiet = make(() => 0);
+  const action = make(() => { console.log("x"); return 1; });
+  return walk(3, quiet);
+}`;
+  assert.deepEqual(ownerMessages("outer", "recursive-wrapper-instances.ts", instances), []);
+  const reassigned = walk + `function make() {
+  let f = () => 0;
+  const wrapped = () => f();
+  f = () => { console.log("x"); return 1; };
+  return wrapped;
+}
+function outer() { return walk(3, make()); }`;
+  assert.deepEqual(ownerMessages("outer", "recursive-wrapper-reassign.ts", reassigned).map(message => message.split(":")[1]), ["ImplicitOutput"]);
+});
+
+test("recursive captured callback stores reach the caller heap", () => {
+  const source = `function walk(n: number, f: (x: number[]) => void, x: number[]): void {
+  if (n > 0) walk(n - 1, y => f(y), x);
+  else f(x);
+}
+function outer(value: number[]) {
+  const boxes: number[][] = [];
+  walk(3, x => { boxes.push(x); }, value);
+  boxes[0].push(1);
+}`;
+  assert.deepEqual(ownerMessages("outer", "recursive-wrapper-stores.ts", source).filter(message => message.includes(":ImplicitOutput:")), [
+    "8:ImplicitOutput: The function outer() mutates caller-owned value boxes, an implicit output.",
+  ]);
+});
+
+
+test("recursive captured wrappers keep unresolved alternatives", () => {
+  const walk = `function walk(n: number, f: () => number): number {
+  if (n > 0) return walk(n - 1, () => f() + 1);
+  return f();
+}
+`;
+  const unknown = walk + `function outer(f: () => number) { return walk(3, f); }`;
+  assert.deepEqual(ownerMessages("outer", "recursive-wrapper-unknown.ts", unknown).map(message => message.split(":")[1]), ["UnknownEffect"]);
+  const mixed = walk + `function outer(flag: boolean, f: () => number) { return walk(3, flag ? (() => 0) : f); }`;
+  assert.deepEqual(ownerMessages("outer", "recursive-wrapper-mixed.ts", mixed).map(message => message.split(":")[1]), ["UnknownEffect"]);
+});
+
+
+test("forwarded callback indexes are substituted in their owning context", () => {
+  const source = `function use(f: () => void) { f(); }
+function invoke(unused: () => void, f: () => void) { use(f); }
+function outer(f: () => void) { invoke(() => 0, f); }
+function entry() { outer(() => console.log("x")); }`;
+  assert.deepEqual(ownerMessages("outer", "deferred-call-owner.ts", source).map(message => message.split(":")[1]), ["UnknownEffect"]);
+  assert.deepEqual(ownerMessages("entry", "deferred-call-owner.ts", source).map(message => message.split(":")[1]), ["ImplicitOutput"]);
+});
+
+
+test("forwarded callback payloads retain their parameter coordinates", () => {
+  const source = `function invoke(unused: number[], x: number[], f: (x: number[]) => void) { f(x); }
+function outer(x: number[], f: (x: number[]) => void) { invoke([], x, f); }
+function entry(x: number[]) { outer(x, y => y.push(1)); }`;
+  assert.deepEqual(ownerMessages("entry", "deferred-payload-owner.ts", source).map(message => message.split(":")[1]), ["ImplicitOutput"]);
+});
+
+test("inherited constructors resolve their forwarded callbacks", () => {
+  const source = `class Base { constructor(f: () => void) { f(); } }
+class Derived extends Base {}
+function outer() { new Derived(() => console.log("x")); }`;
+  assert.deepEqual(ownerMessages("outer", "deferred-inherited-owner.ts", source).map(message => message.split(":")[1]), ["ImplicitOutput"]);
+});
+
+
+test("recursive callback summaries keep payload parameter coordinates", () => {
+  const source = `function invoke(unused: number[], x: number[], f: (x: number[]) => void) { f(x); }
+function loop(x: number[], f: (x: number[]) => void, n: number): void {
+  if (n > 0) loop(x, y => y.push(1), n - 1);
+  invoke([], x, f);
+}
+function outer(x: number[]) { loop(x, () => {}, 1); }`;
+  assert.deepEqual(ownerMessages("outer", "recursive-payload-owner.ts", source).map(message => message.split(":")[1]), ["ImplicitOutput"]);
+});
+
+test("recursive callback payloads do not substitute unrelated arguments", () => {
+  const source = `function invoke(unused: number[], x: number[], f: (x: number[]) => void) { f(x); }
+function loop(x: number[], y: number[], f: (x: number[]) => void, n: number): void {
+  if (n > 0) loop(x, y, f, n - 1);
+  invoke(y, x, f);
+}
+function outer(y: number[]) { loop([], y, z => z.push(1), 1); }`;
+  assert.deepEqual(ownerMessages("outer", "recursive-payload-private.ts", source), []);
+});
