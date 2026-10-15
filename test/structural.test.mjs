@@ -840,6 +840,22 @@ class StaticCohesion {
   assert.equal(calculateLcom4(staticCohesionFile.statements[1]), 1);
 });
 
+test("GlobalVariable reports loop-target, delete, and copyWithin mutations", () => {
+  const cases = [
+    ["export let current = 0;\nfor (current of [1, 2]) {}", "current"],
+    ["export let key = '';\nfor (key in { a: 1 }) {}", "key"],
+    ["export let current = 0;\nexport async function run() { for await (current of [1]) {} }", "current"],
+    ["export let pair = [0, 0];\nexport let first = 0;\nfor ([first] of [[1]]) {}", "first"],
+    ["export let bag = { a: 1 };\ndelete bag.a;", "bag"],
+    ["export const items = [];\nitems.copyWithin(0, 1);", "items"],
+  ];
+  for (const [source, name] of cases) {
+    assert.deepEqual(messages(findGlobalVariable([sourceFile(source)])), [`Avoid using static mutable state: ${name}.`], source);
+  }
+  const declared = sourceFile("for (const current of [1]) {}\nfor (const key in { a: 1 }) {}");
+  assert.deepEqual(findGlobalVariable([declared]), []);
+});
+
 test("structural rules support JavaScript syntax and configured opt-ins", () => {
   const file = sourceFile(`
 let state = 0;

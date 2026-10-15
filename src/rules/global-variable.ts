@@ -348,7 +348,7 @@ function globalBindingFor(name: string, node: ts.Node, bindings: readonly Bindin
   });
 }
 
-const mutatingMethods = new Set(["add", "delete", "fill", "pop", "push", "reverse", "set", "shift", "sort", "splice", "unshift"]);
+const mutatingMethods = new Set(["add", "copywithin", "delete", "fill", "pop", "push", "reverse", "set", "shift", "sort", "splice", "unshift"]);
 
 function markBindingMutation(node: ts.Node, name: string, bindings: readonly Binding[], mutated: Set<Binding>): void {
   const binding = globalBindingFor(name, node, bindings);
@@ -438,19 +438,25 @@ function observeMutations(
   mutatedBindings: Set<Binding>,
   mutatedFields: Set<StaticField>,
 ): void {
+  function markWriteTarget(target: ts.Identifier | ts.PropertyAccessExpression | ts.ElementAccessExpression): void {
+    if (ts.isIdentifier(target)) {
+      markBindingMutation(target, target.text, bindings, mutatedBindings);
+    } else {
+      markPropertyMutation(target, sourceFile, bindings, fields, mutatedBindings, mutatedFields);
+    }
+  }
+
   // messcript-disable-next-line CyclomaticComplexity NPathComplexity
   function visit(node: ts.Node): void {
     if (ts.isBinaryExpression(node) && assignmentOperator(node.operatorToken.kind)) {
-      extractDestructuringTargets(node.left, (target) => {
-        if (ts.isIdentifier(target)) {
-          markBindingMutation(target, target.text, bindings, mutatedBindings);
-        } else {
-          markPropertyMutation(target, sourceFile, bindings, fields, mutatedBindings, mutatedFields);
-        }
-      });
+      extractDestructuringTargets(node.left, markWriteTarget);
     }
-    if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) && updateOperator(node.operator)) {
-      const operand = unwrapExpression(node.operand);
+    if ((ts.isForInStatement(node) || ts.isForOfStatement(node)) && !ts.isVariableDeclarationList(node.initializer)) {
+      extractDestructuringTargets(node.initializer, markWriteTarget);
+    }
+    const updated = (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) && updateOperator(node.operator);
+    if (updated || ts.isDeleteExpression(node)) {
+      const operand = unwrapExpression(ts.isDeleteExpression(node) ? node.expression : node.operand);
       if (ts.isIdentifier(operand)) {
         markBindingMutation(operand, operand.text, bindings, mutatedBindings);
       } else if (ts.isPropertyAccessExpression(operand) || ts.isElementAccessExpression(operand)) {
