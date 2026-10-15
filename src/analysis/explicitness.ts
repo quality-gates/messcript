@@ -4913,10 +4913,17 @@ function isHotAsyncCall(state: AnalysisState, summaries: ReadonlyMap<EffectOwner
     ts.canHaveModifiers(target) && ts.getModifiers(target)?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword));
 }
 
+function runtimeTypeChildren(node: ts.Node): readonly ts.Expression[] {
+  if (!ts.isExpressionWithTypeArguments(node)) { return []; }
+  const parent = node.parent;
+  if (!ts.isHeritageClause(parent)) { return [node.expression]; }
+  return parent.token === ts.SyntaxKind.ExtendsKeyword && ts.isClassLike(parent.parent)
+    ? [node.expression] : [];
+}
+
 function deferredChildren(node: ts.Node, owner: EffectOwner): readonly ts.Node[] | undefined {
-  if (ts.isTypeNode(node) || ts.isExportDeclaration(node)) {
-    return [];
-  }
+  if (ts.isTypeNode(node)) { return runtimeTypeChildren(node); }
+  if (ts.isExportDeclaration(node)) { return []; }
   if (node !== owner && isFunctionLike(node)) {
     return definitionExpressions(node);
   }

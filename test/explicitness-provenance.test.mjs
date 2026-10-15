@@ -1657,3 +1657,73 @@ function outer(flag: boolean) {
 }`;
   assert.equal(ownerMessages("outer", "host-conditional-root.ts", source).some(message => message.startsWith("4:UnknownEffect:")), true);
 });
+
+for (const [name, definition, line] of [
+  ["heritage-call", "class Local extends base() {}", 5],
+  ["heritage-comma", "class Local extends (log.push(1), Base) {}", 5],
+  ["heritage-expression", "const Local = class extends base() {};", 5],
+  ["heritage-constructor", "class Local extends base() { constructor() { super(); } }", 5],
+  ["instantiation-call", "const specialized = make()<typeof erased>;", 5],
+]) {
+  test(`runtime type wrapper evaluates its operand in ${name}`, () => {
+    const source = `const log: number[] = [];
+class Base {}
+function base() { log.push(1); return Base; }
+function outer() {
+  ${definition}
+  return 1;
+}
+function make() { log.push(1); return <T,>(value: T) => value; }
+let erased = 0;
+function change() { erased++; }
+`;
+    const found = ownerMessages("outer", `${name}.ts`, source).map((message) => message.split(":").slice(0, 2).join(":"));
+    assert.deepEqual(found, [`${line}:ImplicitOutput`]);
+  });
+}
+
+for (const [name, definition] of [
+  ["bare-instantiation", "const specialized = effect<typeof erased>;"],
+  ["interface-heritage", "interface Local extends ns.Base<typeof erased> {}"],
+  ["implements-heritage", "class Local implements ns.Base<typeof erased> { value = 0; }"],
+  ["type-query", "let local: typeof ns.value;"],
+]) {
+  test(`runtime type wrapper preserves erased syntax in ${name}`, () => {
+    const source = `const log: number[] = [];
+namespace ns { export interface Base<T> { value: T; } export let value = 0; }
+let erased = 0;
+function effect<T>() { log.push(1); return 0; }
+function change() { erased++; ns.value++; }
+function outer() {
+  ${definition}
+  return 1;
+}
+`;
+    assert.deepEqual(ownerMessages("outer", `${name}.ts`, source), []);
+  });
+}
+
+test("class heritage evaluation does not execute instance fields or methods", () => {
+  const source = `const log: number[] = [];
+class Base {}
+function base() { Date.now(); return Base; }
+function effect() { console.log("instance"); return 0; }
+function outer() {
+  class Local extends base() { field = effect(); method() { effect(); } }
+  return 1;
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "heritage-deferral.ts", source).map((message) => message.split(":").slice(0, 2).join(":")), ["6:ImplicitInput"]);
+});
+
+test("class heritage and static fields both evaluate at definition time", () => {
+  const source = `class Base {}
+function base() { Date.now(); return Base; }
+function effect() { console.log("static"); return 0; }
+function outer() {
+  class Local extends base() { static field = effect(); }
+  return 1;
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "heritage-static.ts", source).map((message) => message.split(":").slice(0, 2).join(":")), ["5:ImplicitInput", "5:ImplicitOutput"]);
+});

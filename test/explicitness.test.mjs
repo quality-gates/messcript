@@ -1,6 +1,7 @@
 import "./explicitness-completeness.test.mjs";
 import "./explicitness-lifecycle.test.mjs";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -2670,6 +2671,15 @@ class Svc {
 
 test("the reviewed explicitness corpus keeps its contract findings", () => {
   const corpus = JSON.parse(readFileSync(new URL("./fixtures/explicitness-corpus.json", import.meta.url), "utf8"));
+  const adjudications = JSON.parse(readFileSync(new URL("./fixtures/explicitness-adjudications.json", import.meta.url), "utf8"));
+  const additions = new Map();
+  for (const entry of adjudications) {
+    const item = corpus.find((item) => item.name === entry.name);
+    assert.ok(item, entry.name);
+    assert.equal(additions.has(entry.name), false, entry.name);
+    assert.equal(createHash("sha256").update(item.source).digest("hex"), entry.sourceSha256, entry.name);
+    additions.set(entry.name, entry.findings);
+  }
   const directory = join(workspace, "corpus");
   mkdirSync(directory);
   corpus.forEach((item) => writeFileSync(join(directory, `${item.name}.ts`), item.source));
@@ -2681,7 +2691,7 @@ test("the reviewed explicitness corpus keeps its contract findings", () => {
   assert.deepEqual(report.errors, []);
   const actual = new Map(corpus.map((item) => [item.name, []]));
   report.findings.forEach((finding) => actual.get(basename(finding.path, ".ts")).push(`${finding.line}:${finding.ruleName}: ${finding.context}: ${finding.message}`));
-  const admissible = (item) => (item.admissible ?? []).map((entry) => entry.finding);
+  const admissible = (item) => [...(item.admissible ?? []), ...(additions.get(item.name) ?? [])].map((entry) => entry.finding);
   assert.deepEqual(
     Object.fromEntries(corpus.map((item) => [item.name, actual.get(item.name).filter((finding) => !admissible(item).includes(finding))])),
     Object.fromEntries(corpus.map((item) => [item.name, item.findings])),

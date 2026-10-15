@@ -1,0 +1,12 @@
+[
+  {
+    "name": "mut-s2-two-class-base",
+    "sourceSha256": "def064d9c5850050120f4d23197c4d46691e5f6848d7c87e5c6792c579beba7d",
+    "findings": [
+      {
+        "finding": "6:ImplicitInput: <module>: The module reads Base, an implicit input.",
+        "reason": "Class heritage reads the mutable module binding during class definition. The original corpus omitted that read. Runtime inheritance capture and independent source adjudication confirm this required addition."
+      }
+    ]
+  }
+]
