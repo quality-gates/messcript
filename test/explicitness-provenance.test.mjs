@@ -1794,3 +1794,105 @@ function outer() {
 `;
   assert.deepEqual(messages("selected-method-body.ts", source).filter(message => message.includes("[key()]()")).map(message => message.split(":").slice(0, 2).join(":")), ["4:ImplicitInput"]);
 });
+
+
+for (const [name, definition] of [
+  ["class", "@mark class Local {}"],
+  ["method", "class Local { @mark go() { return 1; } }"],
+  ["static-method", "class Local { @mark static go() { return 1; } }"],
+  ["getter", "class Local { @mark get value() { return 1; } }"],
+  ["setter", "class Local { @mark set value(value: number) {} }"],
+  ["field", "class Local { @mark value = 1; }"],
+  ["static-field", "class Local { @mark static value = 1; }"],
+]) {
+  test(`decorator application belongs to ${name} definition`, () => {
+    const source = `const log: number[] = [];
+function mark(...args: unknown[]) { log.push(1); }
+function outer() {
+  ${definition}
+  return 1;
+}
+`;
+    assert.deepEqual(ownerMessages("outer", `decorator-${name}.ts`, source), [
+      "4:UnknownEffect: The function outer() uses unresolved decorator application, an unknown effect.",
+    ]);
+    assert.deepEqual(messages(`decorator-owner-${name}.ts`, source).filter(message => message.includes("unknown effect") && !message.includes("outer()")), []);
+  });
+}
+
+test("decorator factory effects and application share the definition owner", () => {
+  const source = `const log: number[] = [];
+function factory() { log.push(1); return (...args: unknown[]) => undefined; }
+function outer() {
+  class Local { @factory() go() { return 1; } }
+  return Local;
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "decorator-factory.ts", source).map(message => message.split(":").slice(0, 2).join(":")), ["4:UnknownEffect", "4:ImplicitOutput"]);
+  assert.deepEqual(messages("decorator-factory-method.ts", source).filter(message => message.includes("Local.go()")), []);
+});
+
+for (const [name, definition] of [
+  ["method", "go(@factory() value = Date.now()) { return value; }"],
+  ["constructor", "constructor(@factory() value = Date.now()) {}"],
+]) {
+  test(`legacy ${name} parameter decorators execute at definition`, () => {
+    const source = `const log: number[] = [];
+function factory() { log.push(1); return (...args: unknown[]) => undefined; }
+function outer() {
+  class Local { ${definition} }
+  return Local;
+}
+`;
+    assert.deepEqual(ownerMessages("outer", `decorator-parameter-${name}.ts`, source).map(message => message.split(":").slice(0, 2).join(":")), ["4:UnknownEffect", "4:ImplicitOutput"]);
+    const invoked = messages(`decorator-invoked-${name}.ts`, source).filter(message => name === "method" ? message.includes("Local.go()") : message.includes("The constructor "));
+    assert.equal(invoked.length, 1);
+    assert.equal(invoked[0].split(":")[1], "ImplicitInput");
+  });
+}
+
+test("decorated defaults still depend on omitted arguments", () => {
+  const source = `function mark(...args: unknown[]) {}
+class Local { go(@mark value = Date.now()) { return value; } }
+const local = new Local();
+function supplied() { return local.go(1); }
+function omitted() { return local.go(); }
+`;
+  assert.deepEqual(ownerMessages("supplied", "decorator-default-supplied.ts", source).filter(message => message.includes("ImplicitInput") || message.includes("uses unresolved decorator application")), []);
+  assert.deepEqual(ownerMessages("omitted", "decorator-default-omitted.ts", source).filter(message => message.includes("ImplicitInput")).map(message => message.split(":").slice(0, 2).join(":")), ["5:ImplicitInput"]);
+});
+
+test("constructing decorated fields retains initializer effects without reapplying decorators", () => {
+  const source = `function mark(...args: unknown[]) {}
+class Local { @mark value = Date.now(); }
+function create() { return new Local(); }
+`;
+  const found = ownerMessages("create", "decorator-field-construction.ts", source);
+  assert.deepEqual(found.filter(message => message.includes("ImplicitInput")).map(message => message.split(":").slice(0, 2).join(":")), ["3:ImplicitInput"]);
+  assert.deepEqual(found.filter(message => message.includes("uses unresolved decorator application")), []);
+});
+
+test("stacked decorator factories retain evaluation and application effects", () => {
+  const source = `const log: number[] = [];
+function factory() { log.push(1); return (...args: unknown[]) => undefined; }
+function outer() {
+  class Local {
+    @factory()
+    @factory()
+    go() { return 1; }
+  }
+  return Local;
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "decorator-stacked.ts", source).map(message => message.split(":").slice(0, 2).join(":")), ["5:UnknownEffect", "5:ImplicitOutput"]);
+});
+
+
+test("module decorator application stays out of the decorated method body", () => {
+  const source = `function mark(...args: unknown[]) {}
+class Local { @mark go() { return 1; } }
+`;
+  assert.deepEqual(messages("decorator-module.ts", source), [
+    "2:UnknownEffect: The module uses unresolved decorator application, an unknown effect.",
+  ]);
+});

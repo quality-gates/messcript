@@ -23,7 +23,12 @@
   {
     "name": "mut-e3-dec-factory",
     "sourceSha256": "a07d3bcba878e9f71eca51d5708cc6c0c68c8caf3c9843d602941f121b8c6cbb",
-    "findings": [],
+    "findings": [
+      {
+        "finding": "8:UnknownEffect: function run(): The function run() uses unresolved decorator application, an unknown effect.",
+        "reason": "Implicit decorator application is outside the modeled protocol subset. This conservative unknown belongs to definition in run, alongside known factory evaluation output. Frozen audit decorator twins admit unknown application; this does not claim the pure returned decorator has an actual runtime effect."
+      }
+    ],
     "rejectedFindings": [
       {
         "finding": "8:ImplicitOutput: method A.go(): The method A.go() writes log, an implicit output.",

@@ -4884,6 +4884,7 @@ function evaluationEffects(
   node: ts.Node,
   owner: EffectOwner,
 ): CallEffects {
+  if (ts.isDecorator(node)) { return unknownEffects(node, owner, "uses unresolved decorator application"); }
   return combineEffects(protocolExpressions(node, state.model).map(({ expression, protocol }) => {
     if (protocol === "iterate") {
       const forced = forceIterator(state, summaries, expression, node, owner);
@@ -4924,17 +4925,19 @@ function runtimeTypeChildren(node: ts.Node): readonly ts.Expression[] {
 function deferredChildren(node: ts.Node, owner: EffectOwner): readonly ts.Node[] | undefined {
   if (ts.isTypeNode(node)) { return runtimeTypeChildren(node); }
   if (ts.isExportDeclaration(node)) { return []; }
+  if (ts.isParameter(node)) { return [node.name, ...(node.initializer ? [node.initializer] : [])]; }
   if (isFunctionLike(node)) {
     return node === owner ? [...node.parameters, ...(node.body ? [node.body] : [])] : definitionExpressions(node);
   }
   return isInstanceField(node) ? definitionExpressions(node) : undefined;
 }
 
-function definitionExpressions(node: ts.Node): readonly ts.Expression[] {
+function definitionExpressions(node: ts.Node): readonly ts.Node[] {
   const computed = (isFunctionLike(node) || ts.isPropertyDeclaration(node)) && node.name && ts.isComputedPropertyName(node.name)
     ? [node.name.expression] : [];
   const decorators = ts.canHaveDecorators(node) ? ts.getDecorators(node) ?? [] : [];
-  return [...computed, ...decorators.map((decorator) => decorator.expression)];
+  const parameters = isFunctionLike(node) ? node.parameters.flatMap((parameter) => ts.getDecorators(parameter) ?? []) : [];
+  return [...computed, ...decorators, ...parameters];
 }
 
 function executionRoots(owner: EffectOwner): readonly ts.Node[] {
