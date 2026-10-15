@@ -8,6 +8,8 @@ import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "LongClassName";
 export const priority = 3;
+// Rule option names are part of the public ruleset format.
+// messcript-disable-next-line CamelCasePropertyName
 export const properties = { maximum: 40, "subtract-prefixes": "", "subtract-suffixes": "" } as const;
 
 function adjustedClassNameLength(name: string): number {

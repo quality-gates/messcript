@@ -9,6 +9,8 @@ import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "DevelopmentCodeFragment";
 export const priority = 2;
+// Rule option names are part of the public ruleset format.
+// messcript-disable-next-line CamelCasePropertyName
 export const properties = { "unwanted-functions": "", markers: "TODO,FIXME,HACK" } as const;
 
 // Host globals. A local binding of the root name hides them.

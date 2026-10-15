@@ -149,6 +149,8 @@ export function formatGitlab(
     const path = normalizeReportPath(finding.path);
     return {
       type: "issue",
+      // GitLab requires this field name.
+      // messcript-disable-next-line CamelCasePropertyName
       check_name: finding.ruleName,
       description: `${finding.message} (context: ${finding.context})${finding.suppressed ? " [suppressed]" : ""}`,
       fingerprint: gitLabFingerprint(path, finding.line, finding.column, finding.ruleName, finding.message),
@@ -162,6 +164,8 @@ export function formatGitlab(
     const path = normalizeReportPath(error.path);
     return {
       type: "issue",
+      // GitLab requires this field name.
+      // messcript-disable-next-line CamelCasePropertyName
       check_name: "ProcessingError",
       description: error.message,
       fingerprint: gitLabFingerprint(path, error.line, error.column, "ProcessingError", error.message),

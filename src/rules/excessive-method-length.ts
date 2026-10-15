@@ -8,6 +8,8 @@ import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "ExcessiveMethodLength";
 export const priority = 3;
+// Rule option names are part of the public ruleset format.
+// messcript-disable-next-line CamelCasePropertyName
 export const properties = { minimum: 100, "ignore-whitespace": false } as const;
 
 export function findExcessiveMethodLength(sourceFile: ts.SourceFile): Finding[] {
