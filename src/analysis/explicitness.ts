@@ -537,7 +537,17 @@ function callReadSites(state: AnalysisState, site: ts.CallExpression, index: num
   if (index === "this" && known?.kind === "mutating" && known.target === "receiver") {
     return callbackReadSites(state, site, index, seen) ?? [{ path: [], reference: true }];
   }
-  return callbackReadSites(state, site, index, seen) ?? argumentReadSites(state, site, index, seen);
+  return libraryReadSites(state, site, index, known, seen) ?? argumentReadSites(state, site, index, seen);
+}
+
+function libraryReadSites(
+  state: AnalysisState, site: ts.CallExpression, index: number | "this", known: LibraryCall | undefined, seen: Set<string>,
+): ReadSite[] | undefined {
+  if (index === 1 && known && known.kind !== "effect" && callbackRoles(methodName(unwrapExpression(site.expression)))[0] === "accumulator") {
+    // reduce can return its initial value, so reads of the result read it.
+    return [{ path: [], reference: false }, ...storageReadSites(state, site, seen)];
+  }
+  return callbackReadSites(state, site, index, seen);
 }
 
 function argumentReadSites(

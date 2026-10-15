@@ -5919,5 +5919,83 @@
    "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
    "7:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
   ]
+ },
+ {
+  "name": "r10-map-pairs-asserted-get",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const pairs = [[\"a\", shared]] as [string, number[]][];\n  const m = new Map(pairs);\n  return m.get(\"a\")![0];\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "6:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r10-map-pairs-variable-get",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const pairs: [string, number[]][] = [[\"a\", shared]];\n  const m = new Map(pairs);\n  return m.get(\"a\")![0];\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "6:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r10-map-pairs-variable-has",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const pairs: [string, number[]][] = [[\"a\", shared]];\n  const m = new Map(pairs);\n  return m.has(\"a\");\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r10-map-pairs-variable-object-key",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const pairs: [number[], number][] = [[shared, 1]];\n  const m = new Map(pairs);\n  return [...m.keys()][0][0];\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "6:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r10-map-pairs-variable-values-spread",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const pairs: [string, number[]][] = [[\"a\", shared]];\n  const m = new Map(pairs);\n  return [...m.values()][0][0];\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "6:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r10-map-two-pairs-get",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const pairs: [string, number[]][] = [[\"b\", [0]], [\"a\", shared]];\n  const m = new Map(pairs);\n  return m.get(\"a\")![0];\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "6:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r10-reduce-initial-held-element",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const held = [shared];\n  return [1].reduce<number[][]>((acc) => acc, held)[0][0];\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "5:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r10-reduce-initial-inline-length",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  return [1].reduce<number[][]>((acc) => acc, [shared]).length;\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r10-reduce-initial-inline-literal",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  return [1].reduce<number[][]>((acc) => acc, [shared])[0][0];\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "4:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r10-reduce-right-initial-held",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const held = [shared];\n  return [1].reduceRight<number[][]>((acc) => acc, held)[0][0];\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "5:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
  }
 ]

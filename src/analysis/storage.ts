@@ -338,11 +338,18 @@ function spreadProperties(source: StorageFact): { slot: string; fact: StorageFac
     : [{ slot: "*", fact: elementFact(source) }];
 }
 
-function mapEntries(value: ts.NewExpression): ts.ArrayLiteralExpression | undefined {
+function mapEntries(value: ts.NewExpression): ts.Expression | undefined {
   const name = unwrapExpression(value.expression);
   const entries = value.arguments?.[0] && unwrapExpression(value.arguments[0]);
-  return ts.isIdentifier(name) && (name.text === "Map" || name.text === "WeakMap") && entries && ts.isArrayLiteralExpression(entries)
-    ? entries : undefined;
+  return ts.isIdentifier(name) && (name.text === "Map" || name.text === "WeakMap") ? entries : undefined;
+}
+
+function mapEntryListParts(entries: ts.Expression, resolve: (value: ts.Expression) => StorageFact): { slot: string; fact: StorageFact }[] {
+  if (ts.isArrayLiteralExpression(entries)) {
+    return entries.elements.flatMap((entry) => mapEntryParts(entry, resolve));
+  }
+  const pair = iteratedFact(resolve(entries), entries);
+  return [{ slot: KEY_SLOT, fact: memberStorageFact(pair, "property:0") }, { slot: "*", fact: memberStorageFact(pair, "property:1") }];
 }
 
 function mapEntryParts(entry: ts.Expression, resolve: (value: ts.Expression) => StorageFact): { slot: string; fact: StorageFact }[] {
@@ -364,7 +371,7 @@ export function literalKey(value: ts.Expression): string | undefined {
 
 export function constructorStorageFact(value: ts.NewExpression, resolve: (value: ts.Expression) => StorageFact): StorageFact {
   const entries = mapEntries(value);
-  return entries ? allocatedFact(value, entries.elements.flatMap((entry) => mapEntryParts(entry, resolve)))
+  return entries ? allocatedFact(value, mapEntryListParts(entries, resolve))
     : allocatedFact(value, (value.arguments ?? []).flatMap((argument) => {
       const fact = resolve(argument);
       return [{ slot: "*", fact }, { slot: "*", fact: iteratedFact(fact, value.expression) }];
