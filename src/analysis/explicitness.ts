@@ -156,7 +156,14 @@ type InvocationState = {
   readonly values: Map<ts.Expression, StorageFact>;
   readonly calls: Map<Invocation, { readonly effects: CallEffects; readonly value: StorageFact }>;
   readonly stack: readonly EffectOwner[];
+  /** States left by break and continue, joined in where their target statement ends or repeats. */
+  jumps?: Jump[];
+  /** For each try block being walked, the states an exception could leave it in. */
+  handlers?: FlowState[][];
 };
+
+type FlowState = { readonly store: Map<string, StorageFact>; readonly heap: StorageInsertion[]; readonly arrays: Map<StorageOrigin, PushStart | undefined> };
+type Jump = FlowState & { readonly target: ts.Node; readonly kind: "break" | "continue" };
 
 type AnalysisState = {
   readonly summarySubstitutions?: ReadonlySet<EffectOwner>;
@@ -4386,8 +4393,10 @@ function summarizeCallable(
   const context: SummaryContext = { state, summaries, owner, includeThis, draft, visit };
   function visit(node: ts.Node): void {
     if (visitDeferredNode(context, node)) { return; }
+    recordThrowPoint(context.state.invocation, node);
     const iterationEffects = visitExecutedChildren(context, node);
     recordExecutedNode(context, node, iterationEffects);
+    if (ts.isBreakOrContinueStatement(node)) { recordJump(context.state.invocation, node); }
   }
   executionRoots(owner).forEach(visit);
   appendEffects(draft, inheritedConstructorEffects(state, summaries, owner));
@@ -4481,6 +4490,11 @@ function visitExecutedChildren(context: SummaryContext, node: ts.Node): CallEffe
   const { reachable, condition, split } = executionBranches(node);
   if (ts.isSwitchStatement(node)) {
     visitSwitch(context, node);
+  } else if (ts.isTryStatement(node)) {
+    visitTry(context, node);
+  } else if (ts.isLabeledStatement(node)) {
+    visit(node.statement);
+    joinFlows(context.state, takeJumps(context.state.invocation, node, "break"));
   } else if (reachable && split) {
     visitConditional(context, reachable, condition);
   } else if (ts.isIterationStatement(node, false) && !reachable) {
@@ -4528,6 +4542,7 @@ function visitSwitch(context: SummaryContext, node: ts.SwitchStatement): void {
   values.forEach((value, key) => active.values.set(key, value));
   active.calls.clear();
   calls.forEach((value, key) => active.calls.set(key, value));
+  joinFlows(state, takeJumps(active, node, "break"));
 }
 
 function visitSwitchPath(context: SummaryContext, clauses: readonly ts.CaseOrDefaultClause[]): void {
@@ -4535,9 +4550,9 @@ function visitSwitchPath(context: SummaryContext, clauses: readonly ts.CaseOrDef
   for (const clause of clauses) {
     if (ts.isCaseClause(clause)) { visit(clause.expression); }
     for (const statement of clause.statements) {
-      if (ts.isBreakStatement(statement)) { return; }
+      if (ts.isBreakStatement(statement) && !statement.label) { return; }
       visit(statement);
-      if (ts.isReturnStatement(statement) || ts.isThrowStatement(statement)) { return; }
+      if (ts.isReturnStatement(statement) || ts.isThrowStatement(statement) || ts.isBreakOrContinueStatement(statement)) { return; }
     }
   }
 }
@@ -4579,6 +4594,7 @@ function visitLoop(context: SummaryContext, node: ts.IterationStatement): CallEf
   const heap = [...state.invocation.heap];
   const initialArrays = new Map(state.invocation.arrays);
   const iterationEffects = visitInitialLoop(context, node);
+  joinFlows(state, takeJumps(state.invocation, node, "continue"));
   state.invocation.arrays = joinArrayStates(state, initialArrays, [initialArrays, state.invocation.arrays]);
   state.invocation.store = joinBindingStores(initial, [initial, state.invocation.store]);
   state.invocation.heap = joinInvocationHeaps([], [heap, state.invocation.heap]);
@@ -4598,11 +4614,91 @@ function visitLoop(context: SummaryContext, node: ts.IterationStatement): CallEf
     state.factCache.clear();
     state.insertionCache.clear();
     visitRepeatedLoop(context, node);
+    joinFlows(state, takeJumps(active, node, "continue"));
     active.store = joinBindingStores(store, [store, active.store]);
     active.heap = joinInvocationHeaps([], [heap, active.heap]);
     active.arrays = joinArrayStates(state, arrays, [arrays, active.arrays]);
   } while (invocationStateKey(state.invocation) !== previous);
+  joinFlows(state, takeJumps(state.invocation, node, "break"));
   return iterationEffects;
+}
+
+function captureFlow(active: InvocationState): FlowState {
+  return { store: new Map(active.store), heap: [...active.heap], arrays: new Map(active.arrays) };
+}
+
+/** The statement a break or continue leaves: its label, or the closest loop or switch. A continue to a label repeats the labeled loop. */
+function jumpTarget(node: ts.BreakOrContinueStatement): ts.Node | undefined {
+  for (let current = node.parent; !endsJumpSearch(current); current = current.parent) {
+    if (node.label && ts.isLabeledStatement(current) && current.label.text === node.label.text) {
+      return ts.isBreakStatement(node) ? current : current.statement;
+    }
+    if (!node.label && (ts.isIterationStatement(current, false) || (ts.isBreakStatement(node) && ts.isSwitchStatement(current)))) {
+      return current;
+    }
+  }
+  return undefined;
+}
+
+function endsJumpSearch(node: ts.Node): boolean {
+  return isFunctionLike(node) || ts.isClassLike(node) || ts.isClassStaticBlockDeclaration(node) || ts.isSourceFile(node);
+}
+
+function recordJump(active: InvocationState, node: ts.BreakOrContinueStatement): void {
+  const target = jumpTarget(node);
+  if (target) { (active.jumps ??= []).push({ ...captureFlow(active), target, kind: ts.isBreakStatement(node) ? "break" : "continue" }); }
+}
+
+function takeJumps(active: InvocationState, target: ts.Node, kind: Jump["kind"]): readonly FlowState[] {
+  const taken = active.jumps?.filter((jump) => jump.target === target && jump.kind === kind) ?? [];
+  if (taken.length > 0) { active.jumps = active.jumps?.filter((jump) => !taken.includes(jump)); }
+  return taken;
+}
+
+/** Saves the state before each statement of a try block, since an exception there reaches the handler with that state. */
+function recordThrowPoint(active: InvocationState, node: ts.Node): void {
+  const handlers = active.handlers;
+  if (handlers && handlers.length > 0 && ts.isStatement(node)) { handlers[handlers.length - 1].push(captureFlow(active)); }
+}
+
+/** Joins other paths into the current state, keeping the heap writes that every path shares as a common prefix. */
+function joinFlows(state: AnalysisState & { readonly invocation: InvocationState }, others: readonly FlowState[]): void {
+  if (others.length === 0) { return; }
+  const active = state.invocation;
+  const flows = [captureFlow(active), ...others];
+  const first = flows[0].heap;
+  let prefix = 0;
+  while (prefix < first.length && flows.every((flow) => flow.heap[prefix] === first[prefix])) { prefix += 1; }
+  active.store = joinBindingStores(active.store, flows.map((flow) => flow.store));
+  active.heap = joinInvocationHeaps(first.slice(0, prefix), flows.map((flow) => flow.heap));
+  active.arrays = joinArrayStates(state, active.arrays, flows.map((flow) => flow.arrays));
+  state.factCache.clear();
+  state.insertionCache.clear();
+}
+
+/**
+ * Walks a try statement. The handler starts from any state the try block could throw in, the finally block from any
+ * state that reaches it, and the code after it from the joined end of the try and the handler.
+ */
+function visitTry(context: SummaryContext, node: ts.TryStatement): void {
+  const { state, visit } = context;
+  const active = state.invocation;
+  const handlers = active.handlers ??= [];
+  handlers.push([captureFlow(active)]);
+  visit(node.tryBlock);
+  let escaped = handlers.pop() ?? [];
+  if (node.catchClause) {
+    const normal = captureFlow(active);
+    joinFlows(state, escaped);
+    if (node.finallyBlock) { handlers.push([captureFlow(active)]); }
+    visit(node.catchClause);
+    escaped = node.finallyBlock ? handlers.pop() ?? [] : [];
+    joinFlows(state, [normal]);
+  }
+  if (node.finallyBlock) {
+    joinFlows(state, escaped);
+    visit(node.finallyBlock);
+  }
 }
 
 function bindIterationValues(context: SummaryContext, node: ts.ForOfStatement): void {

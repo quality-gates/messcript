@@ -283,7 +283,7 @@ function dominates(node: ts.Node, owner: EffectOwner, site: ts.Node): boolean {
 
 function isBranch(node: ts.Node): boolean {
   return ts.isIfStatement(node) || ts.isIterationStatement(node, false) || ts.isConditionalExpression(node) ||
-    ts.isSwitchStatement(node) || ts.isTryStatement(node) || isFunctionLike(node) ||
+    ts.isSwitchStatement(node) || ts.isTryStatement(node) || ts.isLabeledStatement(node) || isFunctionLike(node) ||
     (ts.isBinaryExpression(node) && isShortCircuit(node.operatorToken.kind));
 }
 

@@ -2711,6 +2711,121 @@ class Svc {
   ]);
 });
 
+test("a break, continue, or exception carries its state to where execution resumes", () => {
+  assert.deepEqual(messages("break-label.ts", `const shared: number[] = [1];
+function bump(): void { shared[0] = 2; }
+function outer(flag: boolean) {
+  let xs = shared;
+  skip: {
+    if (flag) break skip;
+    xs = [0];
+  }
+  return xs[0];
+}
+`), [
+    "2:ImplicitOutput: The function bump() writes shared, an implicit output.",
+    "9:ImplicitInput: The function outer() reads shared, an implicit input.",
+  ]);
+  assert.deepEqual(messages("break-label-private.ts", `const shared: number[] = [1];
+function bump(): void { shared[0] = 2; }
+function outer(flag: boolean) {
+  let xs = [0];
+  skip: {
+    if (flag) break skip;
+    xs = [1];
+  }
+  return xs[0];
+}
+`), [
+    "2:ImplicitOutput: The function bump() writes shared, an implicit output.",
+  ]);
+  assert.deepEqual(messages("break-switch.ts", `const shared: number[] = [1];
+function bump(): void { shared[0] = 2; }
+function outer(flag: boolean, k: number) {
+  const box = { items: shared };
+  switch (k) {
+    case 1:
+      if (flag) break;
+      box.items = [0];
+      break;
+    default:
+      box.items = [1];
+  }
+  return box.items[0];
+}
+`), [
+    "2:ImplicitOutput: The function bump() writes shared, an implicit output.",
+    "13:ImplicitInput: The function outer() reads shared, an implicit input.",
+  ]);
+  assert.deepEqual(messages("break-loop.ts", `const shared: number[] = [1];
+function bump(): void { shared[0] = 2; }
+function outer(n: number) {
+  let xs = [0];
+  while (n-- > 0) {
+    xs = shared;
+    if (n === 3) break;
+    xs = [1];
+  }
+  return xs[0];
+}
+`), [
+    "2:ImplicitOutput: The function bump() writes shared, an implicit output.",
+    "10:ImplicitInput: The function outer() reads shared, an implicit input.",
+  ]);
+  assert.deepEqual(messages("continue-loop.ts", `const shared: number[] = [1];
+function bump(): void { shared[0] = 2; }
+function outer(n: number) {
+  let xs = [0];
+  let total = 0;
+  for (let i = 0; i < n; i++) {
+    total += xs[0];
+    xs = shared;
+    if (i === 1) continue;
+    xs = [1];
+  }
+  return total;
+}
+`), [
+    "2:ImplicitOutput: The function bump() writes shared, an implicit output.",
+    "7:ImplicitInput: The function outer() reads shared, an implicit input.",
+  ]);
+  assert.deepEqual(messages("throw-catch.ts", `const shared: number[] = [1];
+function bump(): void { shared[0] = 2; }
+function outer(flag: boolean) {
+  const box = { items: shared };
+  try {
+    if (flag) throw new Error("stop");
+    box.items = [0];
+    return 0;
+  } catch {
+    return box.items[0];
+  }
+}
+`), [
+    "2:ImplicitOutput: The function bump() writes shared, an implicit output.",
+    "10:ImplicitInput: The function outer() reads shared, an implicit input.",
+  ]);
+  assert.deepEqual(messages("throw-finally.ts", `const shared: number[] = [1];
+function bump(): void { shared[0] = 2; }
+function check(flag: boolean): void { if (flag) throw new Error("stop"); }
+function outer(flag: boolean) {
+  const box = { items: [0] };
+  let seen = 0;
+  try {
+    box.items = shared;
+    check(flag);
+    box.items = [1];
+  } finally {
+    seen = box.items[0];
+  }
+  return seen;
+}
+`), [
+    "2:ImplicitOutput: The function bump() writes shared, an implicit output.",
+    "12:ImplicitInput: The function outer() reads shared, an implicit input.",
+  ]);
+});
+
 test("the reviewed explicitness corpus keeps its contract findings", () => {
   const corpus = JSON.parse(readFileSync(new URL("./fixtures/explicitness-corpus.json", import.meta.url), "utf8"));
   const adjudications = JSON.parse(readFileSync(new URL("./fixtures/explicitness-adjudications.json", import.meta.url), "utf8"));
