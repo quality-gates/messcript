@@ -26,6 +26,7 @@ import {
   type StorageResolver,
 } from "./ownership";
 import {
+  absorbsSlots,
   arrayIndexForSlot,
   elementFact,
   externalProjection,
@@ -117,6 +118,15 @@ type CallEffects = {
   readonly parameterCalls: ParameterCall[];
 };
 
+/**
+ * The reads a callable makes of one parameter's storage: those its own body makes, and those the functions it returns
+ * make, which happen only where the caller invokes the result.
+ */
+type ParameterDemand = { readonly sites: readonly ReadSite[]; readonly returned: readonly ReadSite[] };
+
+/** The expressions that can hold a callable's parameters' storage, in its own body and in the functions it returns. */
+type HeldCandidates = { readonly own: readonly ts.Expression[]; readonly returned: readonly ts.Expression[] };
+
 type SharedWrite = { readonly fact: StorageFact; readonly origin: StorageOrigin; readonly site: ts.Node; readonly slot?: string };
 
 type AnalysisState = {
@@ -127,6 +137,9 @@ type AnalysisState = {
   readonly factCache: Map<string, StorageFact>;
   readonly insertionCache: Map<string, readonly StorageInsertion[]>;
   readonly cycles: { count: number };
+  readonly demands: Map<string, ParameterDemand>;
+  readonly demandCuts: { count: number };
+  readonly heldCandidates: Map<EffectOwner, HeldCandidates>;
   readonly includeThis: boolean;
   readonly sharedBindings: Map<Binding, Set<string>>;
   readonly sharedLocalBindings: Map<Binding, Map<string, SharedWrite>>;
@@ -441,13 +454,13 @@ function callbackReadSites(state: AnalysisState, call: ts.CallExpression, index:
       return resolved ? [{ path: ["*"], reference: false }] : [];
     }
     return resolved.targets.flatMap((target) => roles.flatMap((role, parameter) => {
-      const key = `${ownerKey(target)}:${parameter}`;
-      if (role === "index" || seen.has(key)) {
+      if (role === "index") {
         return [];
       }
-      seen.add(key);
       const prefix = role === "receiver" ? [] : ["*"];
-      return parameterReadSites(state, target, parameter, seen).map((site) => ({ path: [...prefix, ...site.path], reference: site.reference }));
+      // The library can keep the callback's result, so a function it returns can still run.
+      const demand = parameterDemand(state, target, parameter, seen);
+      return [...demand.sites, ...demand.returned].map((site) => ({ path: [...prefix, ...site.path], reference: site.reference }));
     }));
   });
 }
@@ -459,7 +472,7 @@ function externalReads(
     for (const { origin, rest } of readOrigins(fact, site)) {
       const external = originBinding(state, origin);
       if (external && ((exported && (isExportedStorage(external.binding) || isAmbientVariable(external.binding))) ||
-          storageReadAffected(state, external.binding, { path: [...external.path, ...rest], reference: site.reference }, owner))) {
+          storageReadAffected(state, external.binding, projectedRead(external.path, rest, site.reference), owner))) {
         return external.binding;
       }
     }
@@ -469,15 +482,24 @@ function externalReads(
 
 /**
  * Pairs each origin a read reaches with the path still read below it. A contents read of a copy also reaches the
- * source members the copy holds; whole bindings held inside local containers stay out of scope. A reference read that
- * ends on an origin only holds that storage, so it reaches nothing there.
+ * source members the copy holds; whole bindings held inside local containers stay out of scope unless the read selects
+ * a member that holds them, as a deep read of box.pairs reads the shared row inside it. A reference read that ends on
+ * an origin only holds that storage, so it reaches nothing there.
  */
 function readOrigins(fact: StorageFact, site: ReadSite): { origin: StorageOrigin; rest: readonly string[] }[] {
   const selected = Array.from({ length: site.path.length + (site.reference ? 0 : 1) }, (_, length) =>
     originsForPath(fact, length ? site.path.slice(0, length) : "outer").map((origin) => ({ origin, rest: site.path.slice(length) })));
   const held = site.reference ? [] : site.path.reduce((value, slot) => memberStorageFact(value, slot), fact).reachable
-    .filter((origin) => (externalProjection(origin)?.path.length ?? 0) > 0);
+    .filter((origin) => {
+      const external = externalProjection(origin);
+      return !!external && (external.path.length > 0 || site.path.length > 0);
+    });
   return [...selected.flat(), ...held.map((origin) => ({ origin, rest: [] }))];
+}
+
+/** Gives the read below an origin's member path. Below a path that absorbed slots, the rest no longer lines up, so the read reaches all it holds. */
+function projectedRead(path: readonly string[], rest: readonly string[], reference: boolean): ReadSite {
+  return rest.length > 0 && absorbsSlots(path) ? { path, reference: false } : { path: [...path, ...rest], reference };
 }
 
 function isAmbientVariable(binding: Binding): boolean {
@@ -542,10 +564,61 @@ function callReadSites(state: AnalysisState, site: ts.CallExpression, index: num
     return [{ path: [], reference: true }];
   }
   const known = libraryCall(site, state.model);
-  if (index === "this" && known?.kind === "mutating" && known.target === "receiver") {
-    return callbackReadSites(state, site, index, seen) ?? [{ path: [], reference: true }];
+  const held = resultReadSites(state, site, index, known, seen);
+  if (mutatesReceiver(known, index)) {
+    return [...(callbackReadSites(state, site, index, seen) ?? [{ path: [], reference: true }]), ...held];
   }
-  return libraryReadSites(state, site, index, known, seen) ?? argumentReadSites(state, site, index, seen);
+  const sites = libraryReadSites(state, site, index, known, seen) ?? argumentReadSites(state, site, index, seen);
+  return held.length ? [...(sites ?? [{ path: [], reference: false }]), ...held] : sites;
+}
+
+function mutatesReceiver(known: LibraryCall | undefined, index: number | "this"): boolean {
+  return index === "this" && known?.kind === "mutating" && known.target === "receiver";
+}
+
+type LibraryEffect = Exclude<LibraryCall, { readonly kind: "effect" }>;
+
+function resultReadSites(
+  state: AnalysisState, call: ts.CallExpression, index: number | "this", known: LibraryCall | undefined, seen: Set<string>,
+): ReadSite[] {
+  return known && known.kind !== "effect" && resultHoldsTarget(call, index, known) ? heldResultSites(state, call, known, seen) : [];
+}
+
+/** Tells if the call's result is kept and holds the argument at the index, the target of the library call. */
+function resultHoldsTarget(call: ts.CallExpression, index: number | "this", known: LibraryEffect): boolean {
+  return index === (known.target === "receiver" ? "this" : 0) && !ts.isExpressionStatement(outerExpression(call).parent);
+}
+
+/**
+ * Gives the reads of a library call's target that reads of its result make, as [shared].slice(0)[0][0] reads
+ * shared[0]. The result holds the target's members, so a read below the result is a read below a member of the target.
+ */
+function heldResultSites(state: AnalysisState, call: ts.CallExpression, known: LibraryEffect, seen: Set<string>): ReadSite[] {
+  if (known.result === "fresh" || known.result === "mapped") {
+    return [];
+  }
+  const sites = storageReadSites(state, call, seen);
+  if (known.result === "receiver") {
+    return sites;
+  }
+  if (known.result === "element") {
+    return sites.map((site) => ({ path: ["*", ...site.path], reference: site.reference }));
+  }
+  const members = known.result === "pairs" ? 2 : 1;
+  const aligned = membersAlign(call, known);
+  return sites.flatMap((site) => {
+    if (site.path.length === 0) {
+      return site.reference ? [] : [site];
+    }
+    // A result whose members do not line up with the target's members reads all the target's contents.
+    return [aligned ? { path: ["*", ...site.path.slice(members)], reference: site.reference } : { path: [], reference: false }];
+  });
+}
+
+/** Tells if each member of the result is a member, or a pair's member, of the receiver, as flat's are not. */
+function membersAlign(call: ts.CallExpression, known: LibraryEffect): boolean {
+  return (known.result === "shallow" || known.result === "pairs" || known.result === "holding") &&
+    known.target === "receiver" && methodName(unwrapExpression(call.expression)) !== "flat";
 }
 
 function libraryReadSites(
@@ -570,13 +643,63 @@ function argumentReadSites(
     return undefined;
   }
   return resolved.targets.flatMap((target) => {
-    const key = `${ownerKey(target)}:${index}`;
-    if (seen.has(key)) {
-      return [];
+    if (index === "this") {
+      return unvisited(state, `${ownerKey(target)}:this`, seen, () => receiverReadSites(state, target, seen));
     }
-    seen.add(key);
-    return index === "this" ? receiverReadSites(state, target, seen) : parameterReadSites(state, target, index, seen);
+    const demand = parameterDemand(state, target, index, seen);
+    return !ts.isCallExpression(site) || resultInvoked(site) ? [...demand.sites, ...demand.returned] : demand.sites;
   });
+}
+
+/**
+ * Tells if the call's result can be invoked. A discarded result, or one only a member of is read, as f(x).length, is
+ * never called; every other use can call it, now or after it escapes.
+ */
+function resultInvoked(call: ts.CallExpression): boolean {
+  return !ts.isExpressionStatement(outerExpression(call).parent) && selectedRead(call).path.length === 0;
+}
+
+/**
+ * Gives the reads the target makes of a parameter's storage. A demand no cycle cut short is complete whatever seen holds,
+ * so it is kept until the summaries change; one a cycle cut short is recomputed where it is next asked for.
+ */
+function parameterDemand(state: AnalysisState, target: EffectOwner, index: number, seen: Set<string>): ParameterDemand {
+  const key = `${ownerKey(target)}:${index}`;
+  const known = state.demands.get(key);
+  if (known) {
+    seen.add(key);
+    return known;
+  }
+  if (seen.has(key)) {
+    state.demandCuts.count += 1;
+    return { sites: [], returned: [] };
+  }
+  seen.add(key);
+  const cuts = state.demandCuts.count;
+  const cycles = state.cycles.count;
+  const read = parameterReadSites(state, target, index, seen);
+  const demand = { sites: distinctSites(read.sites), returned: distinctSites(read.returned) };
+  if (state.demandCuts.count === cuts && state.cycles.count === cycles) {
+    state.demands.set(key, demand);
+  }
+  return demand;
+}
+
+function distinctSites(sites: readonly ReadSite[]): ReadSite[] {
+  const keys = new Set<string>();
+  return sites.filter((site) => {
+    const key = JSON.stringify([site.path, site.reference]);
+    return !keys.has(key) && !!keys.add(key);
+  });
+}
+
+function unvisited(state: AnalysisState, key: string, seen: Set<string>, read: () => ReadSite[]): ReadSite[] {
+  if (seen.has(key)) {
+    state.demandCuts.count += 1;
+    return [];
+  }
+  seen.add(key);
+  return read();
 }
 
 function receiverReadSites(state: AnalysisState, target: EffectOwner, seen: Set<string>): ReadSite[] {
@@ -597,37 +720,84 @@ function receiverReadSites(state: AnalysisState, target: EffectOwner, seen: Set<
   return sites;
 }
 
-function parameterReadSites(state: AnalysisState, target: EffectOwner, index: number, seen: Set<string>): ReadSite[] {
+/**
+ * Gives the reads the target makes of a parameter. Other functions that capture it can run at any time, so they read all
+ * of it, except one the target returns as it is: that runs only when the result is invoked, so its reads are kept apart.
+ */
+function parameterReadSites(state: AnalysisState, target: EffectOwner, index: number, seen: Set<string>): ParameterDemand {
   const parameter = ownerParameters(target)[index];
   const binding = parameter && state.model.bindings.find((item) => item.declarations.some((declaration) => declaration.node === parameter));
   if (!binding || parameter.dotDotDotToken || !ts.isIdentifier(parameter.name) || isGenerator(target) || usesArguments(target)) {
-    return [{ path: [], reference: false }];
+    return { sites: [{ path: [], reference: false }], returned: [] };
   }
-  return [...binding.references.flatMap((reference) => {
-    if (enclosingFunction(reference) !== target) {
-      return [{ path: [], reference: false }];
-    }
-    const write = writeOf(state, reference);
-    return write && !write.viaCall ? [] : storageReadSites(state, reference, seen).map((site) => ({ path: site.path, reference: false }));
-  }), ...heldParameterReadSites(state, target, index, seen)];
+  const reads = binding.references.map((reference) => referenceReads(state, reference, target, seen));
+  const candidates = heldCandidates(state, target);
+  return {
+    sites: [...reads.flatMap((read) => read.returned ? [] : read.sites), ...heldParameterReadSites(state, candidates.own, target, index, seen)],
+    returned: [...reads.flatMap((read) => read.returned ? read.sites : []), ...heldParameterReadSites(state, candidates.returned, target, index, seen)],
+  };
+}
+
+/** Gives the reads one reference to a parameter makes, and if they happen only when the target's result is invoked. */
+function referenceReads(
+  state: AnalysisState, reference: ts.Identifier, target: EffectOwner, seen: Set<string>,
+): { sites: readonly ReadSite[]; returned: boolean } {
+  const owner = enclosingFunction(reference);
+  const returned = owner !== target && !!owner && returnedBy(owner, target);
+  if (owner !== target && !returned) {
+    return { sites: [{ path: [], reference: false }], returned };
+  }
+  const write = writeOf(state, reference);
+  return { sites: write && !write.viaCall ? [] : storageReadSites(state, reference, seen).map((site) => ({ path: site.path, reference: false })), returned };
+}
+
+/** Tells if the target returns the function as it is, as inner returns () => m.get(k) in return () => m.get(k). */
+function returnedBy(node: EffectOwner, target: EffectOwner): boolean {
+  if (!ts.isArrowFunction(node) && !ts.isFunctionExpression(node)) {
+    return false;
+  }
+  const value = outerExpression(node);
+  return (ts.isReturnStatement(value.parent) && enclosingFunction(value.parent) === target) ||
+    (ts.isArrowFunction(target) && target.body === value);
 }
 
 /**
  * Gives the reads of a parameter's members that the target makes through storage that holds them, as m.get(k) in
  * const m = new Map(pairs) reads pairs[*][1]. The paths follow the same origins the target's own reads follow.
  */
-function heldParameterReadSites(state: AnalysisState, target: EffectOwner, index: number, seen: Set<string>): ReadSite[] {
-  const sites: ReadSite[] = [];
-  const visit = (node: ts.Node): void => {
-    if (ts.isNewExpression(node) || (ts.isIdentifier(node) && state.model.isReference(node) && localTo(state, node, target))) {
-      sites.push(...heldParameterSites(state, node, target, index, storageReadSites(state, node, seen), seen));
+function heldParameterReadSites(
+  state: AnalysisState, candidates: readonly ts.Expression[], target: EffectOwner, index: number, seen: Set<string>,
+): ReadSite[] {
+  return candidates.flatMap((node) => heldParameterSites(state, node, target, index, storageReadSites(state, node, seen), seen));
+}
+
+/**
+ * Gives the expressions that can hold the target's parameters' storage: constructions and local references, in its own
+ * body and in the functions it returns.
+ */
+function heldCandidates(state: AnalysisState, target: EffectOwner): HeldCandidates {
+  const known = state.heldCandidates.get(target);
+  if (known) {
+    return known;
+  }
+  const candidates = { own: [] as ts.Expression[], returned: [] as ts.Expression[] };
+  const visit = (node: ts.Node, into: ts.Expression[]): void => {
+    if (heldCandidate(state, node, target)) {
+      into.push(node);
     }
-    if (!isFunctionLike(node) && !ts.isClassLike(node)) {
-      ts.forEachChild(node, visit);
+    if (into === candidates.own && isFunctionLike(node) && returnedBy(node as EffectOwner, target)) {
+      ts.forEachChild(node, (child) => visit(child, candidates.returned));
+    } else if (!isFunctionLike(node) && !ts.isClassLike(node)) {
+      ts.forEachChild(node, (child) => visit(child, into));
     }
   };
-  ts.forEachChild(target, visit);
-  return sites;
+  ts.forEachChild(target, (child) => visit(child, candidates.own));
+  state.heldCandidates.set(target, candidates);
+  return candidates;
+}
+
+function heldCandidate(state: AnalysisState, node: ts.Node, target: EffectOwner): node is ts.Expression {
+  return ts.isNewExpression(node) || (ts.isIdentifier(node) && state.model.isReference(node) && localTo(state, node, target));
 }
 
 function localTo(state: AnalysisState, node: ts.Identifier, target: EffectOwner): boolean {
@@ -640,9 +810,10 @@ function heldParameterSites(
   state: AnalysisState, node: ts.Expression, target: EffectOwner, index: number, sites: readonly ReadSite[], seen: Set<string>,
 ): ReadSite[] {
   const fact = storageFactForExpression(state, state.summaries, node, target, node);
-  const held = sites.flatMap((site) => readOrigins(fact, site).flatMap(({ origin, rest }) => {
+  // As with direct parameter reads, what the target holds or returns the caller can read, so a held reference reads contents.
+  const held = sites.flatMap((site) => readOrigins(fact, { path: site.path, reference: false }).flatMap(({ origin, rest }) => {
     const projection = parameterProjection(origin);
-    return projection?.parameterIndex === index ? [{ path: [...projection.path, ...rest], reference: site.reference }] : [];
+    return projection?.parameterIndex === index ? [projectedRead(projection.path, rest, false)] : [];
   }));
   const derived = derivedValue(state, selectedRead(node).expression);
   return derived ? [...held, ...heldParameterSites(state, derived, target, index, storageReadSites(state, derived, seen), seen)] : held;
@@ -876,7 +1047,8 @@ function collectCallables(sourceFile: ts.SourceFile, model: ScopeModel, includeT
   collectArrays(sourceFile);
   return {
     model, sourceFile, callables: collectOwners(sourceFile), summaries: new Map(),
-    factCache: new Map(), insertionCache: new Map(), cycles: { count: 0 }, includeThis,
+    factCache: new Map(), insertionCache: new Map(), cycles: { count: 0 }, demands: new Map(), demandCuts: { count: 0 },
+    heldCandidates: new Map(), includeThis,
     sharedBindings: new Map(), sharedLocalBindings: new Map(),
     bindingOrigins: new Map(model.bindings.map((binding) => [externalBindingOrigin(binding), binding])),
     arrayLiterals, exposedOwners: exposedOwners(model), ownerReferences: new Map(), assignments: new Map(),
@@ -3411,6 +3583,12 @@ function summaryKey(summary: CallableSummary): string {
   });
 }
 
+function clearEpoch(state: AnalysisState): void {
+  state.factCache.clear();
+  state.insertionCache.clear();
+  state.demands.clear();
+}
+
 function analyzeImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): ImplicitFlow[] {
   const model = analyzeScopes(sourceFile);
   const state = collectCallables(sourceFile, model, includeThis);
@@ -3423,8 +3601,7 @@ function analyzeImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): 
   const bottomUp = [...state.callables].reverse();
   let converged = false;
   for (let index = 0; index < state.callables.length + 8; index += 1) {
-    state.factCache.clear();
-    state.insertionCache.clear();
+    clearEpoch(state);
     let changed = false;
     const sharedCount = sharedBindingCount(state);
     for (const owner of bottomUp) {
@@ -3435,8 +3612,7 @@ function analyzeImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): 
         changed = true;
         keys.set(owner, nextKey);
         summaries.set(owner, summary);
-        state.factCache.clear();
-        state.insertionCache.clear();
+        clearEpoch(state);
       }
     }
     if (!changed && sharedCount === sharedBindingCount(state)) {

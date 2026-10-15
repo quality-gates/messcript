@@ -121,8 +121,14 @@ function holdsReference(parent: ts.Node, expression: ts.Expression): boolean {
 
 function literalMemberSites(parent: ts.Node, expression: ts.Expression, argumentSites: ArgumentSites): ReadSite[] {
   const held = heldMember(parent, expression);
-  return held ? readSites(held.literal, argumentSites).flatMap((site) =>
-    site.path.length > 0 && pathsOverlap(site.path.slice(0, 1), [held.slot]) ? [{ path: site.path.slice(1), reference: site.reference }] : []) : [];
+  // A nested literal only receives a contents read through a demanded member of the literal holding it, and that read
+  // is deep, so it reads its members' contents too. A literal's own consumer reads only its slots, as a construction does.
+  return held ? readSites(held.literal, argumentSites).flatMap((site) => {
+    if (site.path.length === 0) {
+      return !site.reference && heldMember(held.literal.parent, held.literal) ? CONTENTS : [];
+    }
+    return pathsOverlap(site.path.slice(0, 1), [held.slot]) ? [{ path: site.path.slice(1), reference: site.reference }] : [];
+  }) : [];
 }
 
 function heldMember(parent: ts.Node, expression: ts.Expression): { literal: ts.Expression; slot: string } | undefined {

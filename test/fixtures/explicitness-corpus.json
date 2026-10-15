@@ -6235,5 +6235,65 @@
   "findings": [
    "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
   ]
+ },
+ {
+  "name": "r12-ret-entry-map-bound-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction pick(m: Map<string, number[]>) {\n  return m.get(\"a\")!;\n}\nfunction outer() {\n  const m = new Map([[\"a\", shared]]);\n  return pick(m)[0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "10:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r12-ret-entry-map-bound-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction pick(m: Map<string, number[]>) {\n  return m.get(\"a\")!;\n}\nfunction outer() {\n  const m = new Map([[\"a\", [1]]]);\n  return pick(m)[0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r12-closure-map-pairs-invoked-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction inner(pairs: [string, number[]][]) {\n  const m = new Map(pairs);\n  return () => m.get(\"a\")![0];\n}\nfunction outer() {\n  return inner([[\"a\", shared]])();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "10:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r12-closure-map-pairs-invoked-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction inner(pairs: [string, number[]][]) {\n  const m = new Map(pairs);\n  return () => m.get(\"a\")![0];\n}\nfunction outer() {\n  return inner([[\"a\", [1]]])();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r12-proj-map-inline-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction inner(box: { pairs: [string, number[]][] }) {\n  return new Map(box.pairs).get(\"a\")![0];\n}\nfunction outer() {\n  return inner({ pairs: [[\"a\", shared]] });\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "9:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r12-proj-map-inline-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction inner(box: { pairs: [string, number[]][] }) {\n  return new Map(box.pairs).get(\"a\")![0];\n}\nfunction outer() {\n  return inner({ pairs: [[\"a\", [1]]] });\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r12-chain-literal-slice-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  return [shared].slice(0)[0][0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "6:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r12-chain-literal-slice-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  return [[1]].slice(0)[0][0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
  }
 ]

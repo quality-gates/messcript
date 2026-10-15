@@ -91,8 +91,13 @@ export function externalProjection(origin: StorageOrigin): { base: `external:${n
 
 const MAX_PROJECTION_DEPTH = 3;
 
+/** Tells if a projected path stands for all it holds, so the slots selected below it were absorbed. */
+export function absorbsSlots(path: readonly string[]): boolean {
+  return path.length >= 2 && path[path.length - 1] === "*";
+}
+
 function projectedPath(path: readonly string[], slot: string): string {
-  if (path.length >= 2 && path[path.length - 1] === "*") {
+  if (absorbsSlots(path)) {
     return path.map(encodeURIComponent).join("/");
   }
   const next = path.length >= MAX_PROJECTION_DEPTH ? [...path.slice(0, MAX_PROJECTION_DEPTH - 1), "*"] : [...path, slot];
