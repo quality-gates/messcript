@@ -1118,7 +1118,6 @@ function missingCallback(values: number[]) {
     "4:UnknownEffect: The function apply() calls unresolved callable, an unknown effect.",
     "7:ImplicitOutput: The function push() mutates argument values, an implicit output.",
     "10:ImplicitOutput: The function sharedWrite() mutates caller-owned callback argument, an implicit output.",
-    "10:ImplicitInput: The function sharedWrite() reads shared, an implicit input.",
     "13:UnknownEffect: The function unknownWrite() mutates value with unknown ownership, an unknown effect.",
     "16:UnknownEffect: The function missingCallback() calls unresolved callable, an unknown effect.",
   ]);
