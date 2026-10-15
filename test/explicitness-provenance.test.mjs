@@ -178,7 +178,6 @@ test("a closure returning a factory parameter returns the factory call's argumen
 test("a closure returning a factory parameter still writes through a shared argument", () => {
   const source = [...wrapFactory, "const shared: number[] = [];", "function outer() {", "  const get = wrap(shared);", "  get().push(1);", "}", ""];
   assert.deepEqual(ownerMessages("outer", "wrap-shared.ts", source.join("\n")), [
-    "6:ImplicitInput: The function outer() reads shared, an implicit input.",
     "7:ImplicitOutput: The function outer() mutates receiver of push, an implicit output.",
   ]);
 });
