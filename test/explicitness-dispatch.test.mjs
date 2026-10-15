@@ -482,3 +482,51 @@ function outer() {
     "5:UnknownEffect: The function outer() calls overridable method, an unknown effect.",
   ]);
 });
+
+test("projected array receivers preserve shallow-copy provenance", () => {
+  for (const [name, type, access] of [
+    ["record", "{ a: number[][] }", "box.a"],
+    ["nested", "{ nested: { a: number[][] } }", "box.nested.a"],
+    ["literal-key", "{ a: number[][] }", 'box["a"]'],
+    ["alias", "Box", "box.a"],
+    ["union", "{ a: number[][] } | { a: readonly number[][] }", "box.a"],
+  ]) {
+    const wrap = name === "nested" ? "{ nested: { a: VALUE } }" : "{ a: VALUE }";
+    const source = (value) => `type Box = { a: number[][] };
+const shared: number[] = [1];
+function bump() { shared[0] = 2; }
+function inner(box: ${type}) { return ${access}.slice(0)[0][0]; }
+function outer() { return inner(${wrap.replace("VALUE", value)}); }
+`;
+    assert.deepEqual(messages(`projected-${name}-shared.ts`, source("[shared]")), [
+      "3:ImplicitOutput: The function bump() writes shared, an implicit output.",
+      "5:ImplicitInput: The function outer() reads shared, an implicit input.",
+    ]);
+    assert.deepEqual(messages(`projected-${name}-private.ts`, source("[[1]]")), [
+      "3:ImplicitOutput: The function bump() writes shared, an implicit output.",
+    ]);
+  }
+});
+
+test("projected receivers require a proof for every member and method", () => {
+  for (const [name, source] of [
+    ["custom", "function outer(box: { a: { slice(n: number): number[] } }) { return box.a.slice(0); }"],
+    ["mixed", "function outer(box: { a: number[] } | { a: { slice(n: number): number[] } }) { return box.a.slice(0); }"],
+    ["dynamic", "function outer(box: Record<string, number[]>, key: string) { return box[key].slice(0); }"],
+  ]) {
+    assert.deepEqual(messages(`projected-${name}.ts`, source), [
+      "1:UnknownEffect: The function outer() calls unresolved callable, an unknown effect.",
+    ]);
+  }
+  assert.deepEqual(messages("projected-replaced-method.ts", `const shared: number[] = [1];
+function custom(n: number) { shared[0] = 2; return [1]; }
+function outer(box: { a: number[] }) {
+  box.a.slice = custom;
+  return box.a.slice(0);
+}
+`), [
+    "2:ImplicitOutput: The function custom() writes shared, an implicit output.",
+    "4:ImplicitOutput: The function outer() mutates argument box, an implicit output.",
+    "5:UnknownEffect: The function outer() calls unresolved callable, an unknown effect.",
+  ]);
+});
