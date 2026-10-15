@@ -865,6 +865,27 @@ test("GlobalVariable reports each mutating method call on module state", () => {
   assert.deepEqual(findGlobalVariable([sourceFile("export const state: any = [];\nstate.at(0);")]), []);
 });
 
+test("GlobalVariable reports only Object.assign targets as assign mutations", () => {
+  const mutating = [
+    "Object.assign(state, { value: 1 });",
+    "Object[\"assign\"](state, { value: 1 });",
+    "(Object).assign((state), { value: 1 });",
+  ];
+  for (const call of mutating) {
+    const source = `export let state = { value: 0 };\n${call}`;
+    assert.deepEqual(messages(findGlobalVariable([sourceFile(source)])), ["Avoid using static mutable state: state."], source);
+  }
+  const reading = [
+    "function helper(logger: { assign: (value: object) => void }) {\n  logger.assign(state);\n}",
+    "Object.assign({}, state);",
+    "Object.freeze(state);",
+  ];
+  for (const code of reading) {
+    const source = `export let state = { value: 0 };\n${code}`;
+    assert.deepEqual(findGlobalVariable([sourceFile(source)]), [], source);
+  }
+});
+
 test("structural rules support JavaScript syntax and configured opt-ins", () => {
   const file = sourceFile(`
 let state = 0;
