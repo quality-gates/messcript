@@ -21,6 +21,7 @@ export type UnusedDeclaration = {
 type ClassInfo = {
   name?: string;
   privateMembers: Map<string, UnusedDeclaration[]>;
+  staticMembers: Set<UnusedDeclaration>;
 };
 
 function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
@@ -126,7 +127,7 @@ class UnusedAnalyzer {
 
   private collectClass(node: ClassLike): void {
     const name = className(node);
-    const classInfo: ClassInfo = { name, privateMembers: new Map() };
+    const classInfo: ClassInfo = { name, privateMembers: new Map(), staticMembers: new Set() };
     this.classesByNode.set(node, classInfo);
     if (name) {
       this.classesByName.set(name, classInfo);
@@ -159,6 +160,9 @@ class UnusedAnalyzer {
     const members = classInfo.privateMembers.get(memberKey(name)) ?? [];
     members.push(declaration);
     classInfo.privateMembers.set(memberKey(name), members);
+    if (hasModifier(member, ts.SyntaxKind.StaticKeyword)) {
+      classInfo.staticMembers.add(declaration);
+    }
     this.declarations.push(declaration);
   }
 
@@ -172,12 +176,15 @@ class UnusedAnalyzer {
     return undefined;
   }
 
-  private markPrivate(name: string, node: ts.Node, classInfo = this.currentClass(node)): void {
+  // `ClassName.member` reads the constructor, so it reaches static members only.
+  private markPrivate(name: string, node: ts.Node, classInfo = this.currentClass(node), staticOnly = false): void {
     if (isWriteOnly(node)) {
       return;
     }
     for (const member of classInfo?.privateMembers.get(memberKey(name)) ?? []) {
-      member.used = true;
+      if (!staticOnly || classInfo?.staticMembers.has(member)) {
+        member.used = true;
+      }
     }
   }
 
@@ -206,7 +213,7 @@ class UnusedAnalyzer {
     if (receiver.kind === ts.SyntaxKind.ThisKeyword) {
       this.markPrivate(node.name.text, node);
     } else if (ts.isIdentifier(receiver)) {
-      this.markPrivate(node.name.text, node, this.classesByName.get(receiver.text));
+      this.markPrivate(node.name.text, node, this.classesByName.get(receiver.text), true);
     }
   }
 
@@ -223,7 +230,7 @@ class UnusedAnalyzer {
     }
     const key = unwrapExpression(node.argumentExpression);
     if (ts.isStringLiteralLike(key) || ts.isNumericLiteral(key)) {
-      this.markPrivate(key.text, node, classInfo);
+      this.markPrivate(key.text, node, classInfo, ts.isIdentifier(receiver));
     } else {
       this.markClassUncertain(classInfo);
     }

@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- `UnusedPrivateField` and `UnusedPrivateMethod` no longer count `ClassName.member` or `ClassName["member"]` as a use of an instance private member ([#320](https://github.com/quality-gates/messcript/issues/320)). That access reads the constructor, so it now marks only static private members used.
 - `UnusedPrivateField` and `UnusedPrivateMethod` now treat a numeric key such as `this[0]` as that key only, like `this["other"]` ([#319](https://github.com/quality-gates/messcript/issues/319)). It no longer suppresses every private-member finding in the class.
 - `UnusedPrivateField` and `UnusedPrivateMethod` now count `ClassName["member"]` as a use of a static private member, matching `ClassName.member` and `this["member"]` ([#318](https://github.com/quality-gates/messcript/issues/318)). A non-literal key, such as `ClassName[key]`, suppresses that class's private-member findings the same way `this[key]` does.
 - `GlobalVariable` now treats only `Object.assign(...)` and `Object["assign"](...)` as writing their first argument ([#317](https://github.com/quality-gates/messcript/issues/317)). Passing module state to another object's `assign` method, such as `logger.assign(state)`, is no longer reported.
