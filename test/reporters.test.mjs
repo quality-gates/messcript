@@ -224,6 +224,17 @@ test("structured reports preserve metadata, sorting, escaping, suppression, and 
     sarifPaths.invocations[0].toolExecutionNotifications[0].locations[0].physicalLocation.artifactLocation.uri,
     "nested/broken.ts",
   );
+  const sarifEncoded = JSON.parse(formatSarif([
+    finding(join(root, "my files", "100%#?.ts"), 1, 1, "ARule", "a", "a context"),
+  ], [error(join(root, "..", "outside dir", "broken.ts"), 4, 5, "bad")], tool)).runs[0];
+  assert.equal(
+    sarifEncoded.results[0].locations[0].physicalLocation.artifactLocation.uri,
+    "my%20files/100%25%23%3F.ts",
+  );
+  assert.equal(
+    sarifEncoded.invocations[0].toolExecutionNotifications[0].locations[0].physicalLocation.artifactLocation.uri,
+    join(root, "..", "outside dir", "broken.ts").split(sep).join("/").replaceAll(" ", "%20"),
+  );
   const cleanSarif = JSON.parse(formatSarif([], [], tool));
   assert.equal(cleanSarif.runs[0].invocations[0].executionSuccessful, true);
   assert.equal("toolExecutionNotifications" in cleanSarif.runs[0].invocations[0], false);

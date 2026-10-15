@@ -214,6 +214,8 @@ Use this for GitHub code scanning and other SARIF hosts:
 }
 ```
 
+`uri` is the report path with each segment percent-encoded, so `my files/a.ts`
+becomes `my%20files/a.ts`.
 `suppressions` is present only for suppressed findings.
 `toolExecutionNotifications` is present only when processing errors exist; then
 `executionSuccessful` is `false`.

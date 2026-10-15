@@ -161,10 +161,14 @@ export function formatCheckstyle(
   return `${lines.join("\n")}\n`;
 }
 
+function sarifUri(path: string): string {
+  return normalizeReportPath(path).split("/").map(encodeURIComponent).join("/");
+}
+
 function sarifLocation(path: string, line: number, column: number): object {
   return {
     physicalLocation: {
-      artifactLocation: { uri: normalizeReportPath(path) },
+      artifactLocation: { uri: sarifUri(path) },
       region: { startLine: line, startColumn: column },
     },
   };
