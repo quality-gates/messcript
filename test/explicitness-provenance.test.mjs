@@ -594,6 +594,24 @@ function caller() {
 });
 
 
+test("a resolved helper that reads a passed array keeps that read beside its callback's unknown effect", () => {
+  assert.deepEqual(messages("helper-callback-read.ts", `const shared: number[] = [1];
+function bump(): void { shared[0] = 2; }
+function first(xs: number[], cb: () => void): number {
+  cb();
+  return xs[0];
+}
+function outer(cb: () => void) {
+  return first(shared, cb);
+}
+`), [
+    "2:ImplicitOutput: The function bump() writes shared, an implicit output.",
+    "4:UnknownEffect: The function first() calls unresolved callable, an unknown effect.",
+    "8:UnknownEffect: The function outer() calls unresolved callable, an unknown effect.",
+    "8:ImplicitInput: The function outer() reads shared, an implicit input.",
+  ]);
+});
+
 test("a helper result retains a selected shared map value", () => {
   const source = `const shared: number[] = [1];
 function bump() { shared[0] = 2; }

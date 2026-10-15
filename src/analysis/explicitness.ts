@@ -5444,7 +5444,7 @@ function analyzeImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): 
       description: "calls unresolved callable",
     })));
   }
-  return uniqueLines(uniqueFlows(firstStorageSites(withoutPassedReads(state.model, flows))));
+  return uniqueLines(uniqueFlows(firstStorageSites(withoutPassedReads(state, summaries, flows))));
 }
 
 function firstStorageSites(flows: readonly ImplicitFlow[]): ImplicitFlow[] {
@@ -5472,9 +5472,14 @@ function flowStorageKeys(flow: ImplicitFlow): readonly string[] {
   });
 }
 
-function withoutPassedReads(model: ScopeModel, flows: readonly ImplicitFlow[]): ImplicitFlow[] {
+/**
+ * Drops the read of a binding passed straight to a call that resolves to nothing, since that call's unknown effect
+ * already covers what it does with the argument. A call that resolves keeps the reads its callees make.
+ */
+function withoutPassedReads(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, flows: readonly ImplicitFlow[]): ImplicitFlow[] {
   return flows.filter((flow) => {
-    const call = flow.kind === "input" && ts.isIdentifier(flow.node) && !reassigned(model, flow.binding) ? argumentCall(flow.node) : undefined;
+    const passed = flow.kind === "input" && ts.isIdentifier(flow.node) && !reassigned(state.model, flow.binding) ? argumentCall(flow.node) : undefined;
+    const call = passed && resolveTargets(dispatchFor(state, summaries), passed.expression).targets.length === 0 ? passed : undefined;
     return !call || !flows.some((other) => other.kind === "unknown" && other.owner === flow.owner &&
       (other.node === call || inside(other.node, call.expression)) && sameLine(other.node, flow.node));
   });
