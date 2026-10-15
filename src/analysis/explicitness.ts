@@ -12,7 +12,7 @@ import { classTargets } from "./shapes";
 import { ambientFlow, isLibraryMethodName, isPureConstructor, iteratedArgument, libraryCall, libraryCallback, movesElements, storesArguments, type LibraryCall, type LibraryStorage } from "./library";
 import { protocolExpressions, supportsProtocol } from "./protocols";
 import { standardReceiver } from "./standard-receivers";
-import { readSites, storageSlot, writeAffectsRead, type ReadSite } from "./reads";
+import { readSites, receiverCall, selectedRead, storageSlot, writeAffectsRead, type ReadSite } from "./reads";
 import {
   baseClassExpression, collectOwners, enclosingClass, explicitConstructor, instanceInitializers, isConstruction,
   isGenerator, isInstanceField, ownerKey, ownerParameters, type EffectOwner,
@@ -36,6 +36,8 @@ import {
   hasUnknownOrigin,
   freshStorageFact,
   allocatedFact,
+  iteratedFact,
+  pairsStorageFact,
   shallowStorageFact,
   invokedStorageFact,
   isCellAllocation,
@@ -356,8 +358,12 @@ function boundFlows(state: AnalysisState, binding: Binding, node: ts.Identifier,
   const shared = bindingSharesRead(state, binding, node, owner);
   const direct = bindingFlow(binding, node, owner, write, shared);
   if (direct) {
-    const held = write ? undefined : localStorageRead(state, binding, node, owner, undefined);
-    return held ? [{ kind: "input", node, owner, description: `reads ${held.name}` }] : accessFlows(direct, binding, node, owner, write);
+    const held = localStorageRead(state, binding, node, owner, write);
+    if (!held) {
+      return accessFlows(direct, binding, node, owner, write);
+    }
+    const read: ImplicitFlow = { kind: "input", node, owner, description: `reads ${held.name}` };
+    return write ? [...accessFlows(direct, binding, node, owner, { ...write, compound: false }), read] : [read];
   }
   const target = aliasTarget(state.model, binding, new Set());
   const aliased = target && bindingFlow(target, node, owner, write, shared || bindingSharesRead(state, target, node, owner));
@@ -368,14 +374,51 @@ function boundFlows(state: AnalysisState, binding: Binding, node: ts.Identifier,
   return read ? [{ kind: "input", node, owner, description: `reads ${read.name}` }] : [];
 }
 
-/** Finds shared storage that a function-local value reads, including the elements its own write hands to a callback. */
 function localStorageRead(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner, write: Write | undefined): Binding | undefined {
-  const sites = !write ? storageReadSites(state, node) : callbackReadsReceiver(state, node) ? [{ path: ["*"], reference: false }] : [];
   const home = inside(binding.scope.node, owner) ? owner : declaringOwner(state, binding);
-  if (!sites.length || !home) {
+  if (!home) {
     return undefined;
   }
-  return externalReads(state, storageFactForExpression(state, state.summaries, node, home, node), sites, owner, false);
+  const sites = write ? writtenReadSites(state, node, write) : storageReadSites(state, node);
+  return externalReads(state, storageFactForExpression(state, state.summaries, node, home, node), sites, owner, false) ??
+    derivedRead(state, node, home, owner);
+}
+
+function writtenReadSites(state: AnalysisState, node: ts.Identifier, write: Write): ReadSite[] {
+  if (write.compound) {
+    return [{ path: selectedSlots(node), reference: false }];
+  }
+  return callbackReadsReceiver(state, node) ? [{ path: ["*"], reference: false }] : [];
+}
+
+function derivedRead(state: AnalysisState, node: ts.Expression, home: EffectOwner, owner: EffectOwner): Binding | undefined {
+  const derived = derivedValue(state, selectedRead(node).expression);
+  return derived && (externalReads(state, storageFactForExpression(state, state.summaries, derived, home, derived), derivedReadSites(state, derived), owner, false) ??
+    derivedRead(state, derived, home, owner));
+}
+
+function derivedValue(state: AnalysisState, target: ts.Expression): ts.Expression | undefined {
+  const parent = target.parent;
+  if (ts.isSpreadElement(parent) && ts.isArrayLiteralExpression(parent.parent)) {
+    return parent.parent;
+  }
+  const call = ts.isCallExpression(parent) ? parent : receiverCall(target);
+  return call && resultHolds(state, call, target) ? call : undefined;
+}
+
+function resultHolds(state: AnalysisState, call: ts.CallExpression, target: ts.Expression): boolean {
+  const known = libraryCall(call, state.model);
+  return !!known && known.kind !== "effect" && known.result !== "fresh" && libraryTarget(call, known) === target;
+}
+
+function derivedReadSites(state: AnalysisState, derived: ts.Expression): ReadSite[] {
+  const { path, expression } = selectedRead(derived);
+  const user = receiverCall(expression);
+  const known = user && libraryCall(user, state.model);
+  if (known?.kind !== "mutating" || known.target !== "receiver") {
+    return storageReadSites(state, derived);
+  }
+  return known.callbacks.length ? [{ path: [...path, "*"], reference: false }] : path.length ? [{ path, reference: true }] : [];
 }
 
 function declaringOwner(state: AnalysisState, binding: Binding): EffectOwner | undefined {
@@ -1674,6 +1717,7 @@ function libraryReturnFact(
     case "receiver": return receiver;
     case "holding": return holdingReturnFact(state, summaries, call, owner, receiver, seen);
     case "mapped": return mappedReturnFact(state, summaries, call, owner, known, seen);
+    case "pairs": return pairsStorageFact(call, calleeName(call), receiver);
   }
 }
 
@@ -1699,8 +1743,13 @@ function holdingReturnFact(
   seen: ReadonlySet<Binding>,
 ): StorageFact {
   const facts = call.arguments.map((argument) => storageFactForExpression(state, summaries, argument, owner, call, seen));
-  return allocatedFact(call, [receiver, ...facts].map((fact) => ({ slot: "*",
-    fact: { ...fact, outer: [...fact.outer, ...fact.reachable] } })));
+  return allocatedFact(call, [receiver, ...facts].flatMap((fact) => [{ slot: "*",
+    fact: { ...fact, outer: [...fact.outer, ...fact.reachable] } }, { slot: "*", fact: iteratedFact(fact, calleeName(call)) }]));
+}
+
+function calleeName(call: ts.CallExpression): ts.Node {
+  const callee = unwrapExpression(call.expression);
+  return ts.isPropertyAccessExpression(callee) ? callee.name : ts.isElementAccessExpression(callee) ? callee.argumentExpression : callee;
 }
 
 function mappedReturnFact(

@@ -16,7 +16,6 @@ export type Assignment = {
   readonly element?: boolean;
   /** The value is iterated, as in a for-of loop, and the binding receives its elements. */
   readonly iterated?: boolean;
-  /** The name a destructuring pattern binds, which selects the element from the value. */
   readonly pattern?: ts.Identifier;
   readonly join?: boolean;
 };
@@ -90,7 +89,7 @@ export function declarationAssignment(node: ts.Node, identifier: ts.Identifier):
   }
   const loop = node.parent.parent;
   if (ts.isForOfStatement(loop) && loop.initializer === node.parent) {
-    return { node: loop.statement, value: loop.expression, element: true, iterated: true, join: true, ...(node.name === identifier ? {} : { pattern: identifier }) };
+    return { node: loop.statement, value: loop.expression, element: true, iterated: true, join: true, pattern: identifier };
   }
   if (!node.initializer || ts.isForInStatement(loop)) {
     return undefined;

@@ -51,7 +51,7 @@ function pathsOverlap(left: readonly string[], right: readonly string[]): boolea
     slot === right[index] || slot === "*" || right[index] === "*");
 }
 
-function selectedRead(node: ts.Expression): { path: string[]; expression: ts.Expression } {
+export function selectedRead(node: ts.Expression): { path: string[]; expression: ts.Expression } {
   const path: string[] = [];
   let current: ts.Expression = outerExpression(node);
   for (;;) {
@@ -125,7 +125,7 @@ function initializedName(parent: ts.Node, expression: ts.Expression): ts.Binding
     : undefined;
 }
 
-function receiverCall(expression: ts.Expression): ts.CallExpression | undefined {
+export function receiverCall(expression: ts.Expression): ts.CallExpression | undefined {
   const member = expression.parent;
   if (!(ts.isPropertyAccessExpression(member) || ts.isElementAccessExpression(member)) || member.expression !== expression) {
     return undefined;

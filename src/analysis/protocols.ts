@@ -206,7 +206,7 @@ function callSupports(model: ScopeModel, call: ts.CallExpression, protocol: Prot
   }
   const known = library.libraryCall(call, model);
   if (known && known.kind !== "effect") {
-    return protocol === "iterate" ? ["shallow", "holding", "mapped"].includes(known.result) : known.result === "fresh";
+    return protocol === "iterate" ? ["shallow", "holding", "mapped", "pairs"].includes(known.result) : known.result === "fresh";
   }
   const callee = expressions.unwrapExpression(call.expression);
   return ts.isIdentifier(callee) && functionSupports(model, model.resolve(callee), protocol, seen);

@@ -271,6 +271,9 @@ export function joinOrigins(origins: readonly StorageOrigin[]): readonly Storage
 }
 
 export function shallowStorageFact(value: ts.Node, source: StorageFact): StorageFact {
+  if (entryCells(source)) {
+    return allocatedFact(value, [{ slot: "*", fact: reachedFact(source) }]);
+  }
   const cells = source.cells?.filter((cell) => source.outer.includes(cell.allocation));
   return cells?.length ? allocatedFact(value, cells.map((cell) => ({ slot: cell.slot,
     fact: { outer: cell.origins, reachable: reachableOrigins(cell.origins, source.cells ?? []), cells: source.cells } })))
@@ -284,10 +287,10 @@ export function arrayLiteralFact(value: ts.Expression, resolve: (value: ts.Expre
   const only = value.elements.length === 1 ? value.elements[0] : undefined;
   if (only && ts.isSpreadElement(only)) {
     const source = resolve(only.expression);
-    return entryCells(source) ? allocatedFact(value, [{ slot: "*", fact: iteratedFact(source) }]) : shallowStorageFact(value, source);
+    return entryCells(source) ? allocatedFact(value, [{ slot: "*", fact: iteratedFact(source, only) }]) : shallowStorageFact(value, source);
   }
   return allocatedFact(value, value.elements.map((element, index) => ts.isSpreadElement(element)
-    ? { slot: "*", fact: elementFact(resolve(element.expression)) }
+    ? { slot: "*", fact: iteratedFact(resolve(element.expression), element) }
     : { slot: `property:${index}`, fact: resolve(element) }));
 }
 
@@ -357,7 +360,10 @@ export function literalKey(value: ts.Expression): string | undefined {
 export function constructorStorageFact(value: ts.NewExpression, resolve: (value: ts.Expression) => StorageFact): StorageFact {
   const entries = mapEntries(value);
   return entries ? allocatedFact(value, entries.elements.flatMap((entry) => mapEntryParts(entry, resolve)))
-    : allocatedFact(value, (value.arguments ?? []).map((argument) => ({ slot: "*", fact: resolve(argument) })));
+    : allocatedFact(value, (value.arguments ?? []).flatMap((argument) => {
+      const fact = resolve(argument);
+      return [{ slot: "*", fact }, { slot: "*", fact: iteratedFact(fact, value.expression) }];
+    }));
 }
 
 type HeapWrite = { readonly target: StorageFact; readonly value: StorageFact; readonly slot?: string; readonly replace: boolean };
@@ -467,7 +473,6 @@ export type Selection = { readonly element?: boolean; readonly iterated?: boolea
 /**
  * Gives the part of the value that an element assignment selects: an iterated element, then each destructuring step.
  * A property step selects the member, a rest step copies the members it keeps, and a default joins its own value.
- * A step this analysis cannot place, as an array pattern over map entries, gives whatever the value reaches.
  */
 export function selectedFact(value: StorageFact, selection: Selection, resolve: (value: ts.Expression) => StorageFact): StorageFact {
   if (!selection.element) {
@@ -480,11 +485,21 @@ export function selectedFact(value: StorageFact, selection: Selection, resolve: 
   if (!selection.iterated && steps.length === 0) {
     return elementFact(value);
   }
-  return steps.reduce((fact, element) => patternStep(fact, element, resolve), selection.iterated ? iteratedFact(value) : value);
+  const start = selection.iterated && selection.pattern ? iteratedFact(value, selection.pattern) : value;
+  return steps.reduce((fact, element) => patternStep(fact, element, resolve), start);
 }
 
-function iteratedFact(value: StorageFact): StorageFact {
-  return entryCells(value) ? reachedFact(value) : elementFact(value);
+export function iteratedFact(value: StorageFact, node: ts.Node): StorageFact {
+  return entryCells(value) ? entryPairFact(node, value) : elementFact(value);
+}
+
+export function pairsStorageFact(value: ts.CallExpression, pair: ts.Node, source: StorageFact): StorageFact {
+  return allocatedFact(value, [{ slot: "*", fact: entryPairFact(pair, source) }]);
+}
+
+function entryPairFact(node: ts.Node, source: StorageFact): StorageFact {
+  const element = entryCells(source) ? reachedFact(source) : elementFact(source);
+  return allocatedFact(node, [{ slot: "property:0", fact: element }, { slot: "property:1", fact: element }]);
 }
 
 function patternStep(fact: StorageFact, element: ts.BindingElement, resolve: (value: ts.Expression) => StorageFact): StorageFact {
@@ -503,11 +518,10 @@ function propertyStep(fact: StorageFact, element: ts.BindingElement): StorageFac
 }
 
 function arrayStep(fact: StorageFact, element: ts.BindingElement): StorageFact {
-  if (entryCells(fact)) {
-    return reachedFact(fact);
+  if (element.dotDotDotToken) {
+    return allocatedFact(element.name, [{ slot: "*", fact: iteratedFact(fact, element) }]);
   }
-  return element.dotDotDotToken ? allocatedFact(element.name, [{ slot: "*", fact: elementFact(fact) }])
-    : memberStorageFact(fact, `property:${element.parent.elements.indexOf(element)}`);
+  return entryCells(fact) ? entryPairFact(element.name, fact) : memberStorageFact(fact, `property:${element.parent.elements.indexOf(element)}`);
 }
 
 function entryCells(fact: StorageFact): boolean {

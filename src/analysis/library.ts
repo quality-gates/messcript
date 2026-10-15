@@ -10,7 +10,7 @@ import { standardMethod } from "./standard-receivers";
  * storage the receiver holds. A holding result holds the arguments. A mapped result holds callback results.
  * The receiver result is the receiver itself, or the first argument for Object.assign.
  */
-export type LibraryResult = "fresh" | "shallow" | "element" | "holding" | "mapped" | "receiver";
+export type LibraryResult = "fresh" | "shallow" | "element" | "holding" | "mapped" | "pairs" | "receiver";
 
 export type LibraryStorage = "none" | "arguments" | "sources" | "splice" | "entry";
 
@@ -71,7 +71,8 @@ const PURE_METHODS = new Map<string, LibraryResult>([
     "replace", "replaceAll", "some", "split", "startsWith", "substring", "toFixed", "toLocaleLowerCase",
     "toLocaleUpperCase", "toLowerCase", "toString", "toUpperCase", "trim", "trimEnd", "trimStart",
   ]),
-  ...methods("shallow", ["entries", "filter", "flat", "keys", "slice", "toReversed", "toSorted", "values"]),
+  ...methods("shallow", ["filter", "flat", "keys", "slice", "toReversed", "toSorted", "values"]),
+  ...methods("pairs", ["entries"]),
   ...methods("element", ["at", "find", "findLast", "get"]),
   ...methods("holding", ["concat"]),
   ...methods("mapped", ["flatMap", "map", "reduce", "reduceRight"]),
