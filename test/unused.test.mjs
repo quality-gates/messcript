@@ -671,6 +671,23 @@ class Service {
   assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), ["hidden"]);
 });
 
+test("numeric this[0] counts as that key only and does not suppress other unused privates", () => {
+  const file = sourceFile(`
+class Service {
+  private secret = 1;
+  private 0 = 2;
+  private 1() { return 1; }
+  private hidden() { return 1; }
+  read() {
+    this[1]();
+    return this[0];
+  }
+}
+`);
+  assert.deepEqual(findingNames(findUnusedPrivateField(file)), ["secret"]);
+  assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), ["hidden"]);
+});
+
 test("dynamic Service[expr] suppresses unused private members of the named class only", () => {
   const file = sourceFile(`
 class Service {

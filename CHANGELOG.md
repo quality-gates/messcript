@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- `UnusedPrivateField` and `UnusedPrivateMethod` now treat a numeric key such as `this[0]` as that key only, like `this["other"]` ([#319](https://github.com/quality-gates/messcript/issues/319)). It no longer suppresses every private-member finding in the class.
 - `UnusedPrivateField` and `UnusedPrivateMethod` now count `ClassName["member"]` as a use of a static private member, matching `ClassName.member` and `this["member"]` ([#318](https://github.com/quality-gates/messcript/issues/318)). A non-literal key, such as `ClassName[key]`, suppresses that class's private-member findings the same way `this[key]` does.
 - `GlobalVariable` now treats only `Object.assign(...)` and `Object["assign"](...)` as writing their first argument ([#317](https://github.com/quality-gates/messcript/issues/317)). Passing module state to another object's `assign` method, such as `logger.assign(state)`, is no longer reported.
 - `CamelCaseMethodName`, `ShortMethodName`, and `BooleanGetMethodName` now see object-literal methods and get/set accessors, and parameter-naming rules see their parameters ([#304](https://github.com/quality-gates/messcript/issues/304)). Each member is its own group, because an object literal cannot overload. A property whose value is a function expression or arrow function is unchanged.
