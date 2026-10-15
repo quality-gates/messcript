@@ -1021,3 +1021,28 @@ function pong(value: number, notify: (value: number) => number): number {
     "8:UnknownEffect: The function pong() calls unresolved callable, an unknown effect.",
   ]);
 });
+
+test("definite member replacement removes the shared origin from an object rest copy", () => {
+  const source = `const store = { items: [0], n: 1 };
+function outer() {
+  const { n, ...rest } = store;
+  rest.items = [5];
+  rest.items.push(1);
+  return n;
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "rest-member-replacement.ts", source), []);
+});
+
+test("object rest copies retain shared members unless the selected member is definitely replaced", () => {
+  for (const replacement of ["", "if (flag) rest.items = [5];", "rest[key] = [5];", "rest.other = [5];"]) {
+    const source = `const store = { items: [0], other: [1] };
+function outer(flag: boolean, key: "items" | "other") {
+  const { ...rest } = store;
+  ${replacement}
+  rest.items.push(1);
+}
+`;
+    assert.deepEqual(ownerMessages("outer", "rest-shared-twin.ts", source).map((message) => message.split(":")[1]), ["ImplicitOutput"], replacement);
+  }
+});

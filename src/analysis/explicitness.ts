@@ -2261,7 +2261,7 @@ function iteratorRuns(
   const groups = ts.isCallExpression(value) ? callRuns(state, summaries, value, owner)
     : ts.isIdentifier(value) ? bindingRuns(state, summaries, value, owner, seen) : undefined;
   return groups && groups.length > 0 && groups.every((group) => group !== undefined)
-    ? combineEffects(groups as CallEffects[]) : undefined;
+    ? combineEffects(groups) : undefined;
 }
 
 function callRuns(
@@ -3892,7 +3892,7 @@ function summarizeCallable(
     returnedAliases: uniqueFacts(draft.returnedAliases),
     yieldedAliases: uniqueFacts(draft.yieldedAliases),
     returnedRuns: draft.returnedRuns.length > 0 && draft.returnedRuns.every((runs) => runs !== undefined)
-      ? combineEffects(draft.returnedRuns as CallEffects[]) : undefined,
+      ? combineEffects(draft.returnedRuns) : undefined,
   };
 }
 

@@ -452,8 +452,20 @@ export function withInsertions(fact: StorageFact, insertions: readonly HeapWrite
 function applyHeapWrite(heap: Map<string, StorageCell>, insertion: HeapWrite): void {
   for (const allocation of insertion.target.outer.filter(isCellAllocation)) {
     const cell = { allocation, slot: insertion.slot ?? "*", origins: insertion.value.outer };
+    if (replacesCell(insertion)) { excludeReplacedProperty(heap, allocation, insertion.slot); }
     const previous = replacesCell(insertion) ? [] : allocationMemberOrigins({ ...insertion.target, cells: [...heap.values()] }, allocation, insertion.slot);
     heap.set(cellKey(cell), { ...cell, origins: joinOrigins([...previous, ...cell.origins]) });
+  }
+}
+
+function excludeReplacedProperty(heap: Map<string, StorageCell>, allocation: StorageOrigin, slot: string | undefined): void {
+  if (!slot?.startsWith("property:")) { return; }
+  for (const cell of [...heap.values()]) {
+    if (cell.allocation === allocation && (cell.slot === "*" || cell.slot.startsWith(EXCEPT))) {
+      heap.delete(cellKey(cell));
+      const excluded = { ...cell, slot: exceptSlot(cell.slot, [slot]) };
+      heap.set(cellKey(excluded), excluded);
+    }
   }
 }
 
