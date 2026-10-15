@@ -152,7 +152,8 @@ function allocationMemberOrigins(fact: StorageFact, allocation: StorageOrigin, s
 }
 
 function projectedMemberOrigins(fact: StorageFact, allocation: StorageOrigin, slot: string | undefined): readonly StorageOrigin[] {
-  const base: readonly StorageOrigin[] = fact.outer.length === 1
+  const shaped = fact.cells?.some((cell) => cell.allocation === allocation);
+  const base: readonly StorageOrigin[] = shaped ? [allocation] : fact.outer.length === 1
     ? fact.reachable : fact.reachable.includes(allocation) ? [allocation] : ["private"];
   return base.map((origin) => projectedOrigin(origin, slot ?? "*"));
 }
@@ -226,6 +227,12 @@ export function allocatedFact(value: ts.Node, parts: readonly { slot: string; fa
   }
   const cells = pruneCells([allocation], [...heap.values()]);
   return { outer: [allocation], reachable: reachableOrigins([allocation], cells), cells };
+}
+
+export function knownMemberFact(base: StorageFact, members: readonly { slot: string; fact: StorageFact }[]): StorageFact {
+  const residual = base.outer.map((allocation) => ({ allocation, slot: "*", origins: base.reachable }));
+  return withInsertions({ ...base, cells: [...(base.cells ?? []), ...residual] },
+    members.map(({ slot, fact }) => ({ target: base, value: fact, slot, replace: true })));
 }
 
 function reachableOrigins(roots: readonly StorageOrigin[], cells: readonly StorageCell[]): readonly StorageOrigin[] {

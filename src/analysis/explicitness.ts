@@ -2,13 +2,13 @@
 import ts from "typescript";
 import { aliasedGlobal, globalName } from "../ast/global-reference";
 import { isFunctionLike, isFunctionLikeWithBody } from "../ast/functions";
-import { methodName, outerExpression, unwrapExpression } from "../ast/expressions";
+import { keyName, methodName, outerExpression, unwrapExpression } from "../ast/expressions";
 import { analyzeScopes, isAmbient, writeTargets } from "../ast/scopes";
 import type { Binding, ScopeModel, Write } from "../ast/scopes";
 import { reachableChildren } from "./control-flow";
 import { bindingAssignments, canReachSite, inside, referenceAssignment, unconditional, isShortCircuit, type Assignment } from "./assignments";
 import { callableTargets as resolveTargets, memberTargets, type Dispatch, type Targets } from "./dispatch";
-import { classTargets } from "./shapes";
+import { classTargets, receiverShapes } from "./shapes";
 import { ambientFlow, isLibraryMethodName, isPureConstructor, iteratedArgument, libraryCall, libraryCallback, movesElements, storesArguments, type LibraryCall, type LibraryCallback, type LibraryStorage } from "./library";
 import { protocolExpressions, supportsProtocol } from "./protocols";
 import { standardReceiver } from "./standard-receivers";
@@ -31,6 +31,7 @@ import {
   elementFact,
   externalProjection,
   memberStorageFact,
+  knownMemberFact,
   mapStorageFact,
   hasExternalOrigin,
   hasReceiverOrigin,
@@ -736,7 +737,7 @@ function returnStorageResolver(
   const useCache = summaries === state.summaries;
   const active = state.invocation;
   return {
-    binding: (binding) => invocationBinding(state, binding),
+    binding: (binding, owner, site) => invocationBinding(state, binding) ?? moduleCallableShape(state, binding, site),
     callable: active ? (method) => callableFact(active, method, active.frame) : undefined,
     value: (value, owner, site) => {
       const resolved = owner === active?.frame.owner ? invocationValue(state, summaries, value) : undefined;
@@ -3165,10 +3166,108 @@ function invocationBinding(state: AnalysisState, binding: Binding): StorageFact 
   return undefined;
 }
 
+function moduleCallableShape(state: AnalysisState, binding: Binding, site: ts.Node): StorageFact | undefined {
+  const active = state.invocation;
+  const literal = moduleObjectInitializer(binding);
+  const reference = binding.references[0];
+  if (!active || !literal || !reference || !closedContainerBinding(state.model, binding, literal, new Set()) ||
+      !receiverShapes(state.model, reference, new Set(), site)) { return undefined; }
+  const origin = externalBindingOrigin(binding);
+  const base: StorageFact = { outer: [origin], reachable: [origin] };
+  return moduleLiteralFact(state, active, literal, base);
+}
+
+function moduleObjectInitializer(binding: Binding): ts.ObjectLiteralExpression | undefined {
+  const declaration = binding.declarations.length === 1 ? binding.declarations[0].node : undefined;
+  if (binding.scope.kind !== "file" || !declaration || !ts.isVariableDeclaration(declaration) ||
+      !(declaration.parent.flags & ts.NodeFlags.Const) || !declaration.initializer) { return undefined; }
+  const value = unwrapExpression(declaration.initializer);
+  return ts.isObjectLiteralExpression(value) ? value : undefined;
+}
+
+function closedContainerBinding(model: ScopeModel, binding: Binding, literal: ts.ObjectLiteralExpression, seen: ReadonlySet<Binding>): boolean {
+  if (isExportedBinding(binding) || bindingAssignments(binding).length !== 1) { return false; }
+  return seen.has(binding) || binding.references.every((reference) =>
+    closedContainerUse(model, reference, literal, new Set(seen).add(binding)));
+}
+
+function closedContainerUse(model: ScopeModel, node: ts.Expression, literal: ts.ObjectLiteralExpression, seen: ReadonlySet<Binding>): boolean {
+  const value = outerExpression(node);
+  const parent = value.parent;
+  if (isAccessExpression(parent) && parent.expression === value) {
+    const name = methodName(parent);
+    if (name === undefined) { return false; }
+    const nested = nestedContainer(literal, name);
+    return !nested || closedContainerUse(model, parent, nested, seen);
+  }
+  return ts.isVariableDeclaration(parent) && parent.initializer === value &&
+    closedContainerPattern(model, parent.name, literal, seen);
+}
+
+function closedContainerPattern(model: ScopeModel, name: ts.BindingName, literal: ts.ObjectLiteralExpression, seen: ReadonlySet<Binding>): boolean {
+  if (ts.isIdentifier(name)) {
+    const binding = model.bindings.find((item) => item.declarations.some((declaration) => declaration.identifier === name));
+    return !!binding && closedContainerBinding(model, binding, literal, seen);
+  }
+  return ts.isObjectBindingPattern(name) && name.elements.every((element) => {
+    if (element.dotDotDotToken || element.initializer) { return false; }
+    const key = keyName(element.propertyName ?? element.name);
+    if (key === undefined) { return false; }
+    const nested = nestedContainer(literal, key);
+    return !nested || closedContainerPattern(model, element.name, nested, seen);
+  });
+}
+
+function nestedContainer(literal: ts.ObjectLiteralExpression, name: string): ts.ObjectLiteralExpression | undefined {
+  const property = literal.properties.find((member) => !ts.isSpreadAssignment(member) && keyName(member.name) === name);
+  const value = property && ts.isPropertyAssignment(property) ? unwrapExpression(property.initializer) : undefined;
+  return value && ts.isObjectLiteralExpression(value) ? value : undefined;
+}
+
+function stableLiteral(model: ScopeModel, literal: ts.ObjectLiteralExpression): boolean {
+  const names = new Set<string>();
+  return literal.properties.every((property) => {
+    if (ts.isSpreadAssignment(property) || ts.isGetAccessorDeclaration(property) || ts.isSetAccessorDeclaration(property) ||
+        ts.isComputedPropertyName(property.name)) { return false; }
+    const name = keyName(property.name);
+    if (name === undefined || name === "__proto__" || names.has(name)) { return false; }
+    names.add(name);
+    return !model.writesMemberName(name);
+  });
+}
+
+function literalReceiverStaysClosed(model: ScopeModel, literal: ts.ObjectLiteralExpression): boolean {
+  const visit = (node: ts.Node): boolean => {
+    if (ts.isExpression(node) && node.kind === ts.SyntaxKind.ThisKeyword) {
+      return closedContainerUse(model, node, literal, new Set());
+    }
+    return !ts.forEachChild(node, (child) => visit(child) ? undefined : true);
+  };
+  return visit(literal);
+}
+
+function moduleLiteralFact(state: AnalysisState, active: InvocationState, literal: ts.ObjectLiteralExpression, base: StorageFact): StorageFact {
+  if (!stableLiteral(state.model, literal) || !literalReceiverStaysClosed(state.model, literal) ||
+      base.outer.some((origin) => absorbsSlots(externalProjection(origin)?.path ?? []))) { return base; }
+  const members = literal.properties.flatMap((property) => {
+    if (ts.isSpreadAssignment(property)) { return []; }
+    const slot = `property:${keyName(property.name)}`;
+    if (ts.isMethodDeclaration(property)) {
+      let lexical = active.frame;
+      while (lexical.parent && !inside(property, lexical.owner)) { lexical = lexical.parent; }
+      return [{ slot, fact: callableFact(active, property, lexical) }];
+    }
+    const value = ts.isPropertyAssignment(property) ? unwrapExpression(property.initializer) : undefined;
+    return value && ts.isObjectLiteralExpression(value)
+      ? [{ slot, fact: moduleLiteralFact(state, active, value, memberStorageFact(base, slot)) }] : [];
+  });
+  return members.length ? knownMemberFact(base, members) : base;
+}
+
 function callableFact(active: InvocationState, target: EffectOwner, frame: LexicalFrame): StorageFact {
   const origin: StorageOrigin = `private:${allocationId(target)}:frame=${frame.id}`;
   active.registry.set(origin, { kind: "source", target, frame, receiver: ts.isArrowFunction(target) ? active.receiver : undefined });
-  return { outer: [origin], reachable: ["private"] };
+  return { outer: [origin], reachable: ["private"], cells: [{ allocation: origin, slot: "@allocation", origins: ["private"] }] };
 }
 
 function heapWritesMember(state: AnalysisState, fact: StorageFact, member: string): boolean {

@@ -1134,3 +1134,127 @@ function outer() {
 `;
   assert.deepEqual(ownerMessages("outer", "recursive-bound-callback.ts", bound), []);
 });
+
+test("immutable module methods keep identities through aliases and callbacks", () => {
+  const cases = [
+    { name: "k-nested-destructure-emit-A", source: `const svc = {
+  inner: {
+    emit(m: string): number {
+      console.log(m);
+      return 1;
+    },
+  },
+};
+function outer() {
+  const { inner: { emit } } = svc;
+  return emit("x");
+}
+`, kinds: ["ImplicitOutput"] },
+    { name: "k-nested-destructure-emit-C", source: `const svc = {
+  inner: {
+    emit(m: string): number {
+      const n = m.length;
+      return n;
+    },
+  },
+};
+function outer() {
+  const { inner: { emit } } = svc;
+  return emit("x");
+}
+`, kinds: [] },
+    { name: "k-method-as-callback-A", source: `const log: number[] = [];
+const api = {
+  put(n: number): number {
+    log.push(n);
+    return n;
+  },
+};
+function twice(f: (n: number) => number) {
+  return f(1) + f(2);
+}
+function outer() {
+  return twice(api.put);
+}
+`, kinds: ["ImplicitOutput"] },
+    { name: "k-method-as-callback-C", source: `const api = {
+  put(n: number): number {
+    const local: number[] = [];
+    local.push(n);
+    return n;
+  },
+};
+function twice(f: (n: number) => number) {
+  return f(1) + f(2);
+}
+function outer() {
+  return twice(api.put);
+}
+`, kinds: [] },
+    { name: "k-this-sibling-C", source: `const meter = {
+  stamp(): number {
+    return 1;
+  },
+  run(): number {
+    return this.stamp() > 0 ? 1 : 0;
+  },
+};
+function outer() {
+  return meter.run();
+}
+`, kinds: [] },
+  ];
+  for (const item of cases) {
+    assert.deepEqual(ownerMessages("outer", item.name + ".ts", item.source).map((message) => message.split(":")[1]), item.kinds, item.name);
+  }
+});
+
+
+test("module callable cells retain external data and receiver ownership", () => {
+  const shared = `const api = { items: [] as number[], put(n: number) { this.items.push(n); }, stamp() { return 1; } };
+function outer() { api.put(1); return api.items[0]; }`;
+  assert.ok(ownerMessages("outer", "module-method-data.ts", shared).some((message) => message.includes(":ImplicitOutput:")));
+  const scalar = `let count = 0; function bump() { count++; } const api = { run() { return count; } };
+function outer() { const f = api.run; return f(); }`;
+  assert.ok(ownerMessages("outer", "module-method-scalar.ts", scalar).some((message) => message.includes(":ImplicitInput:")));
+  const rebound = `const api = { items: [] as number[], put(n: number) { this.items.push(n); } };
+function outer() { const local = { items: [] as number[] }; api.put.bind(local)(1); return local.items.length; }`;
+  assert.deepEqual(ownerMessages("outer", "module-method-receiver.ts", rebound), []);
+  const alias = `const api = { inner: { run() { return 1; } } };
+function outer() { const child = api.inner; const { run } = child; return run(); }`;
+  assert.deepEqual(ownerMessages("outer", "module-method-alias.ts", alias), []);
+});
+
+test("module callable shapes reject replaced or escaped members", () => {
+  const cases = [
+    `declare const replacement: () => number; const api = { run() { return 1; } }; api.run = replacement;
+function outer() { const f = api.run; return f(); }`,
+    `declare const replacement: { run(): number }; const api = { inner: { run() { return 1; } } }; api.inner = replacement;
+function outer() { const { inner: { run } } = api; return run(); }`,
+    `declare function change(value: unknown): void; const api = { inner: { run() { return 1; } } }; change(api.inner);
+function outer() { const { inner: { run } } = api; return run(); }`,
+    `declare function change(value: unknown): void; const api = { inner: { run() { return 1; } } }; const child = api.inner; change(child);
+function outer() { const { inner: { run } } = api; return run(); }`,
+    `declare function change(value: unknown): void; const api = { inner: { run() { return 1; } }, expose() { return this.inner; } }; change(api.expose());
+function outer() { const f = api.inner.run; return f(); }`,
+    `declare function change(value: unknown): void; const api = { inner: { run() { return 1; } }, expose() { const child = this.inner; return child; } }; change(api.expose());
+function outer() { const f = api.inner.run; return f(); }`,
+    `declare function change(value: unknown): void; const api = { inner: { run() { return 1; } }, expose() { return { get: () => this.inner }; } }; change(api.expose().get());
+function outer() { const f = api.inner.run; return f(); }`,
+    `const api = { run() { return 1; } };
+function outer() { const f = api.run.missing; return f(); }`,
+    `const api = { inner: { inner: { inner: { inner: { run() { return 1; } } } } } };
+function outer() { const f = api.inner.inner.inner.inner.run; return f(); }`,
+    `const api = { items: [] as number[], put(n: number) { this.items.push(n); } };
+function outer() { const f = api.put; f(1); }`,
+    `const api = { run() { return 1; } }; export { api };
+function outer() { const f = api.run; return f(); }`,
+    `declare const key: string; declare const replacement: () => number; const api = { run() { return 1; } }; api[key] = replacement;
+function outer() { const f = api.run; return f(); }`,
+    `declare const other: { run(): number }; const api = { run() { return 1; }, ...other };
+function outer() { const f = api.run; return f(); }`,
+  ];
+  for (const [index, source] of cases.entries()) {
+    assert.ok(ownerMessages("outer", `module-method-open-${index}.ts`, source).some((message) => message.includes(":UnknownEffect:")), source);
+  }
+});
