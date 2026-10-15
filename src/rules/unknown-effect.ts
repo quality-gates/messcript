@@ -8,6 +8,7 @@ import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "UnknownEffect";
 export const priority = 3;
+// messcript-disable-next-line CamelCasePropertyName
 export const properties = { "include-this": false } as const;
 
 export function findUnknownEffect(sourceFile: ts.SourceFile): Finding[] {
