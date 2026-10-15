@@ -856,6 +856,15 @@ test("GlobalVariable reports loop-target, delete, and copyWithin mutations", () 
   assert.deepEqual(findGlobalVariable([declared]), []);
 });
 
+test("GlobalVariable reports each mutating method call on module state", () => {
+  const methods = ["add", "copyWithin", "delete", "fill", "pop", "push", "reverse", "set", "shift", "sort", "splice", "unshift"];
+  for (const method of methods) {
+    const source = `export const state: any = [];\nstate.${method}(0);`;
+    assert.deepEqual(messages(findGlobalVariable([sourceFile(source)])), ["Avoid using static mutable state: state."], source);
+  }
+  assert.deepEqual(findGlobalVariable([sourceFile("export const state: any = [];\nstate.at(0);")]), []);
+});
+
 test("structural rules support JavaScript syntax and configured opt-ins", () => {
   const file = sourceFile(`
 let state = 0;
