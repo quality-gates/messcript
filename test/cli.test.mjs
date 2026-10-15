@@ -1497,6 +1497,56 @@ test("controversial rules distinguish camel-case roles and skip computed names",
   assert.equal(result.stderr, "");
 });
 
+test("property naming rules cover object-literal identifier properties", () => {
+  const file = join(scanRoot, "src", "object-property-names.ts");
+  writeFileSync(file, `const bag = { Bad_Name: 1, ab: 2, deliberately_long_object_key_name: 3 };
+interface Box {
+  Bad_Name: string;
+  ab: number;
+  deliberately_long_interface_property: number;
+}
+`);
+
+  const result = runCli([file, "text", "naming,controversial", "--only", "CamelCasePropertyName,ShortVariable,LongVariable"]);
+  assert.equal(result.status, 2);
+  assert.equal(result.stderr, "");
+  assert.equal((result.stdout.match(/CamelCasePropertyName .*property Bad_Name/g) ?? []).length, 2);
+  assert.equal((result.stdout.match(/ShortVariable .*short names like ab/g) ?? []).length, 2);
+  assert.match(result.stdout, /LongVariable .*deliberately_long_object_key_name/);
+  assert.match(result.stdout, /LongVariable .*deliberately_long_interface_property/);
+});
+
+test("object property naming covers JS and TS static keys without guessing dynamic keys", () => {
+  for (const extension of ["js", "ts"]) {
+    const file = join(scanRoot, "src", `object-property-boundaries.${extension}`);
+    writeFileSync(file, `const Bad_Shorthand = 1;
+const bag = {
+  Bad_Shorthand,
+  nested: { Bad_Nested: 1 },
+  "Bad_Quoted": 2,
+  "cd": 3,
+  "deliberatelyLongQuotedProperty": 4,
+  [dynamic_key]: 5,
+  ["Bad_Computed"]: 6,
+  12: 7,
+  ...spread_value,
+  Bad_Method() {},
+  validName: 8
+};
+`);
+    const result = runCli([file, "text", "naming,controversial", "--only", "CamelCasePropertyName,ShortVariable,LongVariable"]);
+    assert.equal(result.status, 2);
+    assert.equal(result.stderr, "");
+    assert.equal(result.stdout.trim().split("\n").length, 5);
+    for (const name of ["Bad_Shorthand", "Bad_Nested", "Bad_Quoted"]) {
+      assert.match(result.stdout, new RegExp(`CamelCasePropertyName .*property ${name}`));
+    }
+    assert.match(result.stdout, /ShortVariable .*short names like cd/);
+    assert.match(result.stdout, /LongVariable .*deliberatelyLongQuotedProperty/);
+    assert.doesNotMatch(result.stdout, /dynamic_key|Bad_Computed|short names like 12|spread_value|Bad_Method|validName/);
+  }
+});
+
 test("CamelCaseMethodName exempts PascalCase function components in recommended rulesets", () => {
   const component = join(scanRoot, "src", "react-component.tsx");
   writeFileSync(component, "export function Header() { return <h1>Hi</h1>; }\n");
