@@ -1727,3 +1727,70 @@ function outer() {
 `;
   assert.deepEqual(ownerMessages("outer", "heritage-static.ts", source).map((message) => message.split(":").slice(0, 2).join(":")), ["5:ImplicitInput", "5:ImplicitOutput"]);
 });
+
+for (const [name, definition] of [
+  ["object-method", "const api = { [key()]() { return 1; } };"],
+  ["class-method", "class Local { [key()]() { return 1; } }"],
+  ["static-method", "class Local { static [key()]() { return 1; } }"],
+  ["getter", "const api = { get [key()]() { return 1; } };"],
+  ["setter", "const api = { set [key()](value: number) {} };"],
+]) {
+  test(`computed name belongs to definition rather than ${name} invocation`, () => {
+    const source = `const log: number[] = [];
+function key(): "go" { log.push(1); return "go"; }
+function outer() {
+  ${definition}
+  return 1;
+}
+`;
+    const found = messages(`definition-${name}.ts`, source);
+    assert.deepEqual(found.filter(message => message.includes("[key()]()")), []);
+    assert.deepEqual(ownerMessages("outer", `definition-outer-${name}.ts`, source).map(message => message.split(":").slice(0, 2).join(":")), ["4:ImplicitOutput"]);
+  });
+}
+
+test("callable selection keeps computed parameter binding keys executable", () => {
+  const source = `const log: number[] = [];
+function key(): "go" { log.push(1); return "go"; }
+function use({ [key()]: value }: { go: number }) { return value; }
+`;
+  assert.deepEqual(ownerMessages("use", "computed-parameter.ts", source).map(message => message.split(":").slice(0, 2).join(":")), ["3:ImplicitOutput"]);
+});
+
+test("callable selection retains defaults and skips supplied defaults", () => {
+  const source = `function choose(value = Date.now()) { return value; }
+function supplied() { return choose(1); }
+function omitted() { return choose(); }
+`;
+  assert.deepEqual(ownerMessages("choose", "selected-default.ts", source).map(message => message.split(":").slice(0, 2).join(":")), ["1:ImplicitInput"]);
+  assert.deepEqual(ownerMessages("supplied", "selected-supplied.ts", source), []);
+  assert.deepEqual(ownerMessages("omitted", "selected-omitted.ts", source).map(message => message.split(":").slice(0, 2).join(":")), ["3:ImplicitInput"]);
+});
+
+test("callable selection retains concise arrow return provenance", () => {
+  const source = `const shared: number[] = [];
+const expose = () => shared;
+function write() { expose().push(1); }
+`;
+  assert.deepEqual(ownerMessages("write", "selected-arrow.ts", source).map(message => message.split(":").slice(0, 2).join(":")), ["3:ImplicitOutput"]);
+});
+
+test("callable selection retains constructor defaults and instance initializers", () => {
+  const source = `class Local {
+  field = console.log("field");
+  constructor(value = Date.now()) {}
+}
+`;
+  assert.deepEqual(messages("selected-constructor.ts", source).filter(message => message.includes("The constructor ")).map(message => message.split(":").slice(0, 2).join(":")), ["2:ImplicitOutput", "3:ImplicitInput"]);
+});
+
+test("callable selection retains a computed method default and body", () => {
+  const source = `const log: number[] = [];
+function key(): "go" { log.push(1); return "go"; }
+function outer() {
+  const api = { [key()](value = Date.now()) { return Date.now() + value; } };
+  return 1;
+}
+`;
+  assert.deepEqual(messages("selected-method-body.ts", source).filter(message => message.includes("[key()]()")).map(message => message.split(":").slice(0, 2).join(":")), ["4:ImplicitInput"]);
+});

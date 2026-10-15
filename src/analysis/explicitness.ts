@@ -4924,8 +4924,8 @@ function runtimeTypeChildren(node: ts.Node): readonly ts.Expression[] {
 function deferredChildren(node: ts.Node, owner: EffectOwner): readonly ts.Node[] | undefined {
   if (ts.isTypeNode(node)) { return runtimeTypeChildren(node); }
   if (ts.isExportDeclaration(node)) { return []; }
-  if (node !== owner && isFunctionLike(node)) {
-    return definitionExpressions(node);
+  if (isFunctionLike(node)) {
+    return node === owner ? [...node.parameters, ...(node.body ? [node.body] : [])] : definitionExpressions(node);
   }
   return isInstanceField(node) ? definitionExpressions(node) : undefined;
 }
