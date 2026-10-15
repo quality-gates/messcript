@@ -120,6 +120,9 @@ export function referenceAssignment(reference: ts.Identifier): Assignment | unde
     }
     return isLogicalAssignment(operator) ? { node: parent, value: parent.right, join: true } : undefined;
   }
+  if (ts.isForOfStatement(parent) && parent.initializer === target) {
+    return { node: parent.statement, value: parent.expression, element: true, iterated: true, pattern: reference, join: true };
+  }
   return patternOrLoopTarget(target) ? elementValue(target) ?? { node: target, join: true } : undefined;
 }
 

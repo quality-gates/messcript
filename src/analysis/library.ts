@@ -2,6 +2,7 @@ import ts from "typescript";
 import { methodName, outerExpression, unwrapExpression } from "../ast/expressions";
 import { globalName, globalObjectMember } from "../ast/global-reference";
 import type { ScopeModel } from "../ast/scopes";
+import type { ReadMode } from "./reads";
 import { standardMethod } from "./standard-receivers";
 
 /**
@@ -10,7 +11,7 @@ import { standardMethod } from "./standard-receivers";
  * storage the receiver holds. A holding result holds the arguments. A mapped result holds callback results.
  * The receiver result is the receiver itself, or the first argument for Object.assign.
  */
-export type LibraryResult = "fresh" | "shallow" | "element" | "holding" | "mapped" | "pairs" | "receiver";
+export type LibraryResult = "fresh" | "shallow" | "element" | "holding" | "mapped" | "pairs" | "receiver" | "promise" | "promise-elements";
 
 export type LibraryStorage = "none" | "arguments" | "sources" | "splice" | "entry";
 
@@ -22,11 +23,19 @@ export type LibraryStorage = "none" | "arguments" | "sources" | "splice" | "entr
  */
 export type LibraryCall =
   | { readonly kind: "effect" }
-  | { readonly kind: "pure" | "mutating"; readonly result: LibraryResult; readonly target: "receiver" | "argument"; readonly callbacks: readonly number[]; readonly stores: LibraryStorage };
+  | { readonly kind: "pure" | "mutating"; readonly result: LibraryResult; readonly target: "receiver" | "argument"; readonly callbacks: readonly number[]; readonly stores: LibraryStorage; readonly reads: LibraryReads };
+
+type LibraryReads = { readonly receiver: ReadMode; readonly arguments: readonly ReadMode[]; readonly rest: ReadMode };
+
+function inputs(receiver: ReadMode, args: readonly ReadMode[] = [], rest: ReadMode = "reference"): LibraryReads {
+  return { receiver, arguments: args, rest };
+}
 
 export type AmbientFlow = readonly ["input" | "output", string];
 
-export type LibraryCallback = { readonly kind: "pure" } | { readonly kind: "effect"; readonly flow: AmbientFlow };
+export type LibraryCallback =
+  | { readonly kind: "pure"; readonly call: Exclude<LibraryCall, { kind: "effect" }> }
+  | { readonly kind: "effect"; readonly flow: AmbientFlow };
 
 const HOST_OBJECTS = new Set([
   "document", "globalThis", "localStorage", "location", "navigator", "process", "self", "sessionStorage", "window",
@@ -121,7 +130,8 @@ export function libraryCallback(expression: ts.Expression, model: ScopeModel): L
   if (name.startsWith("console.") || OUTPUT_SINKS.has(name)) {
     return { kind: "effect", flow: ["output", `uses ${name.startsWith("console.") ? "console" : name}`] };
   }
-  return FRESH_GLOBAL_CALLS.has(name) ? { kind: "pure" } : undefined;
+  const call = FRESH_GLOBAL_CALLS.has(name) ? globalCall(name, expression) : undefined;
+  return call && call.kind !== "effect" ? { kind: "pure", call } : undefined;
 }
 
 /** Tells if the method name is one this analysis models for standard library receivers. */
@@ -173,29 +183,58 @@ function globalCall(name: string, callee: ts.Expression): LibraryCall | undefine
     return { kind: "effect" };
   }
   if (name === "Object.assign") {
-    return { kind: "mutating", result: "receiver", target: "argument", callbacks: [], stores: "sources" };
+    return { kind: "mutating", result: "receiver", target: "argument", callbacks: [], stores: "sources", reads: inputs("reference", ["reference"], "slots") };
   }
+  const promise = promiseGlobalCall(name);
+  if (promise) { return promise; }
   if (CALLBACK_GLOBAL_CALLS.has(name)) {
-    return { kind: "pure", result: "fresh", target: "argument", callbacks: [1], stores: "none" };
+    return { kind: "pure", result: "fresh", target: "argument", callbacks: [1], stores: "none", reads: inputs("reference", [name === "JSON.stringify" ? "deep" : "slots"]) };
   }
+  return allocatingGlobalCall(name);
+}
+
+function promiseGlobalCall(name: string): LibraryCall | undefined {
+  if (name === "Promise.resolve" || name === "Promise.all") {
+    return { kind: "pure", result: name === "Promise.all" ? "promise-elements" : "promise", target: "argument", callbacks: [], stores: "none", reads: inputs("reference", [name === "Promise.all" ? "slots" : "reference"]) };
+  }
+  return undefined;
+}
+
+function allocatingGlobalCall(name: string): LibraryCall | undefined {
   if (FRESH_GLOBAL_CALLS.has(name)) {
-    return { kind: "pure", result: "fresh", target: "receiver", callbacks: [], stores: "none" };
+    return { kind: "pure", result: "fresh", target: "receiver", callbacks: [], stores: "none", reads: inputs("reference", [freshGlobalReadMode(name)]) };
   }
   const callbacks = HOLDING_GLOBAL_CALLS.get(name);
-  return callbacks ? { kind: "pure", result: "holding", target: "argument", callbacks, stores: "none" } : undefined;
+  return callbacks ? { kind: "pure", result: "holding", target: "argument", callbacks, stores: "none", reads: inputs("reference", [name === "Array.of" ? "reference" : "slots"]) } : undefined;
+}
+
+function freshGlobalReadMode(name: string): ReadMode {
+  if (name === "Object.keys") { return "keys"; }
+  if (["Array.isArray", "Boolean"].includes(name)) { return "reference"; }
+  return ["structuredClone", "String", "Number"].includes(name) ? "deep" : "slots";
+}
+
+function memberCallbacks(name: string): number[] {
+  if (name === "replace" || name === "replaceAll") { return [1]; }
+  return CALLBACK_METHODS.has(name) ? [0] : [];
+}
+
+function memberReadMode(name: string): ReadMode {
+  if (name === "join" || name === "toString") { return "deep"; }
+  return name === "keys" ? "keys" : "slots";
 }
 
 function memberCall(name: string | undefined): LibraryCall | undefined {
   if (name === undefined) {
     return undefined;
   }
-  const callbacks = name === "replace" || name === "replaceAll" ? [1] : CALLBACK_METHODS.has(name) ? [0] : [];
+  const callbacks = memberCallbacks(name);
   const mutating = MUTATING_METHODS.get(name);
   if (mutating) {
-    return { kind: "mutating", result: mutating, target: "receiver", callbacks, stores: STORING_METHODS.get(name) ?? "none" };
+    return { kind: "mutating", result: mutating, target: "receiver", callbacks, stores: STORING_METHODS.get(name) ?? "none", reads: inputs(MOVING_METHODS.has(name) || name === "pop" ? "slots" : "reference", name === "setItem" || name === "setAttribute" ? ["deep", "deep"] : []) };
   }
   const pure = PURE_METHODS.get(name);
-  return pure ? { kind: "pure", result: pure, target: "receiver", callbacks, stores: "none" } : undefined;
+  return pure ? { kind: "pure", result: pure, target: "receiver", callbacks, stores: "none", reads: inputs(memberReadMode(name)) } : undefined;
 }
 
 /** Tells if a standard library call keeps its arguments as references without reading their contents. */

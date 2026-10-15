@@ -49,7 +49,7 @@ export function receiverShapes(
     return returnedShapes(model, value, callees);
   }
   if (ts.isNewExpression(value)) {
-    return closedShapes(model, classTargets(model, value.expression));
+    return constructedShapes(model, value.expression);
   }
   if (ts.isObjectLiteralExpression(value)) {
     return literalShapes(model, value);
@@ -66,6 +66,18 @@ export function receiverShapes(
     return undefined;
   }
   return bindingShapes(model, binding, new Set(seen).add(binding), site, callees);
+}
+
+function constructedShapes(model: ScopeModel, constructor: ts.Expression): readonly Shape[] | undefined {
+  const classes = classTargets(model, constructor);
+  return classes?.every(inertConstruction) ? classes : closedShapes(model, classes);
+}
+
+function inertConstruction(shape: ts.ClassLikeDeclaration): boolean {
+  return !owners.baseClassExpression(shape) && !(ts.getDecorators(shape)?.length) &&
+    shape.members.every((member) =>
+      (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) &&
+      !ts.isComputedPropertyName(member.name) && !(ts.getDecorators(member)?.length));
 }
 
 function literalShapes(model: ScopeModel, literal: ts.ObjectLiteralExpression): readonly Shape[] | undefined {

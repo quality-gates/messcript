@@ -106,7 +106,7 @@ test("storing generators in a private array is quiet and iterating an element tr
   assert.deepEqual(ownerMessages("outer", "stored-create.ts", [...store, "  return its.length;", "}", ""].join("\n")), []);
   const iterate = [...store, "  let n = 0;", "  for (const v of its[1]) {", "    n += v;", "  }", "  return n;", "}", ""];
   assert.deepEqual(ownerMessages("outer", "stored-iterate.ts", iterate.join("\n")), [
-    "12:UnknownEffect: The function outer() uses unresolved iterate protocol, an unknown effect.",
+    "12:ImplicitOutput: The function outer() writes log, an implicit output.",
   ]);
 });
 
@@ -226,31 +226,28 @@ test("using a generator as a computed key does not run the body", () => {
   assert.deepEqual(ownerMessages("outer", "generator-key.ts", generatorUse(lines)), []);
 });
 
-test("a generator escaping into a library result transfers its effects to the escape", () => {
+test("a generator stored through a library result transfers its effects when consumed", () => {
   const concat = ["  const xs = ([] as Generator<number>[]).concat(it);", "  return [...xs[0]];"];
   assert.deepEqual(ownerMessages("outer", "escape-concat.ts", generatorUse(concat)), [
-    "8:ImplicitOutput: The function outer() writes log, an implicit output.",
-    "9:UnknownEffect: The function outer() uses unresolved iterate protocol, an unknown effect.",
+    "9:ImplicitOutput: The function outer() writes log, an implicit output.",
   ]);
   const assign = ["  const box: { g?: Generator<number> } = {};", "  Object.assign(box, { g: it });", "  return [...box.g!];"];
   assert.deepEqual(ownerMessages("outer", "escape-assign.ts", generatorUse(assign)), [
-    "9:ImplicitOutput: The function outer() writes log, an implicit output.",
-    "10:UnknownEffect: The function outer() uses unresolved iterate protocol, an unknown effect.",
+    "10:ImplicitOutput: The function outer() writes log, an implicit output.",
   ]);
   const holder = [...generator, "function outer() {", "  const box: { g?: Generator<number> } = {};", "  Object.assign(box, { g: gen() });", "  return [...box.g!];", "}", ""];
   assert.deepEqual(ownerMessages("outer", "escape-assign-holder.ts", holder.join("\n")), [
-    "8:ImplicitOutput: The function outer() writes log, an implicit output.",
-    "9:UnknownEffect: The function outer() uses unresolved iterate protocol, an unknown effect.",
+    "9:ImplicitOutput: The function outer() writes log, an implicit output.",
   ]);
   const replacer = ["  return JSON.stringify(it, (key, value) => (value && typeof value.next === \"function\" ? value.next().value : value));"];
   assert.deepEqual(ownerMessages("outer", "escape-json.ts", generatorUse(replacer)), [
-    "8:UnknownEffect: The function outer() calls unresolved callable, an unknown effect.",
     "8:ImplicitOutput: The function outer() writes log, an implicit output.",
+    "8:UnknownEffect: The function outer() calls unresolved callable, an unknown effect.",
   ]);
   const all = [...generator, "async function outer() {", "  const [x] = await Promise.all([gen()]);", "  return [...x];", "}", ""];
   assert.deepEqual(ownerMessages("outer", "escape-all.ts", all.join("\n")), [
     "7:UnknownEffect: The function outer() uses unresolved iterate protocol, an unknown effect.",
-    "7:ImplicitOutput: The function outer() writes log, an implicit output.",
+    "8:ImplicitOutput: The function outer() writes log, an implicit output.",
   ]);
 });
 
@@ -309,5 +306,718 @@ test("generator, async, empty and partly unresolved returns leave method calls u
     "15:UnknownEffect: The function useNone() calls overridable method, an unknown effect.",
     "16:UnknownEffect: The function useNothing() calls overridable method, an unknown effect.",
     "17:UnknownEffect: The function usePartial() calls overridable method, an unknown effect.",
+  ]);
+});
+
+
+test("a spread preserves earlier array positions and shared reads after its insertion", () => {
+  assert.deepEqual(messages("spread-prefix-stable.ts", `const shared = [1];
+function bump() { shared[0] = 2; }
+function run(rest: number[][]) { return [shared, [], ...rest][1][0]; }
+`), [
+    "2:ImplicitOutput: The function bump() writes shared, an implicit output.",
+  ]);
+  assert.deepEqual(messages("spread-suffix-stable.ts", `const shared = [1];
+function bump() { shared[0] = 2; }
+function run(rest: number[][]) { return [[], ...rest, shared][0][0]; }
+`), [
+    "2:ImplicitOutput: The function bump() writes shared, an implicit output.",
+  ]);
+  assert.deepEqual(messages("spread-suffix-shared.ts", `const shared = [1];
+function bump() { shared[0] = 2; }
+function run(rest: number[][]) { return [[], ...rest, shared][1][0]; }
+`), [
+    "2:ImplicitOutput: The function bump() writes shared, an implicit output.",
+    "3:ImplicitInput: The function run() reads shared, an implicit input.",
+  ]);
+});
+
+
+test("a closure reads nested shared elements retained by a shallow copy", () => {
+  assert.deepEqual(messages("captured-copy-read.ts", `const rows: number[][] = [[1]];
+export function bump() { rows[0][0] = 2; }
+export function outer() {
+  const copy = [...rows];
+  const inner = () => copy[0][0];
+  return inner();
+}
+`), [
+    "2:ImplicitOutput: The function bump() writes rows, an implicit output.",
+    "5:ImplicitInput: The arrow function inner() reads rows, an implicit input.",
+    "6:ImplicitInput: The function outer() reads rows, an implicit input.",
+  ]);
+});
+
+test("captured mutators read existing slots while append only retains references", () => {
+  const source = `function outer() {
+  const values = [0, 7];
+  function change() { values.pop(); }
+  function append() { values.push(9); }
+  function read() { return values[1] ?? -1; }
+  change(); append();
+  return read();
+}
+`;
+  assert.deepEqual(ownerMessages("change", "captured-mutator-read.ts", source), [
+    "3:ImplicitInput: The function change() reads values, an implicit input.",
+    "3:ImplicitOutput: The function change() writes values, an implicit output.",
+  ]);
+  assert.deepEqual(ownerMessages("append", "captured-append.ts", source), [
+    "4:ImplicitOutput: The function append() writes values, an implicit output.",
+  ]);
+});
+
+test("a callback read survives alongside uncertainty in its argument ownership", () => {
+  const source = `const state = { count: 0 };
+function save() {
+  return JSON.stringify(state, (key, value) => { if (key === "") { value.count += 1; } return value; });
+}
+`;
+  assert.deepEqual(messages("callback-read-with-unknown.ts", source).filter(message => message.includes("ImplicitInput")), [
+    "3:ImplicitInput: The function save() reads state, an implicit input.",
+  ]);
+});
+
+
+test("increment and decrement invoke both accessor bodies", () => {
+  for (const operation of ["c.value++", "--c.value"]) {
+    assert.deepEqual(messages("accessor-update.ts", `const log: number[] = [];
+class Counter {
+  get value() { return log.length; }
+  set value(next: number) { log.push(next); }
+}
+function run() {
+  const c = new Counter();
+  ${operation};
+}
+`), [
+      "3:ImplicitInput: The accessor Counter.value() reads log, an implicit input.",
+      "4:ImplicitOutput: The accessor Counter.value() writes log, an implicit output.",
+      "8:ImplicitInput: The function run() reads log, an implicit input.",
+      "8:ImplicitOutput: The function run() writes log, an implicit output.",
+    ]);
+  }
+});
+
+
+test("short circuit assignments retain every reachable storage alternative", () => {
+  for (const statement of ["flag && (target = [])", "flag || (target = [])", "flag ?? (target = [])"]) {
+    assert.deepEqual(messages("short-circuit-retains.ts", `const store: number[] = [];
+function fill(flag: boolean | undefined) {
+  let target = store;
+  ${statement};
+  target.push(1);
+}
+`), ["5:ImplicitOutput: The function fill() mutates caller-owned value target, an implicit output."]);
+  }
+  for (const operator of ["||=", "&&=", "??="]) {
+    assert.deepEqual(messages("logical-assignment-joins.ts", `const store: number[] = [];
+function fill(start: number[] | undefined) {
+  let target = start;
+  target ${operator} store;
+  target!.push(1);
+}
+`), ["5:ImplicitOutput: The function fill() mutates caller-owned value target, an implicit output."]);
+  }
+});
+
+
+test("imports and declared class members retain their external reads", () => {
+  assert.deepEqual(messages("imported-host-name.ts", `import { console } from "./sink";
+export function change() { console.log(1); }
+`), [
+    "2:ImplicitInput: The function change() reads console, an implicit input.",
+    "2:UnknownEffect: The function change() calls unresolved callable, an unknown effect.",
+  ]);
+  assert.deepEqual(messages("declared-class-method.ts", `declare class Registry { static reset(): void; }
+function reset() { Registry.reset(); }
+`), [
+    "2:ImplicitInput: The function reset() reads Registry, an implicit input.",
+    "2:UnknownEffect: The function reset() calls unresolved callable, an unknown effect.",
+  ]);
+});
+
+test("an unresolved call keeps a mutable argument read on its own line", () => {
+  assert.deepEqual(messages("multiline-unknown-read.ts", `const log: number[] = [];
+function touch() { log.push(1); }
+function run(make: (value: unknown) => void) {
+  make(
+    log,
+  );
+}
+`), [
+    "2:ImplicitOutput: The function touch() writes log, an implicit output.",
+    "4:UnknownEffect: The function run() calls unresolved callable, an unknown effect.",
+    "5:ImplicitInput: The function run() reads log, an implicit input.",
+  ]);
+});
+
+test("string storage consumes an array's contents when converting its value", () => {
+  assert.deepEqual(messages("storage-string-input.ts", `const items: number[] = [1];
+function grow() { items.push(2); }
+function save() { localStorage.setItem("items", items as unknown as string); }
+`), [
+    "2:ImplicitOutput: The function grow() writes items, an implicit output.",
+    "3:ImplicitOutput: The function save() writes localStorage, an implicit output.",
+    "3:ImplicitInput: The function save() reads items, an implicit input.",
+  ]);
+});
+
+
+test("adding a distinct map key retains the previously stored shared key", () => {
+  assert.deepEqual(messages("map-key-join.ts", `const shared = [1];
+function bump() { shared[0] = 2; }
+function outer() {
+  const m = new Map<number[], number>();
+  m.set(shared, 1);
+  m.set([0], 2);
+  let total = 0;
+  for (const key of m.keys()) total += key[0];
+  return total;
+}
+`), [
+    "2:ImplicitOutput: The function bump() writes shared, an implicit output.",
+    "8:ImplicitInput: The function outer() reads shared, an implicit input.",
+  ]);
+});
+
+
+test("a supplied append callback does not read the forwarded array's contents", () => {
+  const source = `const store: number[] = [];
+function run(callback: (values: number[]) => void) {
+  callback(store);
+}
+function caller() {
+  run((values) => { values.push(1); });
+}
+`;
+  assert.deepEqual(messages("supplied-append-callback.ts", source).filter(message => message.includes("ImplicitInput")), []);
+  assert.deepEqual(ownerMessages("caller", "supplied-append-callback.ts", source), [
+    "6:ImplicitOutput: The function caller() mutates caller-owned callback argument, an implicit output.",
+  ]);
+});
+
+
+test("a helper result retains a selected shared map value", () => {
+  const source = `const shared: number[] = [1];
+function bump() { shared[0] = 2; }
+function pick(m: Map<string, number[]>) { return m.get("a")!; }
+function outer() {
+  const m = new Map([["a", shared]]);
+  return pick(m)[0];
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "helper-map-result.ts", source), [
+    "6:ImplicitInput: The function outer() reads shared, an implicit input.",
+  ]);
+  assert.deepEqual(ownerMessages("outer", "helper-map-result-quiet.ts", source.replace("function bump() { shared[0] = 2; }", "function bump() { return 2; }")), []);
+});
+
+
+test("an unresolved collection callback retains a shared element read", () => {
+  const source = `const shared: number[] = [1];
+function bump() { shared[0] = 2; }
+function outer(callback: (value: number[]) => void) {
+  const held = [shared];
+  held.forEach(callback);
+}
+function caller() { outer((value) => { value.push(1); }); }
+`;
+  assert.deepEqual(ownerMessages("outer", "unknown-element-callback.ts", source), [
+    "5:ImplicitInput: The function outer() reads shared, an implicit input.",
+    "5:UnknownEffect: The function outer() calls unresolved callable, an unknown effect.",
+  ]);
+  assert.deepEqual(ownerMessages("caller", "unknown-element-callback.ts", source).filter(message => message.includes("ImplicitInput")), []);
+});
+
+
+test("for-of rebinding assigns the iterated storage before running its body", () => {
+  for (const initializer of ["target", "const target"]) {
+    const source = `const store: number[] = [];
+function fill() {
+  let target: number[] = [];
+  for (${initializer} of [store]) {
+    target.push(1);
+  }
+}
+`;
+    assert.deepEqual(ownerMessages("fill", "forof-rebinding.ts", source), [
+      "5:ImplicitOutput: The function fill() mutates caller-owned value target, an implicit output.",
+    ]);
+    assert.deepEqual(ownerMessages("fill", "forof-rebinding-private.ts", source.replace("of [store]", "of [[]]")), []);
+  }
+});
+
+
+test("binding a known function defers its effects until the bound call", () => {
+  const source = `let total = 0;
+function add(value: number) { total += value; return total; }
+function bindOnly() { return add.bind(undefined, 2); }
+function outer() {
+  const bound = add.bind(undefined, 2);
+  return bound();
+}
+`;
+  assert.deepEqual(ownerMessages("bindOnly", "known-bound-source.ts", source), []);
+  assert.deepEqual(ownerMessages("outer", "known-bound-source.ts", source), [
+    "6:ImplicitInput: The function outer() reads total, an implicit input.",
+    "6:ImplicitOutput: The function outer() writes total, an implicit output.",
+  ]);
+});
+
+
+test("a bound generator step advances its captured iterator", () => {
+  const source = `function outer() {
+  const values = [0];
+  function* gen() { values.push(1); yield 1; }
+  function read0() { return values[0]; }
+  function read1() { return values[1]; }
+  const it = gen();
+  const step = it.next.bind(it);
+  step();
+  return [read0(), read1()];
+}
+`;
+  assert.deepEqual(ownerMessages("read0", "bound-generator-step.ts", source), []);
+  assert.deepEqual(ownerMessages("read1", "bound-generator-step.ts", source), [
+    "5:ImplicitInput: The function read1() reads values, an implicit input.",
+  ]);
+  assert.deepEqual(ownerMessages("outer", "bound-generator-step.ts", source), []);
+  const bare = source.replace("it.next.bind(it)", "it.next");
+  assert.ok(ownerMessages("outer", "bare-generator-step.ts", bare).some(message => message.includes("UnknownEffect")));
+});
+
+
+test("unknown code invalidates an escaped object's callable members", () => {
+  const source = `declare function share(value: unknown): void;
+function outer() {
+  const api = { run() { return 1; } };
+  share(api);
+  return api.run();
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "escaped-callable.ts", source), [
+    "4:UnknownEffect: The function outer() calls unresolved callable, an unknown effect.",
+    "5:UnknownEffect: The function outer() calls overridable method, an unknown effect.",
+  ]);
+  const known = source.replace("declare function share(value: unknown): void;", "function share(value: unknown) { return value; }");
+  assert.deepEqual(ownerMessages("outer", "known-object-forward.ts", known), []);
+});
+
+
+test("iterating a yielded generator retains its deferred body effects", () => {
+  const source = `const log: number[] = [];
+function* gen() { log.push(1); yield 1; }
+function* outer() { yield gen(); }
+function run() {
+  for (const iterator of outer()) {
+    for (const value of iterator) { void value; }
+  }
+}
+function cold() { for (const iterator of outer()) { void iterator; } }
+`;
+  assert.deepEqual(ownerMessages("outer", "yielded-generator.ts", source), []);
+  assert.deepEqual(ownerMessages("run", "yielded-generator.ts", source), [
+    "6:ImplicitOutput: The function run() writes log, an implicit output.",
+  ]);
+  assert.deepEqual(ownerMessages("cold", "yielded-generator.ts", source), []);
+});
+
+
+test("await preserves a known non-promise iterator until collection consumption", () => {
+  const source = `const log: number[] = [];
+function* gen() { log.push(1); yield 1; }
+async function run() {
+  return new Set(await gen()).size;
+}
+async function cold() { return await gen(); }
+`;
+  assert.ok(ownerMessages("run", "awaited-iterator.ts", source).includes(
+    "4:ImplicitOutput: The function run() writes log, an implicit output."));
+  assert.deepEqual(ownerMessages("cold", "awaited-iterator.ts", source).filter(message => message.includes("ImplicitOutput")), []);
+});
+
+test("a bound generator step retains the storage yielded in its result", () => {
+  const source = `const shared: number[] = [1];
+function bump() { shared[0] = 2; }
+function* gen() { yield shared; }
+function outer() {
+  const it = gen();
+  const step = it.next.bind(it);
+  return step().value![0];
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "bound-step-result.ts", source), [
+    "7:ImplicitInput: The function outer() reads shared, an implicit input.",
+  ]);
+});
+
+
+test("replaced bind and next members execute their replacement", () => {
+  const bind = `let original = 0;
+let replaced = 0;
+function target() { original++; }
+function outer() {
+  target.bind = () => () => { replaced++; };
+  const bound = target.bind(undefined);
+  bound();
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "replaced-bind.ts", bind).filter(message => message.startsWith("7:")), [
+    "7:ImplicitInput: The function outer() reads replaced, an implicit input.",
+    "7:ImplicitOutput: The function outer() writes replaced, an implicit output.",
+  ]);
+  const next = `let original = 0;
+let replaced = 0;
+function* gen() { original++; yield 1; }
+function outer() {
+  const it = gen();
+  it.next = () => { replaced++; return { value: 0, done: true }; };
+  const step = it.next.bind(it);
+  step();
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "replaced-next.ts", next).filter(message => message.startsWith("8:")), [
+    "8:ImplicitInput: The function outer() reads replaced, an implicit input.",
+    "8:ImplicitOutput: The function outer() writes replaced, an implicit output.",
+  ]);
+});
+
+
+test("a class method closure retains a shared receiver read", () => {
+  const source = `class Box {
+  items: number[] = [];
+  total() {
+    const items = this.items;
+    const read = () => items.length;
+    return read();
+  }
+}
+const shared = new Box();
+function touch() { shared.items.push(1); }
+function run() { return shared.total(); }
+function local() { return new Box().total(); }
+`;
+  assert.deepEqual(ownerMessages("run", "captured-receiver.ts", source), [
+    "11:ImplicitInput: The function run() reads shared, an implicit input.",
+  ]);
+  assert.deepEqual(ownerMessages("local", "captured-receiver.ts", source), []);
+});
+
+
+test("recorded library callbacks preserve unchanged array slots", () => {
+  const source = `function outer() {
+  const values = [0];
+  const add = () => { values.length = 1; };
+  [1, 2].forEach(add);
+  const first = () => values[0];
+  const second = () => values[1];
+  return first() + second();
+}
+`;
+  assert.deepEqual(ownerMessages("second", "callback-length.ts", source), []);
+  const changed = source.replace("values.length = 1", "values[1] = 1");
+  assert.deepEqual(ownerMessages("second", "callback-index.ts", changed), [
+    "6:ImplicitInput: The arrow function second() reads values, an implicit input.",
+  ]);
+});
+
+
+test("assigning an object to module storage preserves dispatch uncertainty", () => {
+  const source = `let holder: object = {};
+function make() {
+  const api = { run() { return 1; } };
+  holder = api;
+  return api.run();
+}
+`;
+  assert.ok(ownerMessages("make", "module-held-object.ts", source).includes(
+    "5:UnknownEffect: The function make() calls overridable method, an unknown effect."));
+  const local = source.replace("let holder: object = {};", "").replace("function make() {", "function make() { let holder: object = {};");
+  assert.deepEqual(ownerMessages("make", "local-held-object.ts", local), []);
+});
+
+
+test("a later loop escape invalidates dispatch on the next iteration", () => {
+  const source = `declare function share(value: object): void;
+function use() {
+  const api = { run() { return 1; } };
+  let total = 0;
+  for (let i = 0; i < 2; i++) {
+    total += api.run();
+    share(api);
+  }
+  return total;
+}
+`;
+  assert.ok(ownerMessages("use", "loop-escape.ts", source).includes(
+    "6:UnknownEffect: The function use() calls overridable method, an unknown effect."));
+  const local = source.replace("declare function share(value: object): void;", "function share(value: object) { return value; }");
+  assert.deepEqual(ownerMessages("use", "loop-known-share.ts", local), []);
+});
+
+
+test("loop widening preserves append floors and Set element positions", () => {
+  const append = `function outer() {
+  const values = [0];
+  function add(item: number) { values.push(item); }
+  function read() { return values[0]; }
+  for (const x of [1, 2]) { values[values.length] = x; }
+  add(9);
+  return read();
+}
+`;
+  assert.deepEqual(ownerMessages("read", "loop-append-floor.ts", append), []);
+  const pairs = `const store: number[] = [];
+function change() {
+  const pairs = new Set([[[0], store]]);
+  for (const [first] of pairs) { first.push(1); }
+}
+`;
+  assert.deepEqual(ownerMessages("change", "set-private-position.ts", pairs), []);
+  const shared = pairs.replace("[[[0], store]]", "[[store, [0]]]");
+  assert.deepEqual(ownerMessages("change", "set-shared-position.ts", shared), [
+    "4:ImplicitOutput: The function change() mutates caller-owned value first, an implicit output.",
+  ]);
+});
+
+
+test("captured container reads name shared storage while direct aliases retain their name", () => {
+  const source = `const shared: number[] = [1];
+function bump() { shared[0] = 2; }
+function outer() {
+  const xs: number[][] = [];
+  xs.push(shared);
+  const inner = () => xs[0][0];
+  return inner();
+}
+function aliasRead() {
+  const alias = shared;
+  return alias[0];
+}
+`;
+  assert.deepEqual(ownerMessages("inner", "captured-storage-name.ts", source), [
+    "6:ImplicitInput: The arrow function inner() reads shared, an implicit input.",
+  ]);
+  assert.deepEqual(ownerMessages("outer", "captured-storage-name.ts", source), [
+    "7:ImplicitInput: The function outer() reads shared, an implicit input.",
+  ]);
+  assert.deepEqual(ownerMessages("aliasRead", "captured-storage-name.ts", source), [
+    "11:ImplicitInput: The function aliasRead() reads alias, an implicit input.",
+  ]);
+});
+
+
+test("object key conversion invalidates callable storage exposed to coercion hooks", () => {
+  for (const expression of ["table[api as any] = 1", "const value = table[api as any]", "const value = { [api as any]: 1 }"]) {
+    const source = [
+      "export function make() {",
+      "  const api = { run() { return 1; } };",
+      "  const table: any = {};",
+      `  ${expression};`,
+      "  return api.run();",
+      "}",
+    ].join("\n");
+    assert.deepEqual(ownerMessages("make", "coercion-dispatch.ts", source), [
+      "5:UnknownEffect: The function make() calls overridable method, an unknown effect.",
+    ]);
+    assert.deepEqual(ownerMessages("make", "scalar-key-dispatch.ts", source.replaceAll("api as any", '"safe"')), []);
+  }
+});
+
+test("Object.assign replaces the original callable effect before invocation", () => {
+  const source = `let original = 0, replacement = 0;
+function outer() { const api = { run() { original++; return 1; } };
+  Object.assign(api, { run: () => { replacement++; return 2; } });
+  return api.run();
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "assign-replacement-effects.ts", source), [
+    "4:ImplicitInput: The function outer() reads replacement, an implicit input.",
+    "4:ImplicitOutput: The function outer() writes replacement, an implicit output.",
+  ]);
+});
+
+
+test("awaiting a known iterator is quiet until its then member is exposed or replaced", () => {
+  const source = `function* gen() { yield 1; }
+async function cold() { return await gen(); }
+async function patched() {
+  const iterator: any = gen();
+  iterator.then = (resolve: (value: number) => void) => resolve(1);
+  return await iterator;
+}
+declare function expose(value: unknown): void;
+async function escaped() {
+  const iterator = gen();
+  expose(iterator);
+  return await iterator;
+}
+`;
+  assert.deepEqual(ownerMessages("cold", "iterator-await-boundary.ts", source), []);
+  for (const owner of ["patched", "escaped"]) {
+    assert.ok(ownerMessages(owner, "iterator-await-boundary.ts", source).some(message => message.includes("uses unresolved await protocol")));
+  }
+});
+
+
+test("a captured parameter mutation names the caller's actual storage through nested calls", () => {
+  const source = `const store: number[] = [];
+function outer(list: number[]) {
+  const alias = list;
+  const add = () => { alias.push(1); };
+  add();
+}
+function caller() {
+  outer(store);
+}
+function local() { outer([]); }
+`;
+  assert.deepEqual(ownerMessages("caller", "nested-parameter-origin.ts", source), [
+    "8:ImplicitOutput: The function caller() mutates caller-owned value store, an implicit output.",
+  ]);
+  assert.deepEqual(ownerMessages("local", "nested-parameter-origin.ts", source), []);
+});
+
+
+test("iteration joins known generator and ordinary array alternatives", () => {
+  const source = `const log: number[] = [];
+function* gen() { log.push(1); yield 1; }
+function plain() { return [1]; }
+function run(flag: boolean) {
+  const factory = flag ? gen : plain;
+  for (const value of factory()) { void value; }
+}
+declare function external(): Iterable<number>;
+function opaque(flag: boolean) {
+  const factory = flag ? gen : external;
+  for (const value of factory()) { void value; }
+}
+declare function unknownIterator(): ArrayIterator<number>;
+function patched(flag: boolean) {
+  const values = [1];
+  values[Symbol.iterator] = unknownIterator;
+  const iterator = flag ? gen() : values;
+  for (const value of iterator) { void value; }
+}
+`;
+  assert.deepEqual(ownerMessages("run", "mixed-iterables.ts", source), [
+    "6:ImplicitOutput: The function run() writes log, an implicit output.",
+  ]);
+  for (const owner of ["opaque", "patched"]) {
+    assert.ok(ownerMessages(owner, "mixed-iterables.ts", source).some(message => message.includes("uses unresolved iterate protocol")), owner);
+  }
+});
+
+
+test("typeof guards remove plain noncallable alternatives and retain opaque functions", () => {
+  for (const value of ["{}", "[]"]) {
+    const source = `let count = 0;
+function bump() { count += 1; }
+function known(flag: boolean) {
+  const action: any = flag ? bump : ${value};
+  if (typeof action === "function") action();
+}
+function opaque(action: unknown) {
+  if (typeof action === "function") action();
+}
+function impossible() {
+  const action: any = ${value};
+  if (typeof action === "function") action();
+}
+`;
+    assert.deepEqual(ownerMessages("known", "typeof-callable.ts", source), [
+      "5:ImplicitInput: The function known() reads count, an implicit input.",
+      "5:ImplicitOutput: The function known() writes count, an implicit output.",
+    ]);
+    assert.ok(ownerMessages("opaque", "typeof-callable.ts", source).some(message => message.includes("calls unresolved callable")));
+    assert.deepEqual(ownerMessages("impossible", "typeof-callable.ts", source), []);
+  }
+});
+
+test("fresh inert construction ignores escape paths in uncalled methods", () => {
+  const source = [
+    "let count = 0;",
+    "const seen: object[] = [];",
+    "class First { keep() { seen.push(this); } run() { return 1; } }",
+    "class Second { run() { return 2; } }",
+    "class Third { run() { count += 1; return 3; } }",
+    "let Kind: typeof First | typeof Second = First;",
+    "export function choose() { Kind = Second; }",
+    "export function make() { return new Kind().run(); }",
+    "export function other() { return new Third().run(); }",
+    "",
+  ].join("\n");
+  assert.deepEqual(ownerMessages("make", "fresh-class-selection.ts", source), [
+    "8:ImplicitInput: The function make() reads Kind, an implicit input.",
+  ]);
+  assert.deepEqual(ownerMessages("other", "fresh-class-selection.ts", source), [
+    "9:ImplicitInput: The function other() reads count, an implicit input.",
+    "9:ImplicitOutput: The function other() writes count, an implicit output.",
+  ]);
+  for (const construction of [
+    "constructor() { publish(this); }",
+    "value = publish(this);",
+  ]) {
+    const open = [
+      "declare function publish(value: object): void;",
+      "class Box { " + construction + " run() { return 1; } }",
+      "export function make() { return new Box().run(); }",
+      "",
+    ].join("\n");
+    assert.ok(ownerMessages("make", "fresh-class-escape.ts", open).some((message) => message.includes("UnknownEffect")));
+  }
+});
+
+test("computed replacement joins known callable effects and keeps opaque replacements unknown", () => {
+  const pure = `export function make(name: string) {
+  const api: any = { run() { return 1; } };
+  api[name] = () => 2;
+  return api.run();
+}
+`;
+  assert.deepEqual(ownerMessages("make", "computed-pure-replacement.ts", pure), []);
+  const action = `let count = 0;
+export function make(name: string) {
+  const api: any = { run() { return 1; } };
+  api[name] = () => { count++; return 2; };
+  return api.run();
+}
+`;
+  assert.deepEqual(ownerMessages("make", "computed-action-replacement.ts", action), [
+    "5:ImplicitInput: The function make() reads count, an implicit input.",
+    "5:ImplicitOutput: The function make() writes count, an implicit output.",
+  ]);
+  const opaque = pure.replace("name: string", "name: string, fn: () => number").replace("() => 2", "fn");
+  assert.ok(ownerMessages("make", "computed-opaque-replacement.ts", opaque).some((message) => message.includes("UnknownEffect")));
+});
+
+test("JSON replacer key and value association retains unknown mutation ownership", () => {
+  const source = `function save() {
+  const state = { count: 0 };
+  return JSON.stringify(state, (key, value) => { if (key === "") { value.count += 1; } return value; });
+}
+`;
+  assert.deepEqual(ownerMessages("save", "json-replacer-association.ts", source), [
+    "3:UnknownEffect: The function save() mutates value with unknown ownership, an unknown effect.",
+  ]);
+});
+
+test("recursive injected callbacks keep the owner's earliest unknown site", () => {
+  const source = `function ping(value: number, notify: (value: number) => number): number {
+  if (value <= 0) {
+    return notify(value);
+  }
+  return pong(value - 1, notify);
+}
+function pong(value: number, notify: (value: number) => number): number {
+  return ping(value, notify);
+}
+`;
+  assert.deepEqual(ownerMessages("ping", "recursive-first-unknown.ts", source), [
+    "3:UnknownEffect: The function ping() calls unresolved callable, an unknown effect.",
+  ]);
+  assert.deepEqual(ownerMessages("pong", "recursive-first-unknown.ts", source), [
+    "8:UnknownEffect: The function pong() calls unresolved callable, an unknown effect.",
   ]);
 });

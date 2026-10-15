@@ -141,6 +141,11 @@ closures beside it, so their reads of that storage become inputs. Storing a
 value with `push`, `add`, `set` or `splice` keeps its reference and reads none of
 its contents.
 
+JSON replacer callbacks receive the root and unknown descendant values. The
+analysis does not associate an empty replacer key with the root value. A mutation
+through that callback value retains unknown ownership, even when the root is
+private. Known shared reads and writes are still reported.
+
 Imported functions, unresolved property calls, dynamic callable lookup, injected
 callbacks, and writes with unknown ownership stay `UnknownEffect`. Unresolved
 iteration hooks, conversion hooks, and non-native thenable waits also stay

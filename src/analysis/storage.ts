@@ -147,7 +147,7 @@ function allocationMemberOrigins(fact: StorageFact, allocation: StorageOrigin, s
   if (!cells?.length) {
     return projected;
   }
-  const matched = cells.filter((cell) => cell.slot !== "@allocation" && (cell.slot !== KEY_SLOT || slot === "*") && cellMatchesSlot(cell.slot, slot)).flatMap((cell) => cell.origins);
+  const matched = cells.filter((cell) => cell.slot !== "@allocation" && (cell.slot !== KEY_SLOT || slot === "*" || slot === KEY_SLOT) && cellMatchesSlot(cell.slot, slot)).flatMap((cell) => cell.origins);
   return isClosedMemberSlot(cells, slot) ? matched : [...matched, ...projected];
 }
 
@@ -303,16 +303,22 @@ export function arrayLiteralFact(value: ts.Expression, resolve: (value: ts.Expre
     const source = resolve(only.expression);
     return entryCells(source) ? allocatedFact(value, [{ slot: "*", fact: iteratedFact(source, only) }]) : shallowStorageFact(value, source);
   }
-  return allocatedFact(value, value.elements.map((element, index) => ts.isSpreadElement(element)
-    ? { slot: "*", fact: iteratedFact(resolve(element.expression), element) }
-    : { slot: `property:${index}`, fact: resolve(element) }));
+  let lowerBound = 0;
+  let exact = true;
+  return allocatedFact(value, value.elements.map((element) => {
+    const spread = ts.isSpreadElement(element);
+    const slot = exact && !spread ? `property:${lowerBound}` : `append:${lowerBound}`;
+    exact &&= !spread;
+    lowerBound += Number(!spread);
+    return { slot, fact: spread ? iteratedFact(resolve(element.expression), element) : resolve(element) };
+  }));
 }
 
-export function objectLiteralFact(value: ts.Expression, resolve: (value: ts.Expression) => StorageFact): StorageFact {
+export function objectLiteralFact(value: ts.Expression, resolve: (value: ts.Expression) => StorageFact, callable?: (method: ts.MethodDeclaration) => StorageFact): StorageFact {
   if (!ts.isObjectLiteralExpression(value)) {
     return { outer: ["unknown"], reachable: ["unknown"] };
   }
-  const parts = value.properties.flatMap((property) => propertyParts(property, resolve));
+  const parts = value.properties.flatMap((property) => propertyParts(property, resolve, callable));
   return allocatedFact(value, parts.map((part, index) => isWildcardSlot(part.slot)
     ? { ...part, slot: exceptSlot(part.slot, parts.slice(index + 1).map((later) => later.slot)) } : part));
 }
@@ -322,7 +328,7 @@ const EXCEPT = "*-except:";
 export const KEY_SLOT = "@key";
 
 export function isWildcardSlot(slot: string): boolean {
-  return slot === "*" || slot === KEY_SLOT || slot.startsWith(EXCEPT);
+  return slot === "*" || slot === KEY_SLOT || slot.startsWith(EXCEPT) || slot.startsWith("append:");
 }
 
 function exceptedSlots(slot: string): string[] {
@@ -334,15 +340,22 @@ function exceptSlot(slot: string, later: readonly string[]): string {
   return excepted.length ? `${EXCEPT}${excepted.map(encodeURIComponent).join(",")}` : slot;
 }
 
-function propertyParts(property: ts.ObjectLiteralElementLike, resolve: (value: ts.Expression) => StorageFact): { slot: string; fact: StorageFact }[] {
+function propertyParts(property: ts.ObjectLiteralElementLike, resolve: (value: ts.Expression) => StorageFact, callable?: (method: ts.MethodDeclaration) => StorageFact): { slot: string; fact: StorageFact }[] {
   if (ts.isSpreadAssignment(property)) {
     return spreadProperties(resolve(property.expression));
   }
   const name = property.name;
   const key = ts.isComputedPropertyName(name) ? literalKey(name.expression) : name.text;
-  const expression = ts.isShorthandPropertyAssignment(property) ? property.name
-    : ts.isPropertyAssignment(property) ? property.initializer : undefined;
+  const expression = propertyValue(property);
+  if (ts.isMethodDeclaration(property) && callable) {
+    return [{ slot: key === undefined ? "*" : `property:${key}`, fact: callable(property) }];
+  }
   return expression ? [{ slot: key === undefined ? "*" : `property:${key}`, fact: resolve(expression) }] : [];
+}
+
+function propertyValue(property: ts.ObjectLiteralElementLike): ts.Expression | undefined {
+  if (ts.isShorthandPropertyAssignment(property)) { return property.name; }
+  return ts.isPropertyAssignment(property) ? property.initializer : undefined;
 }
 
 function spreadProperties(source: StorageFact): { slot: string; fact: StorageFact }[] {
@@ -392,6 +405,10 @@ export function constructorStorageFact(
   value: ts.NewExpression, constructor: string | undefined, resolve: (value: ts.Expression) => StorageFact,
 ): StorageFact {
   const entries = mapEntries(value, constructor);
+  if (constructor === "Set" || constructor === "WeakSet") {
+    const iterable = value.arguments?.[0];
+    return allocatedFact(value, iterable ? [{ slot: "*", fact: iteratedFact(resolve(iterable), value.expression) }] : []);
+  }
   return entries ? allocatedFact(value, mapEntryListParts(entries, resolve))
     : allocatedFact(value, (value.arguments ?? []).flatMap((argument) => {
       const fact = resolve(argument);
@@ -435,7 +452,7 @@ export function withInsertions(fact: StorageFact, insertions: readonly HeapWrite
 function applyHeapWrite(heap: Map<string, StorageCell>, insertion: HeapWrite): void {
   for (const allocation of insertion.target.outer.filter(isCellAllocation)) {
     const cell = { allocation, slot: insertion.slot ?? "*", origins: insertion.value.outer };
-    const previous = replacesCell(insertion) ? [] : heap.get(cellKey(cell))?.origins ?? [];
+    const previous = replacesCell(insertion) ? [] : allocationMemberOrigins({ ...insertion.target, cells: [...heap.values()] }, allocation, insertion.slot);
     heap.set(cellKey(cell), { ...cell, origins: joinOrigins([...previous, ...cell.origins]) });
   }
 }

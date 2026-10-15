@@ -289,6 +289,7 @@
   "name": "fresh120-helper-copywithin-A",
   "source": "function outer() {\n  const values = [0, 7];\n  function change() {\n    values.copyWithin(0, 1);\n  }\n  function read() { return values[0] ?? -1; }\n  change();\n  return read();\n}\n",
   "findings": [
+   "4:ImplicitInput: function change(): The function change() reads values, an implicit input.",
    "4:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
    "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
   ]
@@ -398,6 +399,7 @@
   "name": "fresh120-helper-pop-A",
   "source": "function outer() {\n  const values = [0, 7];\n  function change() {\n    values.pop();\n  }\n  function read() { return values[1] ?? -1; }\n  change();\n  return read();\n}\n",
   "findings": [
+   "4:ImplicitInput: function change(): The function change() reads values, an implicit input.",
    "4:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
    "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
   ]
@@ -406,6 +408,7 @@
   "name": "fresh120-helper-reverse-A",
   "source": "function outer() {\n  const values = [0, 7];\n  function change() {\n    values.reverse();\n  }\n  function read() { return values[0] ?? -1; }\n  change();\n  return read();\n}\n",
   "findings": [
+   "4:ImplicitInput: function change(): The function change() reads values, an implicit input.",
    "4:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
    "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
   ]
@@ -414,6 +417,7 @@
   "name": "fresh120-helper-shift-A",
   "source": "function outer() {\n  const values = [0, 7];\n  function change() {\n    values.shift();\n  }\n  function read() { return values[0] ?? -1; }\n  change();\n  return read();\n}\n",
   "findings": [
+   "4:ImplicitInput: function change(): The function change() reads values, an implicit input.",
    "4:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
    "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
   ]
@@ -437,6 +441,7 @@
   "name": "fresh120-helper-sort-A",
   "source": "function outer() {\n  const values = [7, 0];\n  function change() {\n    values.sort();\n  }\n  function read() { return values[0] ?? -1; }\n  change();\n  return read();\n}\n",
   "findings": [
+   "4:ImplicitInput: function change(): The function change() reads values, an implicit input.",
    "4:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
    "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
   ]
@@ -445,6 +450,7 @@
   "name": "fresh120-helper-splice-A",
   "source": "function outer() {\n  const values = [0, 7];\n  function change() {\n    values.splice(0, 1);\n  }\n  function read() { return values[0] ?? -1; }\n  change();\n  return read();\n}\n",
   "findings": [
+   "4:ImplicitInput: function change(): The function change() reads values, an implicit input.",
    "4:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
    "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
   ]
@@ -453,6 +459,7 @@
   "name": "fresh120-helper-unshift-A",
   "source": "function outer() {\n  const values = [0];\n  function change() {\n    values.unshift(9);\n  }\n  function read() { return values[0] ?? -1; }\n  change();\n  return read();\n}\n",
   "findings": [
+   "4:ImplicitInput: function change(): The function change() reads values, an implicit input.",
    "4:ImplicitOutput: function change(): The function change() writes values, an implicit output.",
    "6:ImplicitInput: function read(): The function read() reads values, an implicit input."
   ]
@@ -742,9 +749,15 @@
   "source": "function outer() {\n  const values: number[] = [0, 7];\n  function add(item: number) { values.push(item); }\n  function prep() {\n    values.pop();\n  }\n  function read() { return values[1] ?? -1; }\n  prep();\n  add(9);\n  return read();\n}\n",
   "findings": [
    "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "5:ImplicitInput: function prep(): The function prep() reads values, an implicit input.",
    "5:ImplicitOutput: function prep(): The function prep() writes values, an implicit output.",
    "7:ImplicitInput: function read(): The function read() reads values, an implicit input."
-  ]
+  ],
+  "expectationReview": {
+   "sourceSha256": "5cfeec99d73801fd23331ea2412eb5b76b708badc7d402310648864c21671a45",
+   "reason": "Independent library adjudication requires the executed pop/splice read of existing captured slots. Exact original source compiles and returns 9.",
+   "runtimeWitness": ".audit/explicitness-completion/typescript/r15/resume-serial/adjudicated-library-witness-results.json"
+  }
  },
  {
   "name": "fresh120-read-before-and-after-A",
@@ -838,9 +851,15 @@
   "source": "function outer() {\n  const values: number[] = [0];\n  function add(item: number) { values.push(item); }\n  function prep() {\n    values.splice(0, 0, 5, 6);\n  }\n  function read() { return values[3] ?? -1; }\n  prep();\n  add(9);\n  return read();\n}\n",
   "findings": [
    "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
+   "5:ImplicitInput: function prep(): The function prep() reads values, an implicit input.",
    "5:ImplicitOutput: function prep(): The function prep() writes values, an implicit output.",
    "7:ImplicitInput: function read(): The function read() reads values, an implicit input."
-  ]
+  ],
+  "expectationReview": {
+   "sourceSha256": "47325759a637274e9239e5362cb2e654c8dc8c1bac5017dd5f8a2058fb5e1b61",
+   "reason": "Independent library adjudication requires the executed pop/splice read of existing captured slots. Exact original source compiles and returns 9.",
+   "runtimeWitness": ".audit/explicitness-completion/typescript/r15/resume-serial/adjudicated-library-witness-results.json"
+  }
  },
  {
   "name": "fresh120-spread-copy-A",
@@ -969,6 +988,7 @@
   "name": "fresh42-escaped-unshift-after-precise-push",
   "source": "function outer() {\n  const values = [0];\n  function shift(item: number) { values.unshift(item); }\n  function read() { return values[0]; }\n  values.push(1);\n  return { shift, read };\n}\n",
   "findings": [
+   "3:ImplicitInput: function shift(): The function shift() reads values, an implicit input.",
    "3:ImplicitOutput: function shift(): The function shift() writes values, an implicit output.",
    "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
   ]
@@ -1562,7 +1582,8 @@
    "3:ImplicitOutput: function patch(): The function patch() mutates argument target, an implicit output.",
    "3:ImplicitInput: arrow function anonymous(): The arrow function anonymous() reads hits, an implicit input.",
    "3:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes hits, an implicit output.",
-   "8:UnknownEffect: function outer(): The function outer() calls overridable method, an unknown effect."
+   "8:ImplicitInput: function outer(): The function outer() reads hits, an implicit input.",
+   "8:ImplicitOutput: function outer(): The function outer() writes hits, an implicit output."
   ]
  },
  {
@@ -1571,7 +1592,8 @@
   "findings": [
    "4:ImplicitInput: arrow function anonymous(): The arrow function anonymous() reads hits, an implicit input.",
    "4:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes hits, an implicit output.",
-   "5:UnknownEffect: function outer(): The function outer() calls overridable method, an unknown effect."
+   "5:ImplicitInput: function outer(): The function outer() reads hits, an implicit input.",
+   "5:ImplicitOutput: function outer(): The function outer() writes hits, an implicit output."
   ]
  },
  {
@@ -1618,7 +1640,8 @@
    "5:UnknownEffect: method swap(): The method swap() reads this, an unknown effect.",
    "5:ImplicitInput: arrow function anonymous(): The arrow function anonymous() reads hits, an implicit input.",
    "5:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes hits, an implicit output.",
-   "7:UnknownEffect: function outer(): The function outer() calls overridable method, an unknown effect."
+   "8:ImplicitInput: function outer(): The function outer() reads hits, an implicit input.",
+   "8:ImplicitOutput: function outer(): The function outer() writes hits, an implicit output."
   ]
  },
  {
@@ -2028,15 +2051,21 @@
   "findings": [
    "2:ImplicitInput: function add(): The function add() reads total, an implicit input.",
    "2:ImplicitOutput: function add(): The function add() writes total, an implicit output.",
-   "4:ImplicitInput: function outer(): The function outer() reads add, an implicit input.",
-   "4:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
-  ]
+   "5:ImplicitInput: function outer(): The function outer() reads total, an implicit input.",
+   "5:ImplicitOutput: function outer(): The function outer() writes total, an implicit output."
+  ],
+  "expectationReview": {
+   "sourceSha256": "9be105d2a81dbdbba7d332308249463d36fd50f2c6825234284816ea2e630622",
+   "reason": "Independent provenance adjudication requires total read/write at the bound invocation, and rejects a data read of the stable add declaration. Exact runtime returns [2,4]; native tests prove creation defers execution.",
+   "runtimeWitness": ".audit/explicitness-completion/typescript/r15/resume-serial/adjudicated-provenance-witness-results.json"
+  }
  },
  {
   "name": "h-g-destructure-default-fn-A",
   "source": "const log: number[] = [];\nconst api: { add?: (item: number) => void } = {};\nfunction outer() {\n  const { add = (item: number) => { log.push(item); } } = api;\n  add(1);\n  return 0;\n}\n",
   "findings": [
    "4:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes log, an implicit output.",
+   "5:ImplicitOutput: function outer(): The function outer() writes log, an implicit output.",
    "5:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
   ]
  },
@@ -2164,16 +2193,14 @@
   "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  [add][0](2);\n  return read();\n}\n",
   "findings": [
    "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
-   "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
-   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
   ]
  },
  {
   "name": "h-q-array-element-call-C",
   "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  [add][0](2);\n  return read();\n}\n",
   "findings": [
-   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
-   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
   ]
  },
  {
@@ -2181,16 +2208,14 @@
   "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  add(1);\n  add.bind(undefined, 2)();\n  return read();\n}\n",
   "findings": [
    "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
-   "4:ImplicitInput: function read(): The function read() reads values, an implicit input.",
-   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
   ]
  },
  {
   "name": "h-q-bind-then-call-C",
   "source": "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  add(1);\n  add.bind(undefined, 2)();\n  return read();\n}\n",
   "findings": [
-   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
-   "6:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+   "3:ImplicitOutput: function add(): The function add() writes values, an implicit output."
   ]
  },
  {
@@ -2347,24 +2372,12 @@
   "source": "function outer() {\n  const state: Record<string, number[]> = { items: [0] };\n  const key = 'items';\n  function add(item: number) { state[key].push(item); }\n  function read() { return state.items[0] ?? -1; }\n  add(1);\n  add(2);\n  return read();\n}\n",
   "findings": [
    "4:ImplicitOutput: function add(): The function add() writes state, an implicit output."
-  ],
-  "admissible": [
-   {
-    "finding": "5:ImplicitInput: function read(): The function read() reads state, an implicit input.",
-    "reason": "a key bound to a constant string is not resolved to its member, so the push may reach state.items[0]"
-   }
   ]
  },
  {
   "name": "h-c-object-assign-patch-C",
   "source": "function outer() {\n  const api = { add(item: number): number { return item + 1; } };\n  Object.assign(api, { add: (item: number): number => item });\n  return api.add(1);\n}\n",
-  "findings": [],
-  "admissible": [
-   {
-    "finding": "4:UnknownEffect: function outer(): The function outer() calls overridable method, an unknown effect.",
-    "reason": "Object.assign replaces the method; patched members are outside the trusted subset, so UnknownEffect is the tolerated answer"
-   }
-  ]
+  "findings": []
  },
  {
   "name": "h-c-shared-this-method-C",
@@ -2577,8 +2590,9 @@
   "name": "mut-json-stringify-replacer",
   "source": "const state = { count: 0 };\nfunction save() {\n  return JSON.stringify(state, (key, value) => { if (key === \"\") { value.count += 1; } return value; });\n}\n",
   "findings": [
-   "3:ImplicitOutput: function save(): The function save() mutates caller-owned callback argument, an implicit output.",
    "3:ImplicitInput: function save(): The function save() reads state, an implicit input.",
+   "3:ImplicitOutput: function save(): The function save() mutates caller-owned callback argument, an implicit output.",
+   "3:UnknownEffect: function save(): The function save() mutates value with unknown ownership, an unknown effect.",
    "3:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() mutates argument value, an implicit output."
   ]
  },
@@ -2586,6 +2600,7 @@
   "name": "mut-json-stringify-replacer-local",
   "source": "function save() {\n  const state = { count: 0 };\n  return JSON.stringify(state, (key, value) => { if (key === \"\") { value.count += 1; } return value; });\n}\n",
   "findings": [
+   "3:UnknownEffect: function save(): The function save() mutates value with unknown ownership, an unknown effect.",
    "3:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() mutates argument value, an implicit output."
   ]
  },
@@ -2772,9 +2787,13 @@
   "source": "function outer() {\n  const values = [0];\n  const add = () => { values[0] = 5; };\n  [1, 2].forEach(add);\n  const first = () => values[0];\n  const second = () => values[1];\n  return first() + second();\n}\n",
   "findings": [
    "3:ImplicitOutput: arrow function add(): The arrow function add() writes values, an implicit output.",
-   "5:ImplicitInput: arrow function first(): The arrow function first() reads values, an implicit input.",
-   "6:ImplicitInput: arrow function second(): The arrow function second() reads values, an implicit input."
-  ]
+   "5:ImplicitInput: arrow function first(): The arrow function first() reads values, an implicit input."
+  ],
+  "expectationReview": {
+   "sourceSha256": "6fdf5aa5643f2e25e56480f5d1b7812b07c910fa30f39f3a30ec21fafc862535",
+   "reason": "The callback writes slot 0, so first observes captured mutable slot 0. No operation changes slot 1 or lets values escape. second always reads absent slot 1 and has no implicit input under precise slot provenance.",
+   "runtimeWitness": "strict compilation and runtime observation passed; immutable original and witness receipts retained in explicitness completion audit"
+  }
  },
  {
   "name": "mut-captured-truncate-callback",
@@ -2789,10 +2808,13 @@
   "name": "mut-captured-truncate-to-one-callback",
   "source": "function outer() {\n  const values = [0];\n  const add = () => { values.length = 1; };\n  [1, 2].forEach(add);\n  const first = () => values[0];\n  const second = () => values[1];\n  return first() + second();\n}\n",
   "findings": [
-   "3:ImplicitOutput: arrow function add(): The arrow function add() writes values, an implicit output.",
-   "5:ImplicitInput: arrow function first(): The arrow function first() reads values, an implicit input.",
-   "6:ImplicitInput: arrow function second(): The arrow function second() reads values, an implicit input."
-  ]
+   "3:ImplicitOutput: arrow function add(): The arrow function add() writes values, an implicit output."
+  ],
+  "expectationReview": {
+   "sourceSha256": "2ce7edc7d5c68522d49dfbb60e86358ad370af40e4339a6fff4e7157832564be",
+   "reason": "The only write sets length to 1 on an array initially of length 1. No operation replaces slot 0, inserts slot 1, or escapes the array. Neither selected slot is mutable under the closed precise model. The callback still owns a captured output operation.",
+   "runtimeWitness": "strict compilation and runtime observation passed; immutable original and witness receipts retained in explicitness completion audit"
+  }
  },
  {
   "name": "mut-captured-spread-literal",
@@ -2842,31 +2864,41 @@
   "source": "function outer(index: number) {\n  const values = [0];\n  const other = [0];\n  function add() { other.push(1); values.push(2); }\n  function read0() { return values[0]; }\n  function read1() { return values[1]; }\n  function read2() { return values[2]; }\n  function read3() { return values[3]; }\n  add();\n  return [read0(), read1(), read2(), read3()];\n}\n",
   "findings": [
    "4:ImplicitOutput: function add(): The function add() writes other, an implicit output.",
-   "6:ImplicitInput: function read1(): The function read1() reads values, an implicit input.",
-   "7:ImplicitInput: function read2(): The function read2() reads values, an implicit input.",
-   "8:ImplicitInput: function read3(): The function read3() reads values, an implicit input."
-  ]
+   "6:ImplicitInput: function read1(): The function read1() reads values, an implicit input."
+  ],
+  "expectationReview": {
+   "sourceSha256": "4a51425b7cb5e6484c37c3e27aab6f9f18def116cce61346ce913d31b645a255",
+   "reason": "add appends exactly once to values, at slot 1. read1 can observe that write. Slots 0, 2 and 3 remain unchanged and private. The separate other append must not corrupt values' append position.",
+   "runtimeWitness": "strict compilation and runtime observation passed; immutable original and witness receipts retained in explicitness completion audit"
+  }
  },
  {
   "name": "mut-e1-while-other-after",
   "source": "function outer(index: number) {\n  const values = [0];\n  const other = [0];\n  function add() { let step = 0; while (step < index) { values.push(step); other[0] = step; step += 1; } }\n  function read0() { return values[0]; }\n  function read1() { return values[1]; }\n  function read2() { return values[2]; }\n  function read3() { return values[3]; }\n  add();\n  return [read0(), read1(), read2(), read3()];\n}\n",
   "findings": [
    "4:ImplicitOutput: function add(): The function add() writes values, an implicit output.",
-   "5:ImplicitInput: function read0(): The function read0() reads values, an implicit input.",
    "6:ImplicitInput: function read1(): The function read1() reads values, an implicit input.",
    "7:ImplicitInput: function read2(): The function read2() reads values, an implicit input.",
    "8:ImplicitInput: function read3(): The function read3() reads values, an implicit input."
-  ]
+  ],
+  "expectationReview": {
+   "sourceSha256": "ecce12b53476b333bca61995324b342921b7fee91541566b282548431012fea6",
+   "reason": "The loop may append any finite number of elements after slot 0. Slots 1 through 3 can change; slot 0 cannot. Writing other[0] does not overwrite values[0].",
+   "runtimeWitness": "strict compilation and runtime observation passed; immutable original and witness receipts retained in explicitness completion audit"
+  }
  },
  {
   "name": "mut-e1-gen-next-bound",
   "source": "function outer(index: number) {\n  const values = [0];\n  function* gen() { values.push(1); yield 1; }\n  function read0() { return values[0]; }\n  function read1() { return values[1]; }\n  const it = gen();\n  const step = it.next.bind(it);\n  step();\n  return [read0(), read1()];\n}\n",
   "findings": [
    "3:ImplicitOutput: function gen(): The function gen() writes values, an implicit output.",
-   "4:ImplicitInput: function read0(): The function read0() reads values, an implicit input.",
-   "5:ImplicitInput: function read1(): The function read1() reads values, an implicit input.",
-   "7:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
-  ]
+   "5:ImplicitInput: function read1(): The function read1() reads values, an implicit input."
+  ],
+  "expectationReview": {
+   "sourceSha256": "388a34951865cf8aa4d4638c9af25d3e654aa4b60edd103fbaa572b19f0c1922",
+   "reason": "Generator creation is cold. A bound next, when supported, executes its body at 8 and updates only slot 1 of private values. read0 remains stable. Unknown for unsupported next/bind is permitted, but it does not itself prove slot 0 mutable.",
+   "runtimeWitness": "strict compilation and runtime observation passed; immutable original and witness receipts retained in explicitness completion audit"
+  }
  },
  {
   "name": "mut-e1-x3",
@@ -3069,16 +3101,22 @@
  {
   "name": "mut-e2-made-array",
   "source": "function outer() {\n  const values = make();\n  function read() { return values[2] ?? -1; }\n  values.push(1);\n  return read();\n}\nfunction make() { return [0]; }\n",
-  "findings": [
-   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
-  ]
+  "findings": [],
+  "expectationReview": {
+   "sourceSha256": "2164be1b1a95e7c24417a9fa6f25779c79926f76646335c01e362a5f6d315ab1",
+   "reason": "make returns a fresh [0]. A single push writes slot 1. Captured slot 2 remains absent, private, and unchanged.",
+   "runtimeWitness": "strict compilation and runtime observation passed; immutable original and witness receipts retained in explicitness completion audit"
+  }
  },
  {
   "name": "mut-e2-index-write-at-2",
   "source": "function outer() {\n  const values = [0];\n  function read() { return values[4] ?? -1; }\n  values.push(1);\n  values[2] = 2;\n  values.push(3);\n  return read();\n}\n",
-  "findings": [
-   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
-  ]
+  "findings": [],
+  "expectationReview": {
+   "sourceSha256": "e47b6d8cfc26f7c038a8dd61098348b33302ce12eabba8b79a7d233157835ee0",
+   "reason": "push writes slot 1, explicit write fills slot 2, and the later push fills slot 3. Slot 4 remains absent and private.",
+   "runtimeWitness": "strict compilation and runtime observation passed; immutable original and witness receipts retained in explicitness completion audit"
+  }
  },
  {
   "name": "mut-e2-cond-push",
@@ -3091,9 +3129,13 @@
   "name": "mut-e2-helper-early-return",
   "source": "function outer() {\n  const values = [0];\n  function read() { return values[3] ?? -1; }\n  function add(f: boolean) { if (f) { return; } values.push(1); }\n  add(true);\n  values.push(2);\n  return read();\n}\n",
   "findings": [
-   "3:ImplicitInput: function read(): The function read() reads values, an implicit input.",
    "4:ImplicitOutput: function add(): The function add() writes values, an implicit output."
-  ]
+  ],
+  "expectationReview": {
+   "sourceSha256": "7083c60aecd675298a757a8f49cf98e6bb12f5c6c5df9c7194e16ec20f3a6e29",
+   "reason": "Nonliteral parameter control flow joins the early return and one append. Combined with the direct append, at most slots 1 and 2 are added. Slot 3 remains unchanged. add still owns its possible captured output.",
+   "runtimeWitness": "strict compilation and runtime observation passed; immutable original and witness receipts retained in explicitness completion audit"
+  }
  },
  {
   "name": "mut-e2-helper-nested-return",
@@ -3117,9 +3159,12 @@
  {
   "name": "mut-e2-holder-assign",
   "source": "function outer() {\n  const values = [0];\n  const state = { values };\n  function read() { return values[0] ?? -1; }\n  read();\n  state.values = values;\n  values.push(1);\n  return read();\n}\n",
-  "findings": [
-   "4:ImplicitInput: function read(): The function read() reads values, an implicit input."
-  ]
+  "findings": [],
+  "expectationReview": {
+   "sourceSha256": "c517e0ce582c594e4bea1146572cc7d245918ea22cbadbda8e0f9fc077df9efb",
+   "reason": "Assigning the same array reference to a private holder field does not escape or mutate values slot 0. The append changes slot 1 only. Both read calls observe the same slot 0.",
+   "runtimeWitness": "strict compilation and runtime observation passed; immutable original and witness receipts retained in explicitness completion audit"
+  }
  },
  {
   "name": "mut-e2-paren-length-index",
@@ -3136,9 +3181,12 @@
  {
   "name": "mut-e2-named-prop",
   "source": "function outer() {\n  const values: number[] & { foo?: number } = [0];\n  function read() { return values[2] ?? -1; }\n  values.foo = 3;\n  values.push(4);\n  return read();\n}\n",
-  "findings": [
-   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
-  ]
+  "findings": [],
+  "expectationReview": {
+   "sourceSha256": "bc3ab5db3abf241c2ea31d3c37bfc75a6e39e9318c9cb96a8fd9503f78286c42",
+   "reason": "A named foo property does not change array length. The single push changes slot 1. Slot 2 remains absent.",
+   "runtimeWitness": "strict compilation and runtime observation passed; immutable original and witness receipts retained in explicitness completion audit"
+  }
  },
  {
   "name": "mut-e2-nonnull-length-index",
@@ -3159,7 +3207,7 @@
   "source": "export function change(items: number[]) {\n  const local = [items];\n  const add = () => { local[0].push(1); };\n  add();\n}\n",
   "findings": [
    "3:ImplicitOutput: arrow function add(): The arrow function add() writes local, an implicit output.",
-   "4:ImplicitOutput: function change(): The function change() mutates caller-owned value local, an implicit output."
+   "4:ImplicitOutput: function change(): The function change() mutates argument items, an implicit output."
   ]
  },
  {
@@ -3167,7 +3215,7 @@
   "source": "export function change(items: number[]) {\n  const holder = { items };\n  function add() { const { items: list } = holder; list.push(1); }\n  add();\n}\n",
   "findings": [
    "3:ImplicitOutput: function add(): The function add() mutates caller-owned value list, an implicit output.",
-   "4:ImplicitOutput: function change(): The function change() mutates caller-owned value holder, an implicit output."
+   "4:ImplicitOutput: function change(): The function change() mutates argument items, an implicit output."
   ]
  },
  {
@@ -3294,17 +3342,14 @@
    "3:ImplicitInput: function make(): The function make() calls Math.random(), an implicit input.",
    "4:ImplicitInput: arrow function anonymous(): The arrow function anonymous() reads count, an implicit input.",
    "4:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes count, an implicit output.",
-   "7:ImplicitInput: function call(): The function call() reads count, an implicit input.",
-   "7:ImplicitOutput: function call(): The function call() writes count, an implicit output.",
-   "7:UnknownEffect: function call(): The function call() calls overridable method, an unknown effect."
+   "7:ImplicitInput: function call(): The function call() calls Math.random(), an implicit input.",
+   "7:ImplicitOutput: function call(): The function call() writes count, an implicit output."
   ]
  },
  {
   "name": "mut-e2-no-return-push",
   "source": "function none(): number[] { throw new Error(\"none\"); }\nexport function change() {\n  none().push(1);\n}\n",
-  "findings": [
-   "3:UnknownEffect: function change(): The function change() mutates value with unknown ownership, an unknown effect."
-  ]
+  "findings": []
  },
  {
   "name": "mut-e3-self-captured-push",
@@ -3320,10 +3365,14 @@
   "source": "const store: number[] = [];\nfunction outer(list: number[]) {\n  const alias = list;\n  const add = () => { alias.push(1); };\n  add();\n}\nfunction caller() {\n  outer(store);\n}\n",
   "findings": [
    "4:ImplicitOutput: arrow function add(): The arrow function add() writes alias, an implicit output.",
-   "5:ImplicitOutput: function outer(): The function outer() mutates caller-owned value alias, an implicit output.",
-   "8:ImplicitOutput: function caller(): The function caller() mutates caller-owned value store, an implicit output.",
-   "8:ImplicitInput: function caller(): The function caller() reads store, an implicit input."
-  ]
+   "5:ImplicitOutput: function outer(): The function outer() mutates argument list, an implicit output.",
+   "8:ImplicitOutput: function caller(): The function caller() mutates caller-owned value store, an implicit output."
+  ],
+  "expectationReview": {
+   "sourceSha256": "017b14d282f0021d7d4a934400b69614c17b4d412dac52ec937e5eeabb954820",
+   "reason": "The closure mutates its captured argument alias. outer transfers that parameter write at 5 and caller transfers it to store at 8. Passing stable store into an append-only known helper does not read its contents.",
+   "runtimeWitness": "strict compilation and runtime observation passed; immutable original and witness receipts retained in explicitness completion audit"
+  }
  },
  {
   "name": "mut-e3-receiver-helper",
@@ -3338,10 +3387,14 @@
   "source": "const store: number[] = [];\nfunction run(callback: (values: number[]) => void) {\n  callback(store);\n}\nfunction caller() {\n  run((values) => { values.push(1); });\n}\n",
   "findings": [
    "3:UnknownEffect: function run(): The function run() calls unresolved callable, an unknown effect.",
-   "6:ImplicitInput: function caller(): The function caller() reads store, an implicit input.",
    "6:ImplicitOutput: function caller(): The function caller() mutates caller-owned callback argument, an implicit output.",
    "6:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() mutates argument values, an implicit output."
-  ]
+  ],
+  "expectationReview": {
+   "sourceSha256": "a2107f97be2d4a2b5d54bca5b2adf7dd0bb830a5b42221bc6e695547a457e739",
+   "reason": "run owns unresolved callback invocation at 3. caller supplies a known append-only callback; origin substitution proves output at 6. Forwarding stable store does not observe its contents. The callback owns its parameter mutation.",
+   "runtimeWitness": "strict compilation and runtime observation passed; immutable original and witness receipts retained in explicitness completion audit"
+  }
  },
  {
   "name": "mut-e3-getter-read",
@@ -3501,26 +3554,32 @@
   "source": "const log: number[] = [];\nfunction* gen() {\n  log.push(1);\n  yield 1;\n}\nexport function run() {\n  var a = gen();\n  var b = a;\n  var a = b;\n  for (const x of a) {\n    void x;\n  }\n}\n",
   "findings": [
    "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
-   "10:ImplicitOutput: function run(): The function run() writes log, an implicit output.",
-   "10:UnknownEffect: function run(): The function run() uses unresolved iterate protocol, an unknown effect."
+   "10:ImplicitOutput: function run(): The function run() writes log, an implicit output."
   ]
  },
  {
   "name": "mut-e3-gen-yield-plain",
   "source": "const log: number[] = [];\nfunction* gen() {\n  log.push(1);\n  yield 1;\n}\nfunction* outer() {\n  yield gen();\n}\nexport function run() {\n  for (const x of outer()) {\n    void x;\n  }\n}\n",
   "findings": [
-   "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
-   "7:ImplicitOutput: function outer(): The function outer() writes log, an implicit output.",
-   "10:ImplicitOutput: function run(): The function run() writes log, an implicit output."
-  ]
+   "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output."
+  ],
+  "expectationReview": {
+   "sourceSha256": "6378471f80771b23bc503ba8430d06e5e204833cfd820d7fe91b2461691d63bf",
+   "reason": "outer yields a cold generator object as a value. yield without star does not iterate that object. run iterates outer only and discards each yielded object. Only gen owns output.",
+   "runtimeWitness": "strict compilation and runtime observation passed; immutable original and witness receipts retained in explicitness completion audit"
+  }
  },
  {
   "name": "mut-e3-gen-passed-local",
   "source": "const log: number[] = [];\nfunction* gen() {\n  log.push(1);\n  yield 1;\n}\nfunction keep(value: unknown) {\n  return value === undefined;\n}\nexport function run() {\n  return keep(gen());\n}\n",
   "findings": [
-   "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
-   "10:ImplicitOutput: function run(): The function run() writes log, an implicit output."
-  ]
+   "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output."
+  ],
+  "expectationReview": {
+   "sourceSha256": "65983b2784974d0b9b7c63c8e402f2b88a00f2901d12c0b7a7478d18c6b1b4a2",
+   "reason": "keep only compares the generator object with undefined. Neither argument forwarding nor identity comparison executes a generator body. Only gen owns output.",
+   "runtimeWitness": "strict compilation and runtime observation passed; immutable original and witness receipts retained in explicitness completion audit"
+  }
  },
  {
   "name": "mut-e3-gen-consumed-param",
@@ -3528,7 +3587,6 @@
   "findings": [
    "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
    "7:UnknownEffect: function consume(): The function consume() uses unresolved iterate protocol, an unknown effect.",
-   "12:UnknownEffect: function run(): The function run() uses unresolved iterate protocol, an unknown effect.",
    "12:ImplicitOutput: function run(): The function run() writes log, an implicit output."
   ]
  },
@@ -3552,7 +3610,6 @@
   "source": "const log: number[] = [];\nfunction* gen() {\n  log.push(1);\n  yield 1;\n}\nfunction plain() {\n  return [1];\n}\nexport function run(flag: boolean) {\n  const f = flag ? gen : plain;\n  for (const x of f()) {\n    void x;\n  }\n}\n",
   "findings": [
    "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
-   "11:UnknownEffect: function run(): The function run() uses unresolved iterate protocol, an unknown effect.",
    "11:ImplicitOutput: function run(): The function run() writes log, an implicit output."
   ]
  },
@@ -3566,9 +3623,13 @@
   "source": "const log: number[] = [];\nfunction* gen() {\n  log.push(1);\n  yield 1;\n}\nexport function run(other: Iterable<number>) {\n  let it: Iterable<number> = gen();\n  it = other;\n  for (const x of it) {\n    void x;\n  }\n}\n",
   "findings": [
    "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
-   "9:ImplicitOutput: function run(): The function run() writes log, an implicit output.",
    "9:UnknownEffect: function run(): The function run() uses unresolved iterate protocol, an unknown effect."
-  ]
+  ],
+  "expectationReview": {
+   "sourceSha256": "d8975efdfea04874f8555b1a5c52b198fd69478cfa27052b19cd0bdc60580150",
+   "reason": "The unconditional assignment replaces gen with external other before iteration. gen is never forced by run. The external iterable remains unresolved at 9. No generator output transfers there.",
+   "runtimeWitness": "strict compilation and runtime observation passed; immutable original and witness receipts retained in explicitness completion audit"
+  }
  },
  {
   "name": "mut-e3-await-unknown-call",
@@ -3643,8 +3704,7 @@
   "name": "mut-e3-await-generator",
   "source": "const log: number[] = [];\nfunction* gen() {\n  log.push(1);\n  yield 1;\n}\nexport async function run() {\n  return await gen();\n}\n",
   "findings": [
-   "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
-   "7:UnknownEffect: function run(): The function run() uses unresolved await protocol, an unknown effect."
+   "3:ImplicitOutput: function gen(): The function gen() writes log, an implicit output."
   ]
  },
  {
@@ -3715,7 +3775,7 @@
   "source": "const log: number[] = [];\nexport function touch() {\n  log.push(1);\n}\nexport function run() {\n  [touch].forEach((f) => f());\n}\n",
   "findings": [
    "3:ImplicitOutput: function touch(): The function touch() writes log, an implicit output.",
-   "6:UnknownEffect: function run(): The function run() calls unresolved callable, an unknown effect.",
+   "6:ImplicitOutput: function run(): The function run() writes log, an implicit output.",
    "6:UnknownEffect: arrow function anonymous(): The arrow function anonymous() calls unresolved callable, an unknown effect."
   ]
  },
@@ -3758,9 +3818,13 @@
   "source": "const log: number[] = [];\nexport function touch() {\n  log.push(1);\n}\nfunction keep(value: unknown) {\n  return value === undefined;\n}\nexport function run(make: () => void) {\n  return keep(log) && make();\n}\n",
   "findings": [
    "3:ImplicitOutput: function touch(): The function touch() writes log, an implicit output.",
-   "9:ImplicitInput: function run(): The function run() reads log, an implicit input.",
    "9:UnknownEffect: function run(): The function run() calls unresolved callable, an unknown effect."
-  ]
+  ],
+  "expectationReview": {
+   "sourceSha256": "7eb84d5cf0da0734961a3e5c7e28ccad8979ba2f5f7cbc0089b4806a51ff6d81",
+   "reason": "keep compares the stable log reference with undefined and reads no array contents. make remains unresolved at 9. touch retains its direct output.",
+   "runtimeWitness": "strict compilation and runtime observation passed; immutable original and witness receipts retained in explicitness completion audit"
+  }
  },
  {
   "name": "mut-s1-scalar-param",
@@ -4244,7 +4308,7 @@
    "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
    "5:ImplicitInput: function run(): The function run() reads count, an implicit input.",
    "5:ImplicitOutput: function run(): The function run() writes count, an implicit output.",
-   "5:UnknownEffect: function run(): The function run() calls overridable method, an unknown effect."
+   "5:UnknownEffect: function run(): The function run() calls unresolved callable, an unknown effect."
   ]
  },
  {
@@ -4325,7 +4389,7 @@
   "name": "mut-s2-new-branch-callee",
   "source": "class Factory { make() { return 1; } }\nfunction pure() { return 1; }\nexport function run(flag: boolean) {\n  const action: any = flag ? pure : new Factory();\n  return action();\n}\n",
   "findings": [
-   "5:UnknownEffect: function run(): The function run() calls overridable method, an unknown effect."
+   "5:UnknownEffect: function run(): The function run() calls unresolved callable, an unknown effect."
   ]
  },
  {
@@ -4340,14 +4404,14 @@
   "name": "mut-s2-declared-branch-callee",
   "source": "declare function external(): number;\nfunction pure() { return 1; }\nexport function run(flag: boolean) {\n  const action = flag ? external : pure;\n  return action();\n}\n",
   "findings": [
-   "5:UnknownEffect: function run(): The function run() calls overridable method, an unknown effect."
+   "5:UnknownEffect: function run(): The function run() calls unresolved callable, an unknown effect."
   ]
  },
  {
   "name": "mut-s2-parameter-branch-callee",
   "source": "function pure() { return 1; }\nexport function run(flag: boolean, action = () => 1) {\n  const chosen = flag ? action : pure;\n  return chosen();\n}\n",
   "findings": [
-   "4:UnknownEffect: function run(): The function run() calls overridable method, an unknown effect."
+   "4:UnknownEffect: function run(): The function run() calls unresolved callable, an unknown effect."
   ]
  },
  {
@@ -4498,11 +4562,13 @@
    "2:ImplicitInput: function bump(): The function bump() reads count, an implicit input.",
    "2:ImplicitOutput: function bump(): The function bump() writes count, an implicit output.",
    "3:ImplicitInput: method Other.run(): The method Other.run() reads count, an implicit input.",
-   "3:ImplicitOutput: method Other.run(): The method Other.run() writes count, an implicit output.",
-   "6:ImplicitInput: function make(): The function make() reads count, an implicit input.",
-   "6:ImplicitOutput: function make(): The function make() writes count, an implicit output.",
-   "6:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
-  ]
+   "3:ImplicitOutput: method Other.run(): The method Other.run() writes count, an implicit output."
+  ],
+  "expectationReview": {
+   "sourceSha256": "00d6bcabef7d5f6a9d411264ececc06fccb30c7216d556f98cb9735c37e9adb0",
+   "reason": "The unconditional assignment installs a fresh object whose run returns 1 before the call. Other.run is a different owner and is never called. Preserve bump and Other.run effects, but make has no count read or write. Unknown can be removed only under complete rebinding/member resolution.",
+   "runtimeWitness": "strict compilation and runtime observation passed; immutable original and witness receipts retained in explicitness completion audit"
+  }
  },
  {
   "name": "mut-s2-unassigned-binding",
@@ -4518,16 +4584,12 @@
  {
   "name": "mut-s2-escaped-object",
   "source": "function register(value: object) { return value; }\nexport function make() {\n  const api = { run() { return 1; } };\n  register(api);\n  return api.run();\n}\n",
-  "findings": [
-   "5:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
-  ]
+  "findings": []
  },
  {
   "name": "mut-s2-alias-cycle",
   "source": "export function make() {\n  var api = { run() { return 1; } };\n  var alias = api;\n  var api = alias;\n  return api.run();\n}\n",
-  "findings": [
-   "5:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
-  ]
+  "findings": []
  },
  {
   "name": "mut-s2-exported-object",
@@ -4545,9 +4607,7 @@
  {
   "name": "mut-s2-escaped-alias",
   "source": "function register(value: object) { return value; }\nexport function make() {\n  const api = { run() { return 1; } };\n  const same = api;\n  register(same);\n  return api.run();\n}\n",
-  "findings": [
-   "6:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
-  ]
+  "findings": []
  },
  {
   "name": "mut-s2-destructured-object",
@@ -4570,9 +4630,7 @@
  {
   "name": "mut-s2-logical-assigned-object",
   "source": "export function make() {\n  let api = { run() { return 1; } };\n  api ||= { run() { return 2; } };\n  return api.run();\n}\n",
-  "findings": [
-   "4:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
-  ]
+  "findings": []
  },
  {
   "name": "mut-s2-object-as-key",
@@ -4584,9 +4642,7 @@
  {
   "name": "mut-s2-computed-member-write",
   "source": "export function make(name: string) {\n  const api: any = { run() { return 1; } };\n  api[name] = () => 2;\n  return api.run();\n}\n",
-  "findings": [
-   "4:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
-  ]
+  "findings": []
  },
  {
   "name": "mut-s2-computed-member-read",
@@ -4685,9 +4741,7 @@
  {
   "name": "mut-s2-reassigned-parameter-callee",
   "source": "function pure() { return 1; }\nexport function make(action: () => number) {\n  action = pure;\n  return action();\n}\n",
-  "findings": [
-   "4:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
-  ]
+  "findings": []
  },
  {
   "name": "mut-s2-if-true-else-call",
@@ -4711,16 +4765,12 @@
  {
   "name": "mut-s2-redeclared-parameter-object",
   "source": "export function make(api: { run(): number }) {\n  // @ts-ignore\n  var api = { run() { return 1; } };\n  return api.run();\n}\n",
-  "findings": [
-   "4:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
-  ]
+  "findings": []
  },
  {
   "name": "mut-s2-redeclared-parameter-callee",
   "source": "function pure() { return 1; }\nexport function make(action: () => number) {\n  var action = pure;\n  return action();\n}\n",
-  "findings": [
-   "4:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
-  ]
+  "findings": []
  },
  {
   "name": "mut-s2-two-class-binding-other",
@@ -4731,9 +4781,7 @@
    "5:ImplicitInput: method Third.run(): The method Third.run() reads count, an implicit input.",
    "5:ImplicitOutput: method Third.run(): The method Third.run() writes count, an implicit output.",
    "7:ImplicitOutput: function choose(): The function choose() writes Kind, an implicit output.",
-   "9:ImplicitInput: function make(): The function make() reads count, an implicit input.",
-   "9:ImplicitOutput: function make(): The function make() writes count, an implicit output.",
-   "9:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect.",
+   "9:ImplicitInput: function make(): The function make() reads Kind, an implicit input.",
    "11:ImplicitInput: function other(): The function other() reads count, an implicit input.",
    "11:ImplicitOutput: function other(): The function other() writes count, an implicit output."
   ]
@@ -4754,9 +4802,7 @@
  {
   "name": "mut-s2-escaped-alias-first-binding",
   "source": "const first = 0;\nfunction register(value: object) { return value; }\nexport function make() {\n  const api = { run() { return 1; } };\n  const same = api;\n  register(same);\n  return api.run();\n}\n",
-  "findings": [
-   "7:UnknownEffect: function make(): The function make() calls overridable method, an unknown effect."
-  ]
+  "findings": []
  },
  {
   "name": "mut-s2-object-as-index",
@@ -4810,7 +4856,6 @@
   "name": "mut-s3-nullish-assign",
   "source": "const store: number[] = [];\nexport function fill() {\n  let target: number[] | undefined;\n  target ??= store;\n  target.push(1);\n  return 0;\n}\n",
   "findings": [
-   "4:ImplicitInput: function fill(): The function fill() reads store, an implicit input.",
    "5:ImplicitOutput: function fill(): The function fill() mutates caller-owned value target, an implicit output."
   ]
  },
@@ -4818,17 +4863,25 @@
   "name": "mut-s3-or-assign",
   "source": "const store: number[] = [];\nexport function fill(start: number[] | undefined) {\n  let target = start;\n  target ||= store;\n  target.push(1);\n  return 0;\n}\n",
   "findings": [
-   "4:ImplicitInput: function fill(): The function fill() reads store, an implicit input.",
    "5:ImplicitOutput: function fill(): The function fill() mutates caller-owned value target, an implicit output."
-  ]
+  ],
+  "expectationReview": {
+   "sourceSha256": "849677b983a8030ab733a2d6c3273da9e5b652141b5cb00688124f96303f40e4",
+   "reason": "Logical assignment forwards store's stable reference. The later push mutates the selected external array. No contents read occurs at 4.",
+   "runtimeWitness": "strict compilation and runtime observation passed; immutable original and witness receipts retained in explicitness completion audit"
+  }
  },
  {
   "name": "mut-s3-and-assign",
   "source": "const store: number[] = [];\nexport function fill(start: number[] | undefined) {\n  let target: number[] | undefined = [];\n  target &&= store;\n  target.push(1);\n  return 0;\n}\n",
   "findings": [
-   "4:ImplicitInput: function fill(): The function fill() reads store, an implicit input.",
    "5:ImplicitOutput: function fill(): The function fill() mutates caller-owned value target, an implicit output."
-  ]
+  ],
+  "expectationReview": {
+   "sourceSha256": "911e4a048f3ffcc99d3c04540946cdf017b694bec2373d589ceb7e3292338708",
+   "reason": "Logical assignment forwards store's stable reference. The later push mutates it. No contents read occurs at 4.",
+   "runtimeWitness": "strict compilation and runtime observation passed; immutable original and witness receipts retained in explicitness completion audit"
+  }
  },
  {
   "name": "mut-s3-object-pattern-rename-assign",
@@ -4849,7 +4902,7 @@
   "name": "mut-s3-for-of-expression-target",
   "source": "const store: number[] = [];\nexport function fill() {\n  let target: number[] = [];\n  for (target of [store]) {\n    target.push(1);\n  }\n  return 0;\n}\n",
   "findings": [
-   "5:UnknownEffect: function fill(): The function fill() mutates value with unknown ownership, an unknown effect."
+   "5:ImplicitOutput: function fill(): The function fill() mutates caller-owned value target, an implicit output."
   ]
  },
  {
@@ -4959,9 +5012,7 @@
  {
   "name": "mut-s3-alias-cycle",
   "source": "export function make(flag: boolean) {\n  let left = [1];\n  let right = [2];\n  while (flag) {\n    left = right;\n    right = left;\n  }\n  left.push(3);\n  return left;\n}\n",
-  "findings": [
-   "8:UnknownEffect: function make(): The function make() mutates value with unknown ownership, an unknown effect."
-  ]
+  "findings": []
  },
  {
   "name": "mut-s3-var-redeclares-parameter",
@@ -5253,9 +5304,13 @@
   "source": "const log: number[] = [];\nfunction* gen() { log.push(1); yield 1; }\nfunction* outer() {\n  yield gen();\n}\nexport function run() {\n  for (const x of outer()) for (const y of x) void y;\n}\n",
   "findings": [
    "2:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
-   "4:ImplicitOutput: function outer(): The function outer() writes log, an implicit output.",
    "7:ImplicitOutput: function run(): The function run() writes log, an implicit output."
-  ]
+  ],
+  "expectationReview": {
+   "sourceSha256": "bd02d7792a05c3a6ce3a60db602c56193606735dfc0acbb226ac08d034c105ce",
+   "reason": "Independent library adjudication rejects an output at cold iterator creation. Exact runtime observes log length 0 after outer.next(), then 1 after run consumes the yielded iterator.",
+   "runtimeWitness": ".audit/explicitness-completion/typescript/r15/resume-serial/adjudicated-library-witness-results.json"
+  }
  },
  {
   "name": "generator-returned-then-iterated",
@@ -5299,7 +5354,6 @@
   "source": "const log: number[] = [];\nfunction* gen() { log.push(1); yield 1; }\nexport async function run() {\n  return new Set(await gen()).size;\n}\n",
   "findings": [
    "2:ImplicitOutput: function gen(): The function gen() writes log, an implicit output.",
-   "4:UnknownEffect: function run(): The function run() uses unresolved iterate protocol, an unknown effect.",
    "4:ImplicitOutput: function run(): The function run() writes log, an implicit output."
   ]
  },

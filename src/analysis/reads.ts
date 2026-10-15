@@ -2,7 +2,8 @@ import ts from "typescript";
 import { outerExpression, unwrapExpression } from "../ast/expressions";
 import { arrayIndexForSlot } from "./storage";
 
-export type ReadSite = { readonly path: readonly string[]; readonly reference: boolean };
+export type ReadMode = "reference" | "keys" | "slots" | "deep";
+export type ReadSite = { readonly path: readonly string[]; readonly mode: ReadMode };
 
 export type ArgumentSites = (
   site: ts.CallExpression | ts.AccessExpression, index: number | "this",
@@ -11,9 +12,9 @@ export type ArgumentSites = (
 export function readSites(node: ts.Expression, argumentSites: ArgumentSites): ReadSite[] {
   const { path, expression } = selectedRead(node);
   if (path.length > 0 && isAssignedTarget(expression)) {
-    return [{ path: path.slice(0, -1), reference: true }];
+    return [{ path: path.slice(0, -1), mode: "reference" }];
   }
-  return consumerSites(expression, argumentSites).map((site) => ({ path: [...path, ...site.path], reference: site.reference }));
+  return consumerSites(expression, argumentSites).map((site) => ({ path: [...path, ...site.path], mode: site.mode }));
 }
 
 export function writeAffectsRead(site: ReadSite, prefix: readonly string[], slot: string | undefined): boolean {
@@ -21,7 +22,7 @@ export function writeAffectsRead(site: ReadSite, prefix: readonly string[], slot
     return false;
   }
   if (site.path.length <= prefix.length) {
-    return !site.reference;
+    return !(site.mode === "reference");
   }
   return slot === undefined || slotOverlaps(site.path.slice(prefix.length), slot);
 }
@@ -83,8 +84,8 @@ function isAssignedTarget(expression: ts.Expression): boolean {
     ts.isDeleteExpression(parent);
 }
 
-const CONTENTS: ReadSite[] = [{ path: [], reference: false }];
-const REFERENCE: ReadSite[] = [{ path: [], reference: true }];
+const CONTENTS: ReadSite[] = [{ path: [], mode: "slots" }];
+const REFERENCE: ReadSite[] = [{ path: [], mode: "reference" }];
 
 function consumerSites(expression: ts.Expression, argumentSites: ArgumentSites): ReadSite[] {
   const parent = expression.parent;
@@ -92,8 +93,8 @@ function consumerSites(expression: ts.Expression, argumentSites: ArgumentSites):
     return [...REFERENCE, ...literalMemberSites(parent, expression, argumentSites)];
   }
   if (ts.isSpreadElement(parent) || ts.isSpreadAssignment(parent)) {
-    return ts.isCallExpression(parent.parent) || ts.isNewExpression(parent.parent) ? [{ path: ["*"], reference: false }]
-      : readSites(parent.parent, argumentSites).map((site) => ({ path: ["*", ...site.path.slice(1)], reference: site.reference }));
+    return ts.isCallExpression(parent.parent) || ts.isNewExpression(parent.parent) ? [{ path: ["*"], mode: "slots" }]
+      : readSites(parent.parent, argumentSites).map((site) => ({ path: ["*", ...site.path.slice(1)], mode: site.mode }));
   }
   const name = initializedName(parent, expression);
   if (name) {
@@ -121,13 +122,11 @@ function holdsReference(parent: ts.Node, expression: ts.Expression): boolean {
 
 function literalMemberSites(parent: ts.Node, expression: ts.Expression, argumentSites: ArgumentSites): ReadSite[] {
   const held = heldMember(parent, expression);
-  // A nested literal only receives a contents read through a demanded member of the literal holding it, and that read
-  // is deep, so it reads its members' contents too. A literal's own consumer reads only its slots, as a construction does.
-  return held ? readSites(held.literal, argumentSites).flatMap((site) => {
+  return held ? readSites(held.literal, argumentSites).flatMap((site): ReadSite[] => {
     if (site.path.length === 0) {
-      return !site.reference && heldMember(held.literal.parent, held.literal) ? CONTENTS : [];
+      return site.mode === "deep" ? [{ path: [], mode: "deep" }] : [];
     }
-    return pathsOverlap(site.path.slice(0, 1), [held.slot]) ? [{ path: site.path.slice(1), reference: site.reference }] : [];
+    return slotOverlaps(site.path, held.slot) ? [{ path: site.path.slice(1), mode: site.mode }] : [];
   }) : [];
 }
 
@@ -141,7 +140,8 @@ function heldMember(parent: ts.Node, expression: ts.Expression): { literal: ts.E
 
 function elementSlot(literal: ts.ArrayLiteralExpression, element: ts.Expression): string {
   const index = literal.elements.indexOf(element);
-  return literal.elements.slice(0, index).some(ts.isSpreadElement) ? "*" : `property:${index}`;
+  const prefix = literal.elements.slice(0, index);
+  return prefix.some(ts.isSpreadElement) ? `append:${prefix.filter((element) => !ts.isSpreadElement(element)).length}` : `property:${index}`;
 }
 
 function initializedName(parent: ts.Node, expression: ts.Expression): ts.BindingName | undefined {
@@ -161,7 +161,8 @@ export function receiverCall(expression: ts.Expression): ts.CallExpression | und
 
 function binarySites(parent: ts.BinaryExpression, expression: ts.Expression, argumentSites: ArgumentSites): ReadSite[] {
   const operator = parent.operatorToken.kind;
-  if (operator === ts.SyntaxKind.EqualsToken && parent.right === expression) {
+  if (parent.right === expression && (operator === ts.SyntaxKind.EqualsToken || operator === ts.SyntaxKind.BarBarEqualsToken ||
+      operator === ts.SyntaxKind.AmpersandAmpersandEqualsToken || operator === ts.SyntaxKind.QuestionQuestionEqualsToken)) {
     return assignmentTargetSites(parent.left, argumentSites);
   }
   return operator === ts.SyntaxKind.EqualsEqualsEqualsToken || operator === ts.SyntaxKind.ExclamationEqualsEqualsToken ? REFERENCE : CONTENTS;
@@ -174,7 +175,7 @@ function bindingNameSites(name: ts.BindingName): ReadSite[] {
   if (ts.isObjectBindingPattern(name)) {
     return name.elements.flatMap((element) => {
       const key = element.propertyName ?? element.name;
-      return element.dotDotDotToken ? [{ path: ["*"], reference: true }] : nested(keySlot(key), bindingNameSites(element.name));
+      return element.dotDotDotToken ? [{ path: ["*"], mode: "reference" }] : nested(keySlot(key), bindingNameSites(element.name));
     });
   }
   return name.elements.flatMap((element, index) => ts.isOmittedExpression(element) ? []
@@ -186,10 +187,10 @@ function assignmentTargetSites(target: ts.Expression, argumentSites: ArgumentSit
   if (ts.isObjectLiteralExpression(value)) {
     return value.properties.flatMap((property) => {
       if (ts.isSpreadAssignment(property)) {
-        return [{ path: ["*"], reference: true }];
+        return [{ path: ["*"], mode: "reference" }];
       }
       if (ts.isShorthandPropertyAssignment(property)) {
-        return [{ path: [`property:${property.name.text}`], reference: true }];
+        return [{ path: [`property:${property.name.text}`], mode: "reference" }];
       }
       return ts.isPropertyAssignment(property) ? nested(keySlot(property.name), assignmentTargetSites(defaulted(property.initializer), argumentSites))
         : CONTENTS;
@@ -212,7 +213,7 @@ function defaulted(target: ts.Expression): ts.Expression {
 }
 
 function nested(slot: string, sites: ReadSite[]): ReadSite[] {
-  return sites.map((site) => ({ path: [slot, ...site.path], reference: site.reference }));
+  return sites.map((site) => ({ path: [slot, ...site.path], mode: site.mode }));
 }
 
 function keySlot(key: ts.PropertyName | ts.BindingName): string {

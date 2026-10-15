@@ -6,13 +6,13 @@ import { methodName, outerExpression, unwrapExpression } from "../ast/expression
 import { analyzeScopes, isAmbient, writeTargets } from "../ast/scopes";
 import type { Binding, ScopeModel, Write } from "../ast/scopes";
 import { reachableChildren } from "./control-flow";
-import { bindingAssignments, canReachSite, inside, referenceAssignment, unconditional, type Assignment } from "./assignments";
+import { bindingAssignments, canReachSite, inside, referenceAssignment, unconditional, isShortCircuit, type Assignment } from "./assignments";
 import { callableTargets as resolveTargets, memberTargets, type Dispatch, type Targets } from "./dispatch";
 import { classTargets } from "./shapes";
-import { ambientFlow, isLibraryMethodName, isPureConstructor, iteratedArgument, libraryCall, libraryCallback, movesElements, storesArguments, type LibraryCall, type LibraryStorage } from "./library";
+import { ambientFlow, isLibraryMethodName, isPureConstructor, iteratedArgument, libraryCall, libraryCallback, movesElements, storesArguments, type LibraryCall, type LibraryCallback, type LibraryStorage } from "./library";
 import { protocolExpressions, supportsProtocol } from "./protocols";
 import { standardReceiver } from "./standard-receivers";
-import { readSites, receiverCall, selectedRead, storageSlot, writeAffectsRead, type ReadSite } from "./reads";
+import { readSites, receiverCall, selectedRead, storageSlot, writeAffectsRead, type ReadSite, type ReadMode } from "./reads";
 import {
   baseClassExpression, collectOwners, enclosingClass, explicitConstructor, instanceInitializers, isConstruction,
   isGenerator, isInstanceField, ownerKey, ownerParameters, type EffectOwner,
@@ -41,6 +41,7 @@ import {
   iteratedFact,
   pairsStorageFact,
   shallowStorageFact,
+  selectedFact,
   invokedStorageFact,
   isCellAllocation,
   isWildcardSlot,
@@ -73,6 +74,8 @@ export type ImplicitFlow = {
   writeNode?: ts.Node;
   /** The external storage an output flow mutates, so a caller that owns one of those bindings can re-resolve it. */
   origins?: readonly StorageOrigin[];
+  argumentWrite?: "value" | "callback";
+  readParameterIndex?: number;
   reads?: readonly ReadSite[];
 };
 
@@ -101,8 +104,7 @@ type CallableSummary = {
   readonly parameterCalls: readonly ParameterCall[];
   readonly storageInsertions: readonly StorageInsertion[];
   readonly returnedAliases: readonly StorageFact[];
-  readonly returnedCallables: readonly EffectOwner[];
-  readonly opaqueReturn: boolean;
+  readonly yieldedAliases: readonly StorageFact[];
   readonly returnedRuns?: CallEffects;
 };
 
@@ -118,18 +120,33 @@ type CallEffects = {
   readonly parameterCalls: ParameterCall[];
 };
 
-/**
- * The reads a callable makes of one parameter's storage: those its own body makes, and those the functions it returns
- * make, which happen only where the caller invokes the result.
- */
-type ParameterDemand = { readonly sites: readonly ReadSite[]; readonly returned: readonly ReadSite[] };
-
-/** The expressions that can hold a callable's parameters' storage, in its own body and in the functions it returns. */
-type HeldCandidates = { readonly own: readonly ts.Expression[]; readonly returned: readonly ts.Expression[] };
-
 type SharedWrite = { readonly fact: StorageFact; readonly origin: StorageOrigin; readonly site: ts.Node; readonly slot?: string };
 
+type LexicalFrame = { readonly id: string; readonly context: readonly number[]; readonly owner: EffectOwner; readonly parent?: LexicalFrame };
+type CallableInstance =
+  | { readonly kind: "source"; readonly target: EffectOwner; readonly frame: LexicalFrame; readonly receiver?: StorageFact }
+  | { readonly kind: "advance"; readonly iterator: StorageOrigin }
+  | { readonly kind: "bound"; readonly callee: StorageFact; readonly receiver: StorageFact; readonly facts: readonly StorageFact[]; readonly actuals: readonly ts.Expression[] }
+  | { readonly kind: "library"; readonly semantics: LibraryCallback }
+  | { readonly kind: "iterator"; readonly source: Extract<CallableInstance, { kind: "source" }>; readonly facts: readonly StorageFact[]; readonly actuals: readonly ts.Expression[]; readonly receiver?: StorageFact };
+type InvocationState = {
+  readonly frame: LexicalFrame;
+  readonly receiver?: StorageFact;
+  readonly actuals?: readonly ts.Expression[];
+  readonly phase?: "parameters" | "body";
+  readonly caller?: { readonly owner: EffectOwner; readonly point: ts.Node; readonly callback: boolean; readonly repeated: boolean };
+  store: Map<string, StorageFact>;
+  heap: StorageInsertion[];
+  arrays: Map<StorageOrigin, PushStart | undefined>;
+  readonly registry: Map<StorageOrigin, CallableInstance>;
+  readonly values: Map<ts.Expression, StorageFact>;
+  readonly calls: Map<Invocation, { readonly effects: CallEffects; readonly value: StorageFact }>;
+  readonly stack: readonly EffectOwner[];
+};
+
 type AnalysisState = {
+  readonly invocation?: InvocationState;
+  readonly callableRegistry: Map<StorageOrigin, CallableInstance>;
   readonly model: ScopeModel;
   readonly sourceFile: ts.SourceFile;
   readonly callables: readonly EffectOwner[];
@@ -137,14 +154,12 @@ type AnalysisState = {
   readonly factCache: Map<string, StorageFact>;
   readonly insertionCache: Map<string, readonly StorageInsertion[]>;
   readonly cycles: { count: number };
-  readonly demands: Map<string, ParameterDemand>;
-  readonly demandCuts: { count: number };
-  readonly heldCandidates: Map<EffectOwner, HeldCandidates>;
   readonly includeThis: boolean;
   readonly sharedBindings: Map<Binding, Set<string>>;
   readonly sharedLocalBindings: Map<Binding, Map<string, SharedWrite>>;
   readonly bindingOrigins: ReadonlyMap<StorageOrigin, Binding>;
   readonly arrayLiterals: ReadonlyMap<number, ts.ArrayLiteralExpression>;
+  readonly objectLiterals: ReadonlySet<number>;
   readonly exposedOwners: ReadonlySet<ts.Node>;
   readonly ownerReferences: Map<EffectOwner, readonly OwnerReferences[]>;
   readonly assignments: Map<Binding, Assignment[]>;
@@ -171,6 +186,10 @@ function parameterName(owner: EffectOwner, index: number): string {
   return parameter && ts.isIdentifier(parameter.name) ? parameter.name.text : `#${index + 1}`;
 }
 
+function isAccessExpression(node: ts.Node): node is ts.AccessExpression {
+  return ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node);
+}
+
 function isRootExpression(node: ts.Node): node is ts.Identifier | ts.ThisExpression {
   return ts.isIdentifier(node) || node.kind === ts.SyntaxKind.ThisKeyword;
 }
@@ -181,7 +200,7 @@ function memberAccessOn(node: ts.Node): ts.Expression | undefined {
   }
   const expression = outerExpression(node);
   const parent = expression.parent;
-  return (ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) && parent.expression === expression
+  return (isAccessExpression(parent)) && parent.expression === expression
     ? parent
     : undefined;
 }
@@ -200,8 +219,8 @@ function bindingFlow(binding: Binding, node: ts.Identifier, owner: EffectOwner, 
 
 function isAmbientStorage(binding: Binding, node: ts.Identifier): boolean {
   const member = memberAccessOn(node);
-  return binding.declarations.some((declaration) => isAmbient(declaration.node) &&
-    (ts.isVariableDeclaration(declaration.node) || (ts.isClassDeclaration(declaration.node) && !!member && !isThisMethodCall(member))));
+  return binding.declarations.some((declaration) => declaration.kind === "import" && !!member || isAmbient(declaration.node) &&
+    (ts.isVariableDeclaration(declaration.node) || (ts.isClassDeclaration(declaration.node) && !!member)));
 }
 
 function namespaceFlow(node: ts.Identifier, write: Write | undefined): [ImplicitFlowKind, string] | undefined {
@@ -300,7 +319,7 @@ function hasNamedExport(binding: Binding): boolean {
 
 function rootIsThis(expression: ts.Expression): boolean {
   let current = unwrapExpression(expression);
-  while (ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current)) {
+  while (isAccessExpression(current)) {
     current = unwrapExpression(current.expression);
   }
   return current.kind === ts.SyntaxKind.ThisKeyword;
@@ -376,15 +395,13 @@ function identifierFlows(state: AnalysisState, node: ts.Identifier, owner: Effec
 }
 
 function boundFlows(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner, write: Write | undefined): ImplicitFlow[] {
+  if (state.invocation && frameForBinding(state, binding)) {
+    return invocationBindingFlows(state, binding, node, owner, write);
+  }
   const shared = bindingSharesRead(state, binding, node, owner);
   const direct = bindingFlow(binding, node, owner, write, shared);
   if (direct) {
-    const held = localStorageRead(state, binding, node, owner, write);
-    if (!held) {
-      return accessFlows(direct, binding, node, owner, write);
-    }
-    const read: ImplicitFlow = { kind: "input", node, owner, description: `reads ${held.name}` };
-    return write ? [...accessFlows(direct, binding, node, owner, { ...write, compound: false }), read] : [read];
+    return directBindingFlows(state, binding, node, owner, write, shared, direct);
   }
   const target = aliasTarget(state.model, binding, new Set());
   const aliased = target && bindingFlow(target, node, owner, write, shared || bindingSharesRead(state, target, node, owner));
@@ -393,6 +410,27 @@ function boundFlows(state: AnalysisState, binding: Binding, node: ts.Identifier,
   }
   const read = localStorageRead(state, binding, node, owner, write);
   return read ? [{ kind: "input", node, owner, description: `reads ${read.name}` }] : [];
+}
+
+function directBindingFlows(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner, write: Write | undefined, shared: boolean, direct: [ImplicitFlowKind, string]): ImplicitFlow[] {
+  const held = localStorageRead(state, binding, node, owner, write);
+  if (!held) {
+    const readsContents = write && shared && writtenReadSites(state, node, write).some((site) => site.mode !== "reference");
+    return accessFlows(direct, binding, node, owner, readsContents ? { ...write, compound: true } : write);
+  }
+  const read: ImplicitFlow = { kind: "input", node, owner, description: `reads ${held.name}` };
+  return write ? [...accessFlows(direct, binding, node, owner, { ...write, compound: false }), read] : [read];
+}
+
+function invocationBindingFlows(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner, write: Write | undefined): ImplicitFlow[] {
+  const fact = storageFactForBinding(state, state.summaries, binding, owner, node);
+  const sites = write ? writtenReadSites(state, node, write) : storageReadSites(state, node);
+  const read = externalReads(state, fact, sites, owner, true) ?? (!write ? derivedRead(state, node, owner, owner) : undefined);
+  if (!read) { return []; }
+  const alias = ownsStorage(binding, owner) ? aliasTarget(state.model, binding, new Set()) : undefined;
+  const description = alias && bindingFlow(alias, node, owner, undefined, true)?.[1];
+  return [{ kind: "input", node, owner, binding: read, access: "read", readParameterIndex: parameterIndexOf(binding, owner),
+    description: description ?? `reads ${read.name}` }];
 }
 
 function localStorageRead(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner, write: Write | undefined): Binding | undefined {
@@ -411,10 +449,9 @@ function heldRead(state: AnalysisState, node: ts.Expression, home: EffectOwner, 
 
 function writtenReadSites(state: AnalysisState, node: ts.Identifier, write: Write): ReadSite[] {
   if (write.compound) {
-    return [{ path: selectedSlots(node), reference: false }];
+    return [{ path: selectedSlots(node), mode: "slots" }];
   }
-  const call = methodCallOn(node);
-  return (call && callbackReadSites(state, call, "this", new Set())) ?? [];
+  return receiverCall(outerExpression(node)) ? storageReadSites(state, node) : [];
 }
 
 function derivedRead(state: AnalysisState, node: ts.Expression, home: EffectOwner, owner: EffectOwner): Binding | undefined {
@@ -428,7 +465,7 @@ function derivedValue(state: AnalysisState, target: ts.Expression): ts.Expressio
     return parent.parent;
   }
   const call = ts.isCallExpression(parent) ? parent : receiverCall(target);
-  return call && resultHolds(state, call, target) ? call : undefined;
+  return call && !ts.isExpressionStatement(outerExpression(call).parent) && resultHolds(state, call, target) ? call : undefined;
 }
 
 function resultHolds(state: AnalysisState, call: ts.CallExpression, target: ts.Expression): boolean {
@@ -441,38 +478,14 @@ function declaringOwner(state: AnalysisState, binding: Binding): EffectOwner | u
     .reduce<EffectOwner | undefined>((innermost, callable) => !innermost || inside(callable, innermost) ? callable : innermost, undefined);
 }
 
-function callbackReadSites(state: AnalysisState, call: ts.CallExpression, index: number | "this", seen: Set<string>): ReadSite[] | undefined {
-  const known = libraryCall(call, state.model);
-  if (!known || known.kind === "effect" || !known.callbacks.length || index !== (known.target === "receiver" ? "this" : 0)) {
-    return undefined;
-  }
-  const roles = callbackRoles(methodName(unwrapExpression(call.expression)));
-  const dispatch = dispatchFor(state, state.summaries);
-  return known.callbacks.flatMap((position) => {
-    const resolved = call.arguments[position] ? resolveTargets(dispatch, call.arguments[position]) : undefined;
-    if (!resolved?.complete) {
-      return resolved ? [{ path: ["*"], reference: false }] : [];
-    }
-    return resolved.targets.flatMap((target) => roles.flatMap((role, parameter) => {
-      if (role === "index") {
-        return [];
-      }
-      const prefix = role === "receiver" ? [] : ["*"];
-      // The library can keep the callback's result, so a function it returns can still run.
-      const demand = parameterDemand(state, target, parameter, seen);
-      return [...demand.sites, ...demand.returned].map((site) => ({ path: [...prefix, ...site.path], reference: site.reference }));
-    }));
-  });
-}
-
 function externalReads(
   state: AnalysisState, fact: StorageFact, sites: readonly ReadSite[], owner: EffectOwner, exported: boolean,
 ): Binding | undefined {
   for (const site of sites) {
-    for (const { origin, rest } of readOrigins(fact, site)) {
+    for (const { origin, rest } of selectedReadOrigins(fact, site)) {
       const external = originBinding(state, origin);
       if (external && ((exported && (isExportedStorage(external.binding) || isAmbientVariable(external.binding))) ||
-          storageReadAffected(state, external.binding, projectedRead(external.path, rest, site.reference), owner))) {
+          storageReadAffected(state, external.binding, projectedRead(external.path, rest, site.mode), owner))) {
         return external.binding;
       }
     }
@@ -480,26 +493,20 @@ function externalReads(
   return undefined;
 }
 
-/**
- * Pairs each origin a read reaches with the path still read below it. A contents read of a copy also reaches the
- * source members the copy holds; whole bindings held inside local containers stay out of scope unless the read selects
- * a member that holds them, as a deep read of box.pairs reads the shared row inside it. A reference read that ends on
- * an origin only holds that storage, so it reaches nothing there.
- */
-function readOrigins(fact: StorageFact, site: ReadSite): { origin: StorageOrigin; rest: readonly string[] }[] {
-  const selected = Array.from({ length: site.path.length + (site.reference ? 0 : 1) }, (_, length) =>
+function selectedReadOrigins(fact: StorageFact, site: ReadSite): { origin: StorageOrigin; rest: readonly string[] }[] {
+  const selected = Array.from({ length: site.path.length + ((site.mode === "reference") ? 0 : 1) }, (_, length) =>
     originsForPath(fact, length ? site.path.slice(0, length) : "outer").map((origin) => ({ origin, rest: site.path.slice(length) })));
-  const held = site.reference ? [] : site.path.reduce((value, slot) => memberStorageFact(value, slot), fact).reachable
-    .filter((origin) => {
+  const value = site.path.reduce((value, slot) => memberStorageFact(value, slot), fact);
+  const held = site.mode === "deep" ? value.reachable
+    : site.mode === "slots" ? memberStorageFact(value).outer.filter((origin) => {
       const external = externalProjection(origin);
-      return !!external && (external.path.length > 0 || site.path.length > 0);
-    });
+      return !!external && external.path.length > 0;
+    }) : [];
   return [...selected.flat(), ...held.map((origin) => ({ origin, rest: [] }))];
 }
 
-/** Gives the read below an origin's member path. Below a path that absorbed slots, the rest no longer lines up, so the read reaches all it holds. */
-function projectedRead(path: readonly string[], rest: readonly string[], reference: boolean): ReadSite {
-  return rest.length > 0 && absorbsSlots(path) ? { path, reference: false } : { path: [...path, ...rest], reference };
+function projectedRead(path: readonly string[], rest: readonly string[], mode: ReadMode): ReadSite {
+  return rest.length > 0 && absorbsSlots(path) ? { path, mode: "deep" } : { path: [...path, ...rest], mode };
 }
 
 function isAmbientVariable(binding: Binding): boolean {
@@ -556,20 +563,20 @@ function storageReadAffected(state: AnalysisState, binding: Binding, site: ReadS
 }
 
 function storageReadSites(state: AnalysisState, node: ts.Expression, seen = new Set<string>()): ReadSite[] {
-  return readSites(node, (site, index) => ts.isCallExpression(site) ? callReadSites(state, site, index, seen) : argumentReadSites(state, site, index, seen));
+  return readSites(node, (site, index) => ts.isCallExpression(site) ? callReadSites(state, site, index, seen) : argumentReadSites(state, site, index));
 }
 
 function callReadSites(state: AnalysisState, site: ts.CallExpression, index: number | "this", seen: Set<string>): ReadSite[] | undefined {
   if (index !== "this" && storesArguments(site, state.model)) {
-    return [{ path: [], reference: true }];
+    return [{ path: [], mode: "reference" }];
   }
   const known = libraryCall(site, state.model);
   const held = resultReadSites(state, site, index, known, seen);
   if (mutatesReceiver(known, index)) {
-    return [...(callbackReadSites(state, site, index, seen) ?? [{ path: [], reference: true }]), ...held];
+    return [{ path: [], mode: known && known.kind !== "effect" ? known.reads.receiver : "reference" }, ...held];
   }
-  const sites = libraryReadSites(state, site, index, known, seen) ?? argumentReadSites(state, site, index, seen);
-  return held.length ? [...(sites ?? [{ path: [], reference: false }]), ...held] : sites;
+  const sites = libraryReadSites(state, site, index, known, seen) ?? argumentReadSites(state, site, index);
+  return held.length ? [...(sites ?? [{ path: [], mode: "slots" }]), ...held] : sites;
 }
 
 function mutatesReceiver(known: LibraryCall | undefined, index: number | "this"): boolean {
@@ -581,7 +588,7 @@ type LibraryEffect = Exclude<LibraryCall, { readonly kind: "effect" }>;
 function resultReadSites(
   state: AnalysisState, call: ts.CallExpression, index: number | "this", known: LibraryCall | undefined, seen: Set<string>,
 ): ReadSite[] {
-  return known && known.kind !== "effect" && resultHoldsTarget(call, index, known) ? heldResultSites(state, call, known, seen) : [];
+  return known && known.kind !== "effect" && resultHoldsTarget(call, index, known) ? targetReadsFromResult(state, call, known, seen) : [];
 }
 
 /** Tells if the call's result is kept and holds the argument at the index, the target of the library call. */
@@ -589,12 +596,8 @@ function resultHoldsTarget(call: ts.CallExpression, index: number | "this", know
   return index === (known.target === "receiver" ? "this" : 0) && !ts.isExpressionStatement(outerExpression(call).parent);
 }
 
-/**
- * Gives the reads of a library call's target that reads of its result make, as [shared].slice(0)[0][0] reads
- * shared[0]. The result holds the target's members, so a read below the result is a read below a member of the target.
- */
-function heldResultSites(state: AnalysisState, call: ts.CallExpression, known: LibraryEffect, seen: Set<string>): ReadSite[] {
-  if (known.result === "fresh" || known.result === "mapped") {
+function targetReadsFromResult(state: AnalysisState, call: ts.CallExpression, known: LibraryEffect, seen: Set<string>): ReadSite[] {
+  if (known.result === "fresh" || known.result === "mapped" || known.result === "promise" || known.result === "promise-elements") {
     return [];
   }
   const sites = storageReadSites(state, call, seen);
@@ -602,16 +605,15 @@ function heldResultSites(state: AnalysisState, call: ts.CallExpression, known: L
     return sites;
   }
   if (known.result === "element") {
-    return sites.map((site) => ({ path: ["*", ...site.path], reference: site.reference }));
+    return sites.map((site) => ({ path: ["*", ...site.path], mode: site.mode }));
   }
   const members = known.result === "pairs" ? 2 : 1;
   const aligned = membersAlign(call, known);
   return sites.flatMap((site) => {
     if (site.path.length === 0) {
-      return site.reference ? [] : [site];
+      return (site.mode === "reference") ? [] : [site];
     }
-    // A result whose members do not line up with the target's members reads all the target's contents.
-    return [aligned ? { path: ["*", ...site.path.slice(members)], reference: site.reference } : { path: [], reference: false }];
+    return [aligned ? { path: ["*", ...site.path.slice(members)], mode: site.mode } : { path: [], mode: "slots" }];
   });
 }
 
@@ -626,203 +628,33 @@ function libraryReadSites(
 ): ReadSite[] | undefined {
   if (index === 1 && known && known.kind !== "effect" && callbackRoles(methodName(unwrapExpression(site.expression)))[0] === "accumulator") {
     // reduce can return its initial value, so reads of the result read it.
-    return [{ path: [], reference: false }, ...storageReadSites(state, site, seen)];
+    return [{ path: [], mode: "slots" }, ...storageReadSites(state, site, seen)];
   }
-  return callbackReadSites(state, site, index, seen);
+  if (known && known.kind !== "effect") {
+    const mode = index === "this" ? known.reads.receiver : known.reads.arguments[index] ?? known.reads.rest;
+    return [{ path: [], mode }];
+  }
+  return undefined;
 }
 
 function argumentReadSites(
-  state: AnalysisState, site: ts.CallExpression | ts.AccessExpression, index: number | "this", seen: Set<string>,
+  state: AnalysisState, site: ts.CallExpression | ts.AccessExpression, index: number | "this",
 ): ReadSite[] | undefined {
-  const dispatch = dispatchFor(state, state.summaries);
-  const resolved = ts.isCallExpression(site) ? resolveTargets(dispatch, site.expression) : memberTargets(dispatch, site, "set");
-  if (!ts.isCallExpression(site) && resolved.targets.length === 0) {
-    return [{ path: [], reference: true }];
+  if (!ts.isCallExpression(site) || index === "this") {
+    return [{ path: [], mode: "reference" }];
   }
-  if (index === -1 || !resolved.complete || resolved.targets.length === 0) {
-    return undefined;
-  }
-  return resolved.targets.flatMap((target) => {
-    if (index === "this") {
-      return unvisited(state, `${ownerKey(target)}:this`, seen, () => receiverReadSites(state, target, seen));
+  const active = state.invocation;
+  if (active) {
+    const callee = storageFactForExpression(state, state.summaries, site.expression, active.frame.owner, site);
+    if (callee.outer.length > 0 && callee.outer.every((origin) => {
+      const instance = active.registry.get(origin);
+      return instance !== undefined && instance.kind !== "iterator";
+    })) {
+      return [{ path: [], mode: "reference" }];
     }
-    const demand = parameterDemand(state, target, index, seen);
-    return !ts.isCallExpression(site) || resultInvoked(site) ? [...demand.sites, ...demand.returned] : demand.sites;
-  });
-}
-
-/**
- * Tells if the call's result can be invoked. A discarded result, or one only a member of is read, as f(x).length, is
- * never called; every other use can call it, now or after it escapes.
- */
-function resultInvoked(call: ts.CallExpression): boolean {
-  return !ts.isExpressionStatement(outerExpression(call).parent) && selectedRead(call).path.length === 0;
-}
-
-/**
- * Gives the reads the target makes of a parameter's storage. A demand no cycle cut short is complete whatever seen holds,
- * so it is kept until the summaries change; one a cycle cut short is recomputed where it is next asked for.
- */
-function parameterDemand(state: AnalysisState, target: EffectOwner, index: number, seen: Set<string>): ParameterDemand {
-  const key = `${ownerKey(target)}:${index}`;
-  const known = state.demands.get(key);
-  if (known) {
-    seen.add(key);
-    return known;
   }
-  if (seen.has(key)) {
-    state.demandCuts.count += 1;
-    return { sites: [], returned: [] };
-  }
-  seen.add(key);
-  const cuts = state.demandCuts.count;
-  const cycles = state.cycles.count;
-  const read = parameterReadSites(state, target, index, seen);
-  const demand = { sites: distinctSites(read.sites), returned: distinctSites(read.returned) };
-  if (state.demandCuts.count === cuts && state.cycles.count === cycles) {
-    state.demands.set(key, demand);
-  }
-  return demand;
-}
-
-function distinctSites(sites: readonly ReadSite[]): ReadSite[] {
-  const keys = new Set<string>();
-  return sites.filter((site) => {
-    const key = JSON.stringify([site.path, site.reference]);
-    return !keys.has(key) && !!keys.add(key);
-  });
-}
-
-function unvisited(state: AnalysisState, key: string, seen: Set<string>, read: () => ReadSite[]): ReadSite[] {
-  if (seen.has(key)) {
-    state.demandCuts.count += 1;
-    return [];
-  }
-  seen.add(key);
-  return read();
-}
-
-function receiverReadSites(state: AnalysisState, target: EffectOwner, seen: Set<string>): ReadSite[] {
-  if (ts.isArrowFunction(target) || isGenerator(target) || isConstruction(target)) {
-    return [{ path: [], reference: false }];
-  }
-  const sites: ReadSite[] = [];
-  const visit = (node: ts.Node): void => {
-    if (node.kind === ts.SyntaxKind.ThisKeyword) {
-      const write = writeOf(state, node);
-      sites.push(...(write && !write.viaCall ? [] : storageReadSites(state, node as ts.Expression, seen)
-        .map((site) => ({ path: site.path, reference: false }))));
-    } else if (!(isFunctionLike(node) && !ts.isArrowFunction(node)) && !ts.isClassLike(node)) {
-      ts.forEachChild(node, visit);
-    }
-  };
-  ts.forEachChild(target, visit);
-  return sites;
-}
-
-/**
- * Gives the reads the target makes of a parameter. Other functions that capture it can run at any time, so they read all
- * of it, except one the target returns as it is: that runs only when the result is invoked, so its reads are kept apart.
- */
-function parameterReadSites(state: AnalysisState, target: EffectOwner, index: number, seen: Set<string>): ParameterDemand {
-  const parameter = ownerParameters(target)[index];
-  const binding = parameter && state.model.bindings.find((item) => item.declarations.some((declaration) => declaration.node === parameter));
-  if (!binding || parameter.dotDotDotToken || !ts.isIdentifier(parameter.name) || isGenerator(target) || usesArguments(target)) {
-    return { sites: [{ path: [], reference: false }], returned: [] };
-  }
-  const reads = binding.references.map((reference) => referenceReads(state, reference, target, seen));
-  const candidates = heldCandidates(state, target);
-  return {
-    sites: [...reads.flatMap((read) => read.returned ? [] : read.sites), ...heldParameterReadSites(state, candidates.own, target, index, seen)],
-    returned: [...reads.flatMap((read) => read.returned ? read.sites : []), ...heldParameterReadSites(state, candidates.returned, target, index, seen)],
-  };
-}
-
-/** Gives the reads one reference to a parameter makes, and if they happen only when the target's result is invoked. */
-function referenceReads(
-  state: AnalysisState, reference: ts.Identifier, target: EffectOwner, seen: Set<string>,
-): { sites: readonly ReadSite[]; returned: boolean } {
-  const owner = enclosingFunction(reference);
-  const returned = owner !== target && !!owner && returnedBy(owner, target);
-  if (owner !== target && !returned) {
-    return { sites: [{ path: [], reference: false }], returned };
-  }
-  const write = writeOf(state, reference);
-  return { sites: write && !write.viaCall ? [] : storageReadSites(state, reference, seen).map((site) => ({ path: site.path, reference: false })), returned };
-}
-
-/** Tells if the target returns the function as it is, as inner returns () => m.get(k) in return () => m.get(k). */
-function returnedBy(node: EffectOwner, target: EffectOwner): boolean {
-  if (!ts.isArrowFunction(node) && !ts.isFunctionExpression(node)) {
-    return false;
-  }
-  const value = outerExpression(node);
-  return (ts.isReturnStatement(value.parent) && enclosingFunction(value.parent) === target) ||
-    (ts.isArrowFunction(target) && target.body === value);
-}
-
-/**
- * Gives the reads of a parameter's members that the target makes through storage that holds them, as m.get(k) in
- * const m = new Map(pairs) reads pairs[*][1]. The paths follow the same origins the target's own reads follow.
- */
-function heldParameterReadSites(
-  state: AnalysisState, candidates: readonly ts.Expression[], target: EffectOwner, index: number, seen: Set<string>,
-): ReadSite[] {
-  return candidates.flatMap((node) => heldParameterSites(state, node, target, index, storageReadSites(state, node, seen), seen));
-}
-
-/**
- * Gives the expressions that can hold the target's parameters' storage: constructions and local references, in its own
- * body and in the functions it returns.
- */
-function heldCandidates(state: AnalysisState, target: EffectOwner): HeldCandidates {
-  const known = state.heldCandidates.get(target);
-  if (known) {
-    return known;
-  }
-  const candidates = { own: [] as ts.Expression[], returned: [] as ts.Expression[] };
-  const visit = (node: ts.Node, into: ts.Expression[]): void => {
-    if (heldCandidate(state, node, target)) {
-      into.push(node);
-    }
-    if (into === candidates.own && isFunctionLike(node) && returnedBy(node as EffectOwner, target)) {
-      ts.forEachChild(node, (child) => visit(child, candidates.returned));
-    } else if (!isFunctionLike(node) && !ts.isClassLike(node)) {
-      ts.forEachChild(node, (child) => visit(child, into));
-    }
-  };
-  ts.forEachChild(target, (child) => visit(child, candidates.own));
-  state.heldCandidates.set(target, candidates);
-  return candidates;
-}
-
-function heldCandidate(state: AnalysisState, node: ts.Node, target: EffectOwner): node is ts.Expression {
-  return ts.isNewExpression(node) || (ts.isIdentifier(node) && state.model.isReference(node) && localTo(state, node, target));
-}
-
-function localTo(state: AnalysisState, node: ts.Identifier, target: EffectOwner): boolean {
-  const binding = state.model.resolve(node);
-  const write = writeOf(state, node);
-  return !!binding && isLocalBindingOfOwner(binding, target) && (!write || write.viaCall);
-}
-
-function heldParameterSites(
-  state: AnalysisState, node: ts.Expression, target: EffectOwner, index: number, sites: readonly ReadSite[], seen: Set<string>,
-): ReadSite[] {
-  const fact = storageFactForExpression(state, state.summaries, node, target, node);
-  // As with direct parameter reads, what the target holds or returns the caller can read, so a held reference reads contents.
-  const held = sites.flatMap((site) => readOrigins(fact, { path: site.path, reference: false }).flatMap(({ origin, rest }) => {
-    const projection = parameterProjection(origin);
-    return projection?.parameterIndex === index ? [projectedRead(projection.path, rest, false)] : [];
-  }));
-  const derived = derivedValue(state, selectedRead(node).expression);
-  return derived ? [...held, ...heldParameterSites(state, derived, target, index, storageReadSites(state, derived, seen), seen)] : held;
-}
-
-function usesArguments(target: EffectOwner): boolean {
-  const visit = (node: ts.Node): boolean => (ts.isIdentifier(node) && node.text === "arguments") ||
-    (!(isFunctionLike(node) && !ts.isArrowFunction(node)) && !!ts.forEachChild(node, visit));
-  return !!ts.forEachChild(target, visit);
+  const resolved = resolveTargets(dispatchFor(state, state.summaries), site.expression);
+  return resolved.complete && resolved.targets.length > 0 ? [{ path: [], mode: "reference" }] : undefined;
 }
 
 function sharedMarkAffectsRead(state: AnalysisState, binding: Binding, site: ReadSite): boolean {
@@ -846,7 +678,7 @@ function capturedReadSharesMutation(state: AnalysisState, binding: Binding, site
 function selectedSlots(node: ts.Identifier): string[] {
   const slots: string[] = [];
   let current: ts.Expression = outerExpression(node);
-  while ((ts.isPropertyAccessExpression(current.parent) || ts.isElementAccessExpression(current.parent)) &&
+  while ((isAccessExpression(current.parent)) &&
       current.parent.expression === current) {
     slots.push(storageSlot(current.parent) ?? "*");
     current = outerExpression(current.parent);
@@ -888,7 +720,7 @@ function withCompoundRead(write: Write | undefined, flow: ImplicitFlow): Implici
 function writePath(node: ts.Expression, write: Write): "outer" | readonly string[] {
   const slots: string[] = [];
   let current: ts.Expression = outerExpression(node);
-  while ((ts.isPropertyAccessExpression(current.parent) || ts.isElementAccessExpression(current.parent)) &&
+  while ((isAccessExpression(current.parent)) &&
       current.parent.expression === current) {
     slots.push(storageSlot(current.parent) ?? "*");
     current = outerExpression(current.parent);
@@ -901,26 +733,55 @@ function returnStorageResolver(
   summaries: ReadonlyMap<EffectOwner, CallableSummary>,
 ): StorageResolver {
   const useCache = summaries === state.summaries;
+  const active = state.invocation;
   return {
+    binding: (binding) => invocationBinding(state, binding),
+    callable: active ? (method) => callableFact(active, method, active.frame) : undefined,
+    value: (value, owner, site) => {
+      const resolved = owner === active?.frame.owner ? invocationValue(state, summaries, value) : undefined;
+      if (resolved || !ts.isAwaitExpression(value)) { return resolved; }
+      const pending = storageFactForExpression(state, summaries, value.expression, owner, site);
+      if (pending.outer.some((origin) => origin.includes(":promise="))) {
+        return memberStorageFact(pending, "promise:settled");
+      }
+      return pending.outer.length > 0 && pending.outer.every((origin) => active?.registry.get(origin)?.kind === "iterator")
+        ? pending : undefined;
+    },
     cache: useCache ? state.factCache : undefined,
     cycles: state.cycles,
     call: (call, owner, site, seen) =>
       ts.isCallExpression(call) ? joinedReturnFactForCall(state, summaries, call, owner, seen) : undefined,
     insertions: (owner, site) => {
+      if (state.invocation && owner === state.invocation.frame.owner) {
+        return state.invocation.heap;
+      }
       const key = `${nodeKey(owner)}:${nodeKey(site)}`;
       const cached = useCache ? state.insertionCache.get(key) : undefined;
       if (cached) {
-        return cached;
+        return withInvocationHeap(state, cached);
       }
+      const sourceOrigins = (origins: readonly StorageOrigin[]) => sourceAllocationOrigins(origins, owner);
       const computed = (summaries.get(owner)?.storageInsertions ?? [])
         .filter((insertion) => canReachSite(insertion.node, owner, site))
-        .map((insertion) => ({ ...insertion, replace: insertion.replace && insertion.node.end <= site.getStart() && unconditional(insertion.node, owner) }));
+        .map((insertion) => ({ ...insertion,
+          target: mapStorageFact(insertion.target, sourceOrigins, sourceOrigins),
+          value: mapStorageFact(insertion.value, sourceOrigins, sourceOrigins),
+          replace: insertion.replace && insertion.node.end <= site.getStart() && unconditional(insertion.node, owner) }));
       if (useCache) {
         state.insertionCache.set(key, computed);
       }
-      return computed;
+      return withInvocationHeap(state, computed);
     },
   };
+}
+
+function withInvocationHeap(state: AnalysisState, insertions: readonly StorageInsertion[]): readonly StorageInsertion[] {
+  return state.invocation ? [...insertions, ...state.invocation.heap] : insertions;
+}
+
+function sourceAllocationOrigins(origins: readonly StorageOrigin[], owner: EffectOwner): readonly StorageOrigin[] {
+  return origins.map((origin): StorageOrigin => origin.startsWith("private:") && origin.endsWith(`:frame=${ownerKey(owner)}`)
+    ? `private:${Number(origin.split(":")[1])}` : origin);
 }
 
 function storageFactForExpression(
@@ -978,14 +839,39 @@ function mutationEffectsFor(
     return { flows: [], writes: [] };
   }
   const path = writePath(node, write);
-  const fact = storageFactForBinding(state, summaries, binding, owner, node);
+  const fact = state.invocation?.values.get(node) ?? storageFactForBinding(state, summaries, binding, owner, node);
   if (!inside(binding.scope.node, owner)) {
-    shareCapturedWrite(state, binding, node, owner, path, fact);
-    return { flows: [], writes: [] };
+    return capturedMutationEffects(state, binding, node, owner, path, fact);
   }
+  return localMutationEffects(state, binding, node, owner, path, fact);
+}
+
+function capturedMutationEffects(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner, path: StoragePath, fact: StorageFact): Pick<CallEffects, "flows" | "writes"> {
+  shareCapturedWrite(state, binding, node, owner, path, fact);
+  return state.invocation && frameForBinding(state, binding)
+    ? mutationEffectsFromFact(state, fact, path, node, owner, `mutates caller-owned value ${binding.name}`, false, false, mutatedSlots(state, node, owner))
+    : { flows: [], writes: [] };
+}
+
+function localMutationEffects(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner, path: StoragePath, fact: StorageFact): CallEffects {
+  const invocation = state.invocation;
+  if (isParameterOf(binding, owner) && invocation?.caller) {
+    return invokedParameterMutation(state, binding, node, owner, path, fact, invocation, invocation.caller);
+  }
+  const alias = aliasTarget(state.model, binding, new Set());
   return mutationEffectsFromFact(state, fact, path, node, owner, isParameterOf(binding, owner)
     ? `mutates argument ${node.text}`
-    : `mutates caller-owned value ${node.text}`);
+    : alias && hasExternalOrigin(originsForPath(fact, path)) ? `writes ${node.text}` : `mutates caller-owned value ${node.text}`, false, false, mutatedSlots(state, node, owner));
+}
+
+function invokedParameterMutation(state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner, path: StoragePath, fact: StorageFact, invocation: InvocationState, caller: NonNullable<InvocationState["caller"]>): CallEffects {
+  const index = parameterIndexOf(binding, owner);
+  const actual = index === undefined ? undefined : invocation.actuals?.[index] ?? ownerParameters(owner)[index]?.initializer;
+  if (!actual && !caller.callback) {
+    return unknownEffects(node, owner, "calls writable parameter without an argument");
+  }
+  return mutationEffectsFromFact(state, fact, path, node, owner, caller.callback
+    ? "mutates caller-owned callback argument" : `mutates caller-owned value ${actual?.getText(state.sourceFile)}`, false, false, mutatedSlots(state, node, owner));
 }
 
 function mutationEffectsFromFact(
@@ -1010,7 +896,21 @@ function mutationEffectsFromFact(
       description: parameterDescription ? `mutates argument ${parameterName(owner, projection.parameterIndex)}` : description,
     }] : [];
   });
-  return { flows: originFlows(state, origins, node, owner, description, receiverReported, slots), writes, parameterCalls: [] };
+  const argumentWrite = argumentWriteForOrigins(state, origins, owner);
+  return { flows: originFlows(state, origins, node, owner, description, receiverReported, slots)
+    .map((flow) => argumentWrite ? { ...flow, argumentWrite } : flow), writes, parameterCalls: [] };
+}
+
+function argumentWriteForOrigins(state: AnalysisState, origins: readonly StorageOrigin[], owner: EffectOwner): ImplicitFlow["argumentWrite"] {
+  const active = state.invocation;
+  if (!active?.caller) { return undefined; }
+  const argumentWrite = state.model.bindings.some((binding) => {
+    if (!isParameterOf(binding, owner)) { return false; }
+    const argument = active.store.get(cellKey(active.frame, binding));
+    return argument && [...argument.outer, ...argument.reachable].some((origin) => origins.some((written) =>
+      written === origin || externalProjection(written)?.base !== undefined && externalProjection(written)?.base === externalProjection(origin)?.base));
+  });
+  return argumentWrite ? active.caller.callback ? "callback" : "value" : undefined;
 }
 
 function originFlows(
@@ -1038,20 +938,21 @@ function originFlows(
 
 function collectCallables(sourceFile: ts.SourceFile, model: ScopeModel, includeThis: boolean): AnalysisState {
   const arrayLiterals = new Map<number, ts.ArrayLiteralExpression>();
+  const objectLiterals = new Set<number>();
   const collectArrays = (node: ts.Node): void => {
     if (ts.isArrayLiteralExpression(node)) {
       arrayLiterals.set(allocationId(node), node);
     }
+    if (ts.isObjectLiteralExpression(node)) { objectLiterals.add(allocationId(node)); }
     ts.forEachChild(node, collectArrays);
   };
   collectArrays(sourceFile);
   return {
-    model, sourceFile, callables: collectOwners(sourceFile), summaries: new Map(),
-    factCache: new Map(), insertionCache: new Map(), cycles: { count: 0 }, demands: new Map(), demandCuts: { count: 0 },
-    heldCandidates: new Map(), includeThis,
+    model, sourceFile, callables: collectOwners(sourceFile), summaries: new Map(), callableRegistry: new Map(),
+    factCache: new Map(), insertionCache: new Map(), cycles: { count: 0 }, includeThis,
     sharedBindings: new Map(), sharedLocalBindings: new Map(),
     bindingOrigins: new Map(model.bindings.map((binding) => [externalBindingOrigin(binding), binding])),
-    arrayLiterals, exposedOwners: exposedOwners(model), ownerReferences: new Map(), assignments: new Map(),
+    arrayLiterals, objectLiterals, exposedOwners: exposedOwners(model), ownerReferences: new Map(), assignments: new Map(),
   };
 }
 
@@ -1143,15 +1044,55 @@ function literalArrayLength(binding: Binding): number | undefined {
 function assignedSlots(state: AnalysisState, site: ts.Identifier): readonly (string | undefined)[] {
   const access = outermostAccess(site);
   const member = unwrapExpression(access);
-  const slot = ts.isPropertyAccessExpression(member) || ts.isElementAccessExpression(member) ? storageSlot(member) : undefined;
+  const slot = isAccessExpression(member) ? storageSlot(member) : undefined;
   if (slot === "property:length") {
-    return [slot, truncatedSlot(access)];
+    return assignedLengthSlots(state, site, access, slot);
   }
   if (ts.isElementAccessExpression(member) && member.expression === outerExpression(site) && literalArray(state, site) &&
       appendIndex(state, member)) {
     return [`append:${appendStart(state, site, member)}`, "property:length"];
   }
   return arrayIndexForSlot(slot) === undefined ? [slot] : [slot, "property:length"];
+}
+
+function assignedLengthSlots(state: AnalysisState, site: ts.Identifier, access: ts.Expression, slot: string): readonly (string | undefined)[] {
+  const truncated = truncatedSlot(access);
+  const binding = state.model.resolve(site);
+  const maximum = binding && arrayLengthUpperBound(state, binding);
+  return truncated !== undefined && maximum !== undefined && maximum <= Number(truncated.slice(7))
+    ? [slot] : [slot, truncated];
+}
+
+function arrayLengthUpperBound(state: AnalysisState, binding: Binding): number | undefined {
+  let maximum = literalArrayLength(binding);
+  if (maximum === undefined || isModuleScope(binding)) { return undefined; }
+  for (const reference of binding.references) {
+    const assignment = arrayReferenceWrite(state, reference);
+    if (assignment === undefined) { return undefined; }
+    if (assignment === false) { continue; }
+    const { slot, value } = assignment;
+    if (slot === "property:length") {
+      if (!ts.isNumericLiteral(value)) { return undefined; }
+      maximum = Math.max(maximum, Number(value.text));
+    } else {
+      const index = arrayIndexForSlot(slot);
+      if (index === undefined) { return undefined; }
+      maximum = Math.max(maximum, index + 1);
+    }
+  }
+  return maximum;
+}
+
+function arrayReferenceWrite(state: AnalysisState, reference: ts.Identifier): { readonly slot: string | undefined; readonly value: ts.Expression } | false | undefined {
+  const expression = outerExpression(reference);
+  const member = expression.parent;
+  if ((!isAccessExpression(member)) || member.expression !== expression) { return undefined; }
+  const access = outerExpression(member);
+  if (ts.isCallExpression(access.parent)) { return undefined; }
+  if (!writeOf(state, reference)) { return false; }
+  const assignment = access.parent;
+  if (!ts.isBinaryExpression(assignment) || assignment.operatorToken.kind !== ts.SyntaxKind.EqualsToken || assignment.left !== access) { return undefined; }
+  return { slot: storageSlot(member), value: unwrapExpression(assignment.right) };
 }
 
 function appendStart(state: AnalysisState, site: ts.Identifier, member: ts.ElementAccessExpression): number {
@@ -1169,7 +1110,7 @@ function soleOrigin(state: AnalysisState, identifier: ts.Identifier, owner: Effe
 
 function outermostAccess(site: ts.Identifier): ts.Expression {
   let access: ts.Expression = outerExpression(site);
-  while ((ts.isPropertyAccessExpression(access.parent) || ts.isElementAccessExpression(access.parent)) && access.parent.expression === access) {
+  while ((isAccessExpression(access.parent)) && access.parent.expression === access) {
     access = outerExpression(access.parent);
   }
   return access;
@@ -1193,10 +1134,8 @@ function shareAliasedLocalBindings(
   if (localOrigins.length === 0) {
     return;
   }
-  for (const binding of state.model.bindings) {
-    if (!isLocalBindingOfOwner(binding, owner)) {
-      continue;
-    }
+  const bindings = state.model.bindings.filter((binding) => isLocalBindingOfOwner(binding, owner) || frameForBinding(state, binding));
+  for (const binding of bindings) {
     const fact = storageFactForBinding(state, state.summaries, binding, owner, site);
     for (const origin of localOrigins) {
       if ([...fact.outer, ...fact.reachable].includes(origin)) {
@@ -1231,11 +1170,11 @@ function pushedArraySlots(state: AnalysisState, site: ts.Node, owner: EffectOwne
     return undefined;
   }
   const callee = unwrapExpression(call.expression);
-  if (!ts.isPropertyAccessExpression(callee) && !ts.isElementAccessExpression(callee)) {
+  if (!isAccessExpression(callee)) {
     return undefined;
   }
   const start = knownPushStart(state, callee.expression, owner, call);
-  return start ? pushSlots(call, owner, start) : undefined;
+  return start ? pushSlots(call, owner, state.invocation?.caller?.repeated ? { ...start, exact: false } : start) : undefined;
 }
 
 function pushSlots(call: ts.CallExpression, owner: EffectOwner, start: PushStart): readonly string[] {
@@ -1323,7 +1262,7 @@ function iterates(node: ts.Node): boolean {
 
 function iteratorStep(call: ts.CallExpression): boolean {
   const callee = unwrapExpression(call.expression);
-  return (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) &&
+  return (isAccessExpression(callee)) &&
     ["next", "return", "throw"].includes(methodName(callee) ?? "");
 }
 
@@ -1381,13 +1320,13 @@ function isWritingFlow(flow: ImplicitFlow): boolean {
 
 function pushReceiverKey(state: AnalysisState, push: ts.CallExpression): string | undefined {
   const callee = unwrapExpression(push.expression);
-  return ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee) ? storageKey(state, callee.expression) : undefined;
+  return isAccessExpression(callee) ? storageKey(state, callee.expression) : undefined;
 }
 
 function storageKey(state: AnalysisState, expression: ts.Expression): string | undefined {
   let receiver = unwrapExpression(expression);
   const slots: string[] = [];
-  while (ts.isPropertyAccessExpression(receiver) || ts.isElementAccessExpression(receiver)) {
+  while (isAccessExpression(receiver)) {
     const slot = storageSlot(receiver);
     if (slot === undefined) {
       return undefined;
@@ -1439,7 +1378,7 @@ function repeatedPartOfIteration(call: ts.Node, loop: ts.IterationStatement): bo
 
 function pushCallForMutation(site: ts.Node): ts.CallExpression | undefined {
   const member = ts.isIdentifier(site) ? unwrapExpression(outermostAccess(site)) : site;
-  if ((!ts.isPropertyAccessExpression(member) && !ts.isElementAccessExpression(member)) || methodName(member) !== "push") {
+  if ((!isAccessExpression(member)) || methodName(member) !== "push") {
     return undefined;
   }
   const callee = outerExpression(member);
@@ -1464,12 +1403,14 @@ function knownPushStartFromFact(state: AnalysisState, fact: StorageFact, owner: 
     const length = external.path.length === 0 ? literalArrayLength(external.binding) : undefined;
     return length === undefined ? undefined : { lowerBound: length, exact: false };
   }
+  if (state.invocation?.arrays.has(origin)) { return state.invocation.arrays.get(origin); }
   const length = literalAllocationLength(state, origin);
-  return length === undefined ? undefined : priorPushStart(state, owner, call, origin, length);
+  return length === undefined ? undefined : state.invocation
+    ? { lowerBound: length, exact: true } : priorPushStart(state, owner, call, origin, length);
 }
 
 function literalAllocationLength(state: AnalysisState, origin: StorageOrigin): number | undefined {
-  const position = /^private:(\d+)$/.exec(origin)?.[1];
+  const position = /^private:(\d+)(?::frame=.*)?$/.exec(origin)?.[1];
   const allocation = position === undefined ? undefined : state.arrayLiterals.get(Number(position));
   return allocation && !allocation.elements.some(ts.isSpreadElement) ? allocation.elements.length : undefined;
 }
@@ -1690,7 +1631,7 @@ function receiverPushCall(reference: ts.Identifier): ts.CallExpression | undefin
   for (let current: ts.Node | undefined = reference.parent; current; current = current.parent) {
     if (ts.isCallExpression(current)) {
       const callee = unwrapExpression(current.expression);
-      if ((ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) &&
+      if ((isAccessExpression(callee)) &&
           methodName(callee) === "push" && inside(reference, callee.expression)) {
         return current;
       }
@@ -1815,7 +1756,7 @@ function appendIndexAt(state: AnalysisState, reference: ts.Identifier, depth: nu
   let access: ts.Expression = outerExpression(reference);
   for (let step = 0; step <= depth; step += 1) {
     access = access.parent as ts.Expression;
-    if (!ts.isPropertyAccessExpression(access) && !ts.isElementAccessExpression(access)) {
+    if (!isAccessExpression(access)) {
       return false;
     }
     access = step < depth ? outerExpression(access) : access;
@@ -1863,8 +1804,13 @@ function dispatchFor(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, C
     libraryMethod: (receiver, name) => isLibraryMethodName(name) && standardReceiver(state.model, receiver),
     returns: (call, seen) => {
       const targets = resolveTargets(dispatchFor(state, summaries), call.expression, seen);
-      const returned = targets.targets.flatMap((target) => summaries.get(target)?.returnedCallables ?? []);
-      const complete = targets.complete && targets.targets.every((target) => !summaries.get(target)?.opaqueReturn);
+      const facts = targets.targets.flatMap((target) => summaries.get(target)?.returnedAliases ?? []);
+      const origins = facts.flatMap((fact) => fact.outer);
+      const returned = origins.flatMap((origin) => {
+        const instance = state.callableRegistry.get(origin);
+        return instance?.kind === "source" ? [instance.target] : [];
+      });
+      const complete = targets.complete && origins.length > 0 && origins.every((origin) => state.callableRegistry.has(origin));
       return { targets: uniqueCallables(returned), complete };
     },
   };
@@ -1899,6 +1845,10 @@ function joinedReturnFactForCall(
   owner: EffectOwner,
   seen: ReadonlySet<Binding>,
 ): StorageFact | undefined {
+  const invoked = state.invocation?.calls.get(call);
+  if (invoked) {
+    return invoked.value;
+  }
   const facts = returnFactsForCall(state, summaries, call, owner, seen);
   return facts === undefined || facts.length === 0 ? undefined : joinStorageFacts(facts);
 }
@@ -1910,6 +1860,10 @@ function returnFactsForCall(
   owner: EffectOwner,
   seen: ReadonlySet<Binding>,
 ): readonly StorageFact[] | undefined {
+  const executed = state.invocation?.calls.get(call);
+  if (executed) {
+    return [executed.value];
+  }
   const targets = callableTargets(state, summaries, call.expression);
   if (!targets) {
     const known = recognizedCallReturnFact(state, summaries, call, owner, seen);
@@ -1917,7 +1871,9 @@ function returnFactsForCall(
   }
   return uniqueFacts(targets.flatMap((target) => {
     const summary = summaries.get(target);
-    return summary ? summary.returnedAliases.map((fact) => instantiateReturnFact(state, summaries, fact, call, owner, target, seen)) : [];
+    if (!summary) { return []; }
+    const returned = summary.returnedAliases.map((fact) => instantiateReturnFact(state, summaries, fact, call, owner, target, seen));
+    return isAsync(target) ? [promiseFact(call, joinStorageFacts(returned), ownerKey(owner))] : returned;
   }));
 }
 
@@ -1946,14 +1902,26 @@ function libraryReturnFact(
   receiver: StorageFact,
   seen: ReadonlySet<Binding> = new Set(),
 ): StorageFact {
+  const shaped = shapedLibraryReturn(call, known.result, receiver);
+  if (shaped) { return shaped; }
+  const context = state.invocation?.frame.id ?? ownerKey(owner);
   switch (known.result) {
+    case "promise": return promiseFact(call, receiver, context);
+    case "promise-elements": return promiseFact(call, shallowStorageFact(call, receiver), context);
+    case "holding": return holdingReturnFact(state, summaries, call, owner, receiver, seen);
+    case "mapped": return mappedReturnFact(state, summaries, call, owner, known, seen);
+    default: return unknownFact;
+  }
+}
+
+function shapedLibraryReturn(call: ts.CallExpression, result: Exclude<LibraryCall, { kind: "effect" }>["result"], receiver: StorageFact): StorageFact | undefined {
+  switch (result) {
     case "fresh": return freshStorageFact(call);
     case "shallow": return shallowStorageFact(call, receiver);
     case "element": return libraryElementFact(call, receiver);
     case "receiver": return receiver;
-    case "holding": return holdingReturnFact(state, summaries, call, owner, receiver, seen);
-    case "mapped": return mappedReturnFact(state, summaries, call, owner, known, seen);
     case "pairs": return pairsStorageFact(call, calleeName(call), receiver);
+    default: return undefined;
   }
 }
 
@@ -1971,7 +1939,7 @@ function libraryTarget(call: ts.CallExpression, known: Exclude<LibraryCall, { ki
     return call.arguments[0];
   }
   const callee = unwrapExpression(call.expression);
-  return ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee) ? callee.expression : undefined;
+  return isAccessExpression(callee) ? callee.expression : undefined;
 }
 
 function holdingReturnFact(
@@ -2102,14 +2070,6 @@ function uniqueFacts(facts: readonly StorageFact[]): readonly StorageFact[] {
   return facts.length <= 1 ? facts : [joinStorageFacts(facts)];
 }
 
-function returnedCallablesForExpression(
-  state: AnalysisState,
-  summaries: ReadonlyMap<EffectOwner, CallableSummary>,
-  expression: ts.Expression,
-): Targets {
-  return resolveTargets(dispatchFor(state, summaries), expression);
-}
-
 function parameterCallableIndex(state: AnalysisState, expression: ts.Expression, owner: EffectOwner): number | undefined {
   const callee = unwrapExpression(expression);
   if (!ts.isIdentifier(callee)) {
@@ -2129,13 +2089,12 @@ function callEffects(
   call: ts.CallExpression,
   owner: EffectOwner,
 ): CallEffects {
-  if (unwrapExpression(call.expression).kind === ts.SyntaxKind.SuperKeyword) {
-    return superEffects(state, summaries, call, owner);
+  const executed = state.invocation?.calls.get(call);
+  if (executed) {
+    return executed.effects;
   }
-  const callee = unwrapExpression(call.expression);
-  if (isIteratorAdvance(state, summaries, callee)) {
-    return emptyCallEffects();
-  }
+  const lifecycle = lifecycleCallEffects(state, summaries, call, owner);
+  if (lifecycle) { return lifecycle; }
   const resolved = resolveTargets(dispatchFor(state, summaries), call.expression);
   if (resolved.targets.length > 0) {
     return resolvedCallEffects(state, summaries, resolved, call, owner);
@@ -2154,6 +2113,23 @@ function callEffects(
   return unknownEffects(call.expression, owner, "calls unresolved callable");
 }
 
+function lifecycleCallEffects(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, call: ts.CallExpression, owner: EffectOwner): CallEffects | undefined {
+  const calleeValue = unwrapExpression(call.expression);
+  if ((isAccessExpression(calleeValue)) &&
+      ["next", "return", "throw"].includes(methodName(calleeValue) ?? "")) {
+    const forced = forceIterator(state, summaries, calleeValue.expression, call, owner, "advance");
+    if (forced) { return forced; }
+  }
+  if (unwrapExpression(call.expression).kind === ts.SyntaxKind.SuperKeyword) {
+    return superEffects(state, summaries, call, owner);
+  }
+  const callee = unwrapExpression(call.expression);
+  if (isIteratorAdvance(state, summaries, callee)) {
+    return emptyCallEffects();
+  }
+  return undefined;
+}
+
 function callOperandFacts(
   state: AnalysisState,
   summaries: ReadonlyMap<EffectOwner, CallableSummary>,
@@ -2162,7 +2138,7 @@ function callOperandFacts(
 ): StorageFact[] {
   const callee = unwrapExpression(call.expression);
   const operands = [
-    ...(ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee) ? [callee.expression] : []),
+    ...(isAccessExpression(callee) ? [callee.expression] : []),
     ...(call.arguments ?? []).map((argument) => ts.isSpreadElement(argument) ? argument.expression : argument),
   ];
   return operands.map((operand) => storageFactForExpression(state, summaries, operand, owner, call));
@@ -2172,6 +2148,12 @@ function escapeStorage(state: AnalysisState, facts: readonly StorageFact[], site
   const origins = joinStorageOrigins(facts.flatMap((fact) => [...fact.outer, ...fact.reachable]));
   shareOrigins(state, origins);
   shareAliasedLocalBindings(state, origins, site, owner, [undefined]);
+  const active = state.invocation;
+  if (active) {
+    const target: StorageFact = { outer: origins, reachable: origins, cells: facts.flatMap((fact) => fact.cells ?? []) };
+    active.heap.push({ kind: "cell", node: site, origin: site, target, value: unknownFact, replace: false });
+    state.factCache.clear();
+  }
 }
 
 /**
@@ -2189,8 +2171,10 @@ function escapeReturnedStorage(state: AnalysisState, facts: readonly StorageFact
 }
 
 function isIteratorAdvance(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, callee: ts.Expression): boolean {
-  return (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) &&
-    ["next", "return", "throw"].includes(methodName(callee) ?? "") && isKnownIterator(state, summaries, callee.expression);
+  return (isAccessExpression(callee)) &&
+    ["next", "return", "throw"].includes(methodName(callee) ?? "") &&
+    !heapWritesMember(state, storageFactForExpression(state, summaries, callee.expression, state.invocation?.frame.owner ?? state.sourceFile, callee), methodName(callee) ?? "") &&
+    isKnownIterator(state, summaries, callee.expression);
 }
 
 function unknownEffects(node: ts.Node, owner: EffectOwner, description: string): CallEffects {
@@ -2245,7 +2229,7 @@ function callReceiver(
   owner: EffectOwner,
 ): StorageFact | undefined {
   const callee = unwrapExpression(call.expression);
-  return ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)
+  return isAccessExpression(callee)
     ? storageFactForExpression(state, summaries, callee.expression, owner, call) : undefined;
 }
 
@@ -2262,7 +2246,7 @@ function defaultEffects(summary: CallableSummary, defaults: boolean): CallEffect
 function runSummary(summary: CallableSummary, runs: CallEffects): CallableSummary {
   return {
     owner: summary.owner, flows: runs.flows, parameterWrites: runs.writes, parameterCalls: runs.parameterCalls,
-    storageInsertions: [], returnedAliases: [], returnedCallables: [], opaqueReturn: false,
+    storageInsertions: [], returnedAliases: [], yieldedAliases: [],
   };
 }
 
@@ -2322,7 +2306,7 @@ function capturesForExpression(
   if (ts.isCallExpression(value)) {
     return factoryCaptures(state, summaries, value, owner);
   }
-  if (ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)) {
+  if (isAccessExpression(value)) {
     return capturesForExpression(state, summaries, value.expression, owner, seen);
   }
   if (!ts.isIdentifier(value)) {
@@ -2372,6 +2356,19 @@ function factoryRelativeCaptures(
     .map((binding) => [binding, instantiateStorageFact(storageFactForBinding(state, summaries, binding, factory, closure), actualFact)]))));
 }
 
+function receiverMutationEffects(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, call: ts.CallExpression, owner: EffectOwner): CallEffects {
+  const groups: CallEffects[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node) && methodCallOn(node) === call && writeOf(state, node)?.contents) {
+      groups.push({ flows: directFlowsFor(state, node, owner, state.includeThis), writes: [], parameterCalls: [] });
+      groups.push({ ...mutationEffectsFor(state, summaries, node, owner), parameterCalls: [] });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(call.expression);
+  return combineEffects(groups);
+}
+
 function libraryEffects(
   state: AnalysisState,
   summaries: ReadonlyMap<EffectOwner, CallableSummary>,
@@ -2386,10 +2383,22 @@ function libraryEffects(
   for (const index of known.callbacks) {
     const callback = call.arguments[index];
     if (callback) {
-      groups.push(callbackEffects(state, summaries, callback, libraryCallbackFacts(state, summaries, call, owner, known), call.expression, owner));
+      const facts = libraryCallbackFacts(state, summaries, call, owner, known);
+      groups.push(callbackEffects(state, summaries, callback, facts, call.expression, owner));
+      const fact = storageFactForExpression(state, summaries, callback, owner, call);
+      const active = state.invocation;
+      const complete = fact.outer.length > 0 && fact.outer.every((origin) => {
+        const instance = active?.registry.get(origin);
+        return instance !== undefined && instance.kind !== "iterator";
+      });
+      if (!complete && !resolveTargets(dispatchFor(state, summaries), callback).complete) {
+        const read = externalReads(state, joinStorageFacts(facts), [{ path: [], mode: "deep" }], owner, false);
+        if (read) { groups.push({ flows: [{ kind: "input", node: call.expression, owner, binding: read, access: "read", description: `reads ${read.name}` }], writes: [], parameterCalls: [] }); }
+      }
     }
   }
   if (known.kind === "mutating") {
+    groups.push(receiverMutationEffects(state, summaries, call, owner));
     groups.push(mutatingMethodEffects(state, summaries, call, owner, known));
   }
   return combineEffects(groups);
@@ -2407,7 +2416,8 @@ function libraryCallbackFacts(
     return [privateFact, privateFact];
   }
   if (global === "JSON.stringify") {
-    return [privateFact, call.arguments[0] ? storageFactForExpression(state, summaries, call.arguments[0], owner, call) : privateFact];
+    const root = call.arguments[0] ? storageFactForExpression(state, summaries, call.arguments[0], owner, call) : privateFact;
+    return [privateFact, joinStorageFacts([root, unknownFact])];
   }
   const target = libraryTarget(call, known);
   const receiver = target ? storageFactForExpression(state, summaries, target, owner, call) : privateFact;
@@ -2442,6 +2452,18 @@ function callbackEffects(
   node: ts.Node,
   owner: EffectOwner,
 ): CallEffects {
+  const fact = storageFactForExpression(state, summaries, callback, owner, node);
+  const evaluated = evaluateInvocation(state, summaries, {
+    callee: fact,
+    facts,
+    point: node,
+    owner,
+    actuals: [],
+    receiver: undefined,
+    forceGenerator: false,
+    execution: "callback",
+  });
+  if (evaluated) { return evaluated.effects; }
   const resolved = resolveTargets(dispatchFor(state, summaries), callback);
   const effects = instantiateCallbackTargets(state, summaries, resolved.targets, facts, node, owner);
   if (resolved.complete) {
@@ -2608,7 +2630,7 @@ function receiverFlow(state: AnalysisState, flow: ImplicitFlow, receiver: Storag
   }
   const origins = originsForPath(receiver, flow.path ?? "outer");
   const effects = emptyCallEffects();
-  if (externalReads(state, receiver, flow.reads ?? [{ path: [], reference: false }], owner, true)) {
+  if (externalReads(state, receiver, flow.reads ?? [{ path: [], mode: "slots" }], owner, true)) {
     effects.flows.push({ kind: "input", node, owner, description: flow.description });
   }
   if (hasUnknownOrigin(origins)) {
@@ -2758,7 +2780,7 @@ function computedWriteEffects(
   owner: EffectOwner,
 ): CallEffects {
   const member = unwrapExpression(target);
-  if ((!ts.isPropertyAccessExpression(member) && !ts.isElementAccessExpression(member)) || namedRoot(member)) {
+  if ((!isAccessExpression(member)) || namedRoot(member)) {
     return emptyCallEffects();
   }
   const fact = storageFactForExpression(state, summaries, member.expression, owner, node);
@@ -2769,7 +2791,7 @@ function computedWriteEffects(
 
 function namedRoot(expression: ts.Expression): boolean {
   let current = unwrapExpression(expression);
-  while (ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current)) {
+  while (isAccessExpression(current)) {
     current = unwrapExpression(current.expression);
   }
   return ts.isIdentifier(current) || current.kind === ts.SyntaxKind.ThisKeyword;
@@ -2777,7 +2799,7 @@ function namedRoot(expression: ts.Expression): boolean {
 
 function boundRoot(state: AnalysisState, expression: ts.Expression): boolean {
   let current = unwrapExpression(expression);
-  while (ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current)) {
+  while (isAccessExpression(current)) {
     current = unwrapExpression(current.expression);
   }
   return ts.isIdentifier(current) && state.model.resolve(current) !== undefined;
@@ -2801,7 +2823,28 @@ function constructorEffects(
     return unknownEffects(node, owner, "constructs unresolved class");
   }
   return combineEffects(classes.map((created) => {
-    const summary = summaries.get(explicitConstructor(created) ?? created);
+    const target = explicitConstructor(created) ?? created;
+    const active = state.invocation;
+    if (active) {
+      const invocation = ts.isNewExpression(node.parent) ? node.parent : undefined;
+      const prior = invocation && active.calls.get(invocation);
+      if (prior) { return prior.effects; }
+      const result = evaluateInvocation(state, summaries, {
+        callee: callableFact(active, target, active.frame),
+        facts: actuals.map((actual) => storageFactForExpression(state, summaries, actual, owner, node)),
+        point: node,
+        owner,
+        actuals,
+        receiver: privateFact,
+        forceGenerator: false,
+        execution: "once",
+      });
+      if (result) {
+        if (invocation) { active.calls.set(invocation, result); }
+        return result.effects;
+      }
+    }
+    const summary = summaries.get(target);
     return summary ? instantiateCallableSummary(state, summaries, summary, actuals, node, owner, privateFact)
       : unknownEffects(node, owner, "constructs unresolved class");
   }));
@@ -2830,7 +2873,7 @@ function accessorEffects(
   if (ts.isCallExpression(parent) && parent.expression === wrapped) {
     return emptyCallEffects();
   }
-  return combineEffects(accessorKinds(wrapped).map((kind) => accessorKindEffects(state, summaries, node, owner, kind)));
+  return combineEffects(accessorKinds(wrapped).filter((kind) => kind !== "set").map((kind) => accessorKindEffects(state, summaries, node, owner, kind)));
 }
 
 function accessorKinds(node: ts.Expression): readonly ("get" | "set")[] {
@@ -2858,11 +2901,25 @@ function accessorKindEffects(
   if (resolved.targets.length === 0) {
     return emptyCallEffects();
   }
-  const receiver = ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)
+  const receiver = isAccessExpression(node)
     ? storageFactForExpression(state, summaries, node.expression, owner, node) : unknownFact;
   const parent = outerExpression(node).parent;
   const actuals = kind === "set" && ts.isBinaryExpression(parent) ? [parent.right] : [];
   const groups = resolved.targets.flatMap((target) => {
+    const active = state.invocation;
+    if (active) {
+      const result = evaluateInvocation(state, summaries, {
+        callee: callableFact(active, target, active.frame),
+        facts: actuals.map((actual) => storageFactForExpression(state, summaries, actual, owner, node)),
+        point: node,
+        owner,
+        actuals,
+        receiver,
+        forceGenerator: false,
+        execution: "once",
+      });
+      if (result) { return [result.effects]; }
+    }
     const summary = summaries.get(target);
     return summary ? [instantiateCallableSummary(state, summaries, summary, actuals, node, owner, receiver)] : [];
   });
@@ -2916,7 +2973,7 @@ function holderSites(state: AnalysisState, holder: ts.Expression, owner: EffectO
 
 function isInertUse(model: ScopeModel, expression: ts.Expression): boolean {
   const parent = expression.parent;
-  if (ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) {
+  if (isAccessExpression(parent)) {
     const member = outerExpression(parent);
     return !isCallee(member) && isInertUse(model, member);
   }
@@ -2998,7 +3055,7 @@ function explicitForcingSite(model: ScopeModel, expression: ts.Expression): ts.N
   if (ts.isCallExpression(parent) && iteratedArgument(parent, model) === expression) {
     return parent.expression;
   }
-  if ((ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) &&
+  if ((isAccessExpression(parent)) &&
       ["next", "return", "throw"].includes(methodName(parent) ?? "") && isCallee(outerExpression(parent))) {
     return outerExpression(parent).parent;
   }
@@ -3027,16 +3084,778 @@ function isKnownIterator(state: AnalysisState, summaries: ReadonlyMap<EffectOwne
     isKnownIterator(state, summaries, assignment.value, new Set(seen).add(binding)));
 }
 
+function frameForBinding(state: AnalysisState, binding: Binding): LexicalFrame | undefined {
+  let frame = state.invocation?.frame;
+  const home = declaringOwner(state, binding);
+  if (home && ts.isSourceFile(home)) { return undefined; }
+  while (frame) {
+    if (frame.owner === home) {
+      return frame;
+    }
+    frame = frame.parent;
+  }
+  return undefined;
+}
+
+function cellKey(frame: LexicalFrame, binding: Binding): string {
+  return `${frame.id}/${binding.declarations[0].identifier.getStart()}`;
+}
+
+function invocationBinding(state: AnalysisState, binding: Binding): StorageFact | undefined {
+  const active = state.invocation;
+  if (!active) {
+    return undefined;
+  }
+  const target = binding.declarations.map((item) => item.node).find(isFunctionLikeWithBody);
+  const frame = frameForBinding(state, binding);
+  if (target) {
+    let lexical = active.frame;
+    while (lexical.parent && !inside(target, lexical.owner)) {
+      lexical = lexical.parent;
+    }
+    return callableFact(active, target, lexical);
+  }
+  if (!frame) {
+    return undefined;
+  }
+  const stored = active.store.get(cellKey(frame, binding));
+  if (stored) {
+    return stored;
+  }
+  return undefined;
+}
+
+function callableFact(active: InvocationState, target: EffectOwner, frame: LexicalFrame): StorageFact {
+  const origin: StorageOrigin = `private:${allocationId(target)}:frame=${frame.id}`;
+  active.registry.set(origin, { kind: "source", target, frame, receiver: ts.isArrowFunction(target) ? active.receiver : undefined });
+  return { outer: [origin], reachable: ["private"] };
+}
+
+function heapWritesMember(state: AnalysisState, fact: StorageFact, member: string): boolean {
+  return state.invocation?.heap.some((insertion) =>
+    (insertion.slot === undefined || insertion.slot === `property:${member}`) &&
+    insertion.target.outer.some((origin) => fact.outer.includes(origin))) ?? false;
+}
+
+function invocationValue(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, value: ts.Expression): StorageFact | undefined {
+  const active = state.invocation;
+  if (!active) {
+    return undefined;
+  }
+  if (value.kind === ts.SyntaxKind.ThisKeyword && active.receiver) {
+    return active.receiver;
+  }
+  const library = libraryCallback(value, state.model);
+  if (library) {
+    const origin: StorageOrigin = `private:${allocationId(value)}:library`;
+    active.registry.set(origin, { kind: "library", semantics: library });
+    return { outer: [origin], reachable: ["private"] };
+  }
+  const cached = active.values.get(value);
+  if (cached) {
+    return cached;
+  }
+  const advance = iteratorAdvanceValue(state, summaries, value, active);
+  if (advance) { return advance; }
+  if (ts.isArrowFunction(value) || ts.isFunctionExpression(value)) {
+    return callableFact(active, value, active.frame);
+  }
+  return undefined;
+}
+
+function iteratorAdvanceValue(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, value: ts.Expression, active: InvocationState): StorageFact | undefined {
+  if ((isAccessExpression(value)) && methodName(value) === "next") {
+    const receiver = storageFactForExpression(state, summaries, value.expression, active.frame.owner, value);
+    if (!heapWritesMember(state, receiver, "next") && receiver.outer.length > 0 && receiver.outer.every((origin) => active.registry.get(origin)?.kind === "iterator")) {
+      return joinStorageFacts(receiver.outer.map((iterator) => {
+        const origin: StorageOrigin = `private:${allocationId(value)}:advance=${iterator}`;
+        active.registry.set(origin, { kind: "advance", iterator });
+        return { outer: [origin], reachable: ["private"] };
+      }));
+    }
+  }
+  return undefined;
+}
+
+function invocationEvent(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, node: ts.Node, owner: EffectOwner): void {
+  const active = state.invocation;
+  if (!active) {
+    return;
+  }
+  recordInvocationEvent(state, summaries, node, owner, active);
+  state.factCache.clear();
+  state.insertionCache.clear();
+  if (ts.isExpression(node) && (!ts.isIdentifier(node) || state.model.isReference(node))) {
+    cacheInvocationValue(state, summaries, node, owner, active);
+  }
+}
+
+function recordInvocationEvent(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, node: ts.Node, owner: EffectOwner, active: InvocationState): void {
+  escapeComputedKey(state, summaries, node, owner);
+  if (ts.isVariableDeclaration(node) && node.initializer) {
+    recordVariableAssignment(state, summaries, node, owner, active, node.initializer);
+  } else if (ts.isBinaryExpression(node) && (node.operatorToken.kind === ts.SyntaxKind.EqualsToken || isShortCircuit(node.operatorToken.kind))) {
+    recordBinaryAssignment(state, summaries, node, owner, active);
+  } else if (ts.isCallExpression(node)) {
+    executeInvocation(state, summaries, node, owner);
+  }
+}
+
+function escapeComputedKey(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, node: ts.Node, owner: EffectOwner): void {
+  const key = ts.isElementAccessExpression(node) ? node.argumentExpression
+    : ts.isComputedPropertyName(node) ? node.expression : undefined;
+  if (key && !supportsProtocol(state.model, key, "convert")) {
+    escapeStorage(state, [storageFactForExpression(state, summaries, key, owner, node)], node, owner);
+  }
+}
+
+function recordVariableAssignment(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, node: ts.VariableDeclaration, owner: EffectOwner, active: InvocationState, initializer: ts.Expression): void {
+  for (const binding of state.model.bindings) {
+    const assignment = bindingAssignments(binding).find((item) => item.node === node);
+    const frame = frameForBinding(state, binding);
+    if (assignment && frame) {
+      const fact = storageFactForExpression(state, summaries, initializer, owner, node);
+      active.store.set(cellKey(frame, binding), selectedFact(fact, assignment, (expression) => storageFactForExpression(state, summaries, expression, owner, node)));
+    }
+  }
+}
+
+function recordBinaryAssignment(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, node: ts.BinaryExpression, owner: EffectOwner, active: InvocationState): void {
+  for (const binding of state.model.bindings) {
+    const assignment = binding.references.filter((reference) => inside(reference, node.left)).map(referenceAssignment).find((item) => item !== undefined);
+    const frame = frameForBinding(state, binding);
+    if (assignment) { escapeModuleAssignment(state, summaries, binding, assignment, node, owner); }
+    if (assignment && frame) {
+      const source = assignment.value ? storageFactForExpression(state, summaries, assignment.value, owner, node) : unknownFact;
+      const next = selectedFact(source, assignment, (expression) => storageFactForExpression(state, summaries, expression, owner, node));
+      const key = cellKey(frame, binding);
+      active.store.set(key, assignment.join ? joinStorageFacts([active.store.get(key) ?? storageFactForBinding(state, summaries, binding, owner, node.left), next]) : next);
+    }
+  }
+}
+
+function escapeModuleAssignment(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, binding: Binding, assignment: Assignment, node: ts.Node, owner: EffectOwner): void {
+  if (isModuleScope(binding) && owner !== state.sourceFile && assignment.value) {
+    escapeStorage(state, [storageFactForExpression(state, summaries, assignment.value, owner, node)], node, owner);
+  }
+}
+
+function cacheInvocationValue(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, node: ts.Expression, owner: EffectOwner, active: InvocationState): void {
+  const fact = storageFactForExpression(state, summaries, node, owner, node);
+  const allocation: StorageOrigin = `private:${allocationId(node)}`;
+  const rebase = (origins: readonly StorageOrigin[]): readonly StorageOrigin[] => origins.map((origin): StorageOrigin =>
+    origin === allocation ? `private:${allocationId(node)}:frame=${active.frame.id}` : origin);
+  active.values.set(node, mapStorageFact(fact, rebase, rebase));
+}
+
+function joinBindingStores(initial: ReadonlyMap<string, StorageFact>, branches: readonly ReadonlyMap<string, StorageFact>[]): Map<string, StorageFact> {
+  const keys = new Set(branches.flatMap((branch) => [...branch.keys()]));
+  return new Map([...keys].map((key) => [key, joinStorageFacts(branches.map((branch) => branch.get(key) ?? initial.get(key) ?? unknownFact))]));
+}
+
+function invocationStateKey(active: InvocationState): string {
+  const registry = [...active.registry].map(([origin, instance]) => [origin, instance.kind === "source"
+    ? [instance.kind, instance.target.getStart(), instance.frame.id, instance.receiver]
+    : instance.kind === "iterator" ? [instance.kind, instance.source.target.getStart(), instance.source.frame.id, instance.facts, instance.receiver]
+      : instance.kind === "bound" ? [instance.kind, instance.callee, instance.receiver, instance.facts]
+        : instance]);
+  return JSON.stringify([ [...active.store], active.heap.map((insertion) =>
+    [insertion.target, insertion.slot, insertion.value, insertion.replace]), [...active.arrays], registry ]);
+}
+
+function joinInvocationHeaps(prefix: readonly StorageInsertion[], branches: readonly (readonly StorageInsertion[])[]): StorageInsertion[] {
+  const groups = new Map<string, { insertion: StorageInsertion; values: StorageFact[]; branches: Set<number>; replace: boolean }>();
+  branches.forEach((branch, index) => {
+    for (const insertion of branch.slice(prefix.length)) {
+      const key = JSON.stringify([insertion.kind, insertion.target.outer, insertion.slot]);
+      const group = groups.get(key) ?? { insertion, values: [], branches: new Set<number>(), replace: true };
+      group.values.push(insertion.value);
+      group.branches.add(index);
+      group.replace &&= insertion.replace;
+      groups.set(key, group);
+    }
+  });
+  return [...prefix, ...[...groups.values()].map((group) => ({ ...group.insertion,
+    value: joinStorageFacts(group.values), replace: group.replace && group.branches.size === branches.length }))];
+}
+
+function executeInvocation(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, call: ts.CallExpression, owner: EffectOwner): void {
+  const active = state.invocation;
+  if (!active || active.calls.has(call)) {
+    return;
+  }
+  const expression = unwrapExpression(call.expression);
+  const facts = call.arguments.map((argument) => storageFactForExpression(state, summaries, argument, owner, call));
+  if (bindInvocation(state, summaries, call, owner, active, expression, facts)) { return; }
+  const callee = invocationCallee(state, summaries, call, owner, active, expression);
+  const result = evaluateInvocation(state, summaries, {
+    callee,
+    facts,
+    point: call.expression,
+    owner,
+    actuals: call.arguments,
+    receiver: callReceiver(state, summaries, call, owner),
+    forceGenerator: false,
+    execution: "once",
+  });
+  if (result) {
+    active.calls.set(call, result);
+    active.values.set(call, result.value);
+  }
+}
+
+function bindInvocation(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, call: ts.CallExpression, owner: EffectOwner, active: InvocationState, expression: ts.Expression, facts: readonly StorageFact[]): boolean {
+  if ((isAccessExpression(expression)) && methodName(expression) === "bind") {
+    const callee = storageFactForExpression(state, summaries, expression.expression, owner, call);
+    if (!heapWritesMember(state, callee, "bind") && callee.outer.length > 0 && callee.outer.every((origin) => {
+      const instance = active.registry.get(origin);
+      return instance !== undefined && instance.kind !== "iterator";
+    })) {
+      const origin: StorageOrigin = `private:${allocationId(call)}:bound=${active.frame.id}`;
+      active.registry.set(origin, { kind: "bound", callee, receiver: facts[0] ?? privateFact, facts: facts.slice(1), actuals: call.arguments.slice(1) });
+      const value: StorageFact = { outer: [origin], reachable: ["private"] };
+      active.calls.set(call, { effects: emptyCallEffects(), value });
+      active.values.set(call, value);
+      return true;
+    }
+  }
+  return false;
+}
+
+function invocationCallee(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, call: ts.CallExpression, owner: EffectOwner, active: InvocationState, expression: ts.Expression): StorageFact {
+  let callee = storageFactForExpression(state, summaries, call.expression, owner, call);
+  if (!callee.outer.some((origin) => active.registry.has(origin)) &&
+      !((isAccessExpression(expression)) &&
+        heapWritesMember(state, storageFactForExpression(state, summaries, expression.expression, owner, call), methodName(expression) ?? ""))) {
+    const resolved = resolveTargets(dispatchFor(state, summaries), call.expression);
+    if (resolved.complete && resolved.targets.length > 0 && resolved.targets.every((target) => ts.isMethodDeclaration(target) && !isGenerator(target))) {
+      callee = joinStorageFacts(resolved.targets.map((target) => {
+        let lexical = active.frame;
+        while (lexical.parent && !inside(target, lexical.owner)) {
+          lexical = lexical.parent;
+        }
+        return callableFact(active, target, lexical);
+      }));
+    }
+  }
+  return callee;
+}
+
+function invocationFlow(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, flow: ImplicitFlow, facts: readonly StorageFact[], actuals: readonly ts.Expression[], point: ts.Node, owner: EffectOwner): CallEffects {
+  if (flow.binding && ownsStorage(flow.binding, owner)) {
+    return ownedBindingFlow(state, summaries, flow, flow.binding, point, owner);
+  }
+  if (flow.kind === "output" && flow.origins?.some((origin) => ownedOrigin(state, origin, owner))) {
+    return forwardedFlow(state, summaries, flow, point, owner);
+  }
+  const moved = movedInvocationFlow(state, flow, actuals, point, owner);
+  if (moved.argumentWrite !== "value" || !flow.origins?.length) { return { flows: [moved], writes: [], parameterCalls: [] }; }
+  return callerWriteFlow(state, moved, flow.origins, facts, actuals);
+}
+
+function callerWriteFlow(state: AnalysisState, moved: ImplicitFlow, origins: readonly StorageOrigin[], facts: readonly StorageFact[], actuals: readonly ts.Expression[]): CallEffects {
+  const roots = origins.flatMap((origin) => externalProjection(origin)?.base ?? []);
+  const index = facts.findIndex((fact) => [...fact.outer, ...fact.reachable].some((origin) => {
+    const base = externalProjection(origin)?.base;
+    return base !== undefined && roots.includes(base);
+  }));
+  const actual = actuals[index];
+  return { flows: [actual ? { ...moved, description: `mutates caller-owned value ${actual.getText(state.sourceFile)}` } : moved], writes: [], parameterCalls: [] };
+}
+
+function movedInvocationFlow(state: AnalysisState, flow: ImplicitFlow, actuals: readonly ts.Expression[], point: ts.Node, owner: EffectOwner): ImplicitFlow {
+  const readSite = flow.kind === "input" && flow.readParameterIndex !== undefined ? actuals[flow.readParameterIndex] : undefined;
+  return { ...movedFlow(flow, readSite ?? point, owner, flow.origins), readParameterIndex: undefined,
+    argumentWrite: flow.argumentWrite ?? (flow.kind === "output" ? argumentWriteForOrigins(state, flow.origins ?? [], owner) : undefined) };
+}
+
+function isAsync(owner: EffectOwner): boolean {
+  return ts.canHaveModifiers(owner) && !!ts.getModifiers(owner)?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword);
+}
+
+function promiseFact(point: ts.Node, settled: StorageFact, context: string): StorageFact {
+  const allocation: StorageOrigin = `private:${allocationId(point)}`;
+  const origin: StorageOrigin = `private:${allocationId(point)}:promise=${context}`;
+  const rebase = (origins: readonly StorageOrigin[]) => origins.map((value) => value === allocation ? origin : value);
+  return mapStorageFact(allocatedFact(point, [{ slot: "promise:settled", fact: settled }]), rebase, rebase);
+}
+
+type InvocationRequest = {
+  readonly callee: StorageFact;
+  readonly facts: readonly StorageFact[];
+  readonly point: ts.Node;
+  readonly owner: EffectOwner;
+  readonly actuals: readonly ts.Expression[];
+  readonly receiver?: StorageFact;
+  readonly forceGenerator: boolean;
+  readonly execution: "once" | "callback";
+};
+
+type InvocationResult = { readonly effects: CallEffects; readonly value: StorageFact };
+
+function evaluateInvocation(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, request: InvocationRequest): InvocationResult | undefined {
+  const { callee, point, owner } = request;
+  const active = state.invocation;
+  if (!active) { return undefined; }
+  const instances = callee.outer.flatMap((origin) => {
+    const found = active.registry.get(origin);
+    return found && found.kind !== "iterator" ? [found] : [];
+  });
+  if (!instances.length) {
+    return undefined;
+  }
+  const complete = callee.outer.every((origin) => {
+    const instance = active.registry.get(origin);
+    return instance !== undefined && instance.kind !== "iterator";
+  });
+  const member = ts.isExpression(point) ? unwrapExpression(point) : point;
+  const unresolved = isAccessExpression(member) ? "calls overridable method" : "calls unresolved callable";
+  const groups: CallEffects[] = complete ? [] : [unknownEffects(point, owner, unresolved)];
+  const returns: StorageFact[] = complete ? [] : [unknownFact];
+  const stores: Map<string, StorageFact>[] = [];
+  const arrays: Map<StorageOrigin, PushStart | undefined>[] = [];
+  const heapPrefix = [...active.heap];
+  const context: InvocationContext = { state, summaries, request, active, instances, complete, unresolved, groups, returns, stores, arrays, heapPrefix };
+  for (const instance of instances) {
+    evaluateAlternative(context, instance);
+  }
+  return mergeInvocationAlternatives(context);
+
+}
+
+type InvocationContext = {
+  readonly state: AnalysisState;
+  readonly summaries: ReadonlyMap<EffectOwner, CallableSummary>;
+  readonly request: InvocationRequest;
+  readonly active: InvocationState;
+  readonly instances: readonly Exclude<CallableInstance, { kind: "iterator" }>[];
+  readonly complete: boolean;
+  readonly unresolved: string;
+  readonly groups: CallEffects[];
+  readonly returns: StorageFact[];
+  readonly stores: Map<string, StorageFact>[];
+  readonly arrays: Map<StorageOrigin, PushStart | undefined>[];
+  readonly heapPrefix: readonly StorageInsertion[];
+};
+
+function mergeInvocationAlternatives(context: InvocationContext): InvocationResult {
+  const { state, active, stores, complete, arrays, groups, returns } = context;
+  const { execution } = context.request;
+  for (const store of stores) {
+    for (const [key, value] of store) {
+      active.store.set(key, stores.length === 1 && complete && execution === "once" ? value : joinStorageFacts([active.store.get(key) ?? unknownFact, value]));
+    }
+  }
+  active.arrays = joinArrayStates(state, active.arrays, complete && execution === "once" ? arrays : [active.arrays, ...arrays]);
+  const result = { effects: combineEffects(groups), value: joinStorageFacts(returns) };
+  return result;
+}
+
+function evaluateAdvanceAlternative(context: InvocationContext, instance: Extract<CallableInstance, { kind: "advance" }>): void {
+  const { state, summaries, active, unresolved, groups, returns, stores, arrays } = context;
+  const { point, owner, receiver, execution } = context.request;
+  const iterator = active.registry.get(instance.iterator);
+  if (iterator?.kind !== "iterator" || !receiver?.outer.includes(instance.iterator)) {
+    groups.push(unknownEffects(point, owner, unresolved));
+    returns.push(unknownFact);
+    return;
+  }
+  const callee = callableFact(active, iterator.source.target, iterator.source.frame);
+  const result = evaluateInvocation(state, summaries, {
+    callee,
+    facts: iterator.facts,
+    point,
+    owner,
+    actuals: iterator.actuals,
+    receiver: iterator.receiver,
+    forceGenerator: true,
+    execution,
+  });
+  groups.push(result?.effects ?? unknownEffects(point, owner, unresolved));
+  returns.push(allocatedFact(point, [{ slot: "property:value", fact: result?.value ?? unknownFact }]));
+  stores.push(new Map(active.store));
+  arrays.push(new Map(active.arrays));
+  return;
+}
+
+function evaluateBoundAlternative(context: InvocationContext, instance: Extract<CallableInstance, { kind: "bound" }>): void {
+  const { state, summaries, active, heapPrefix, groups, returns, stores, arrays, complete, instances, unresolved } = context;
+  const { facts, point, owner, actuals, forceGenerator, execution } = context.request;
+  const invocation: InvocationState = { ...active, store: new Map(active.store), heap: [...heapPrefix], arrays: new Map(active.arrays), values: new Map(active.values), calls: new Map(active.calls) };
+  const child = { ...state, invocation, factCache: new Map<string, StorageFact>(), insertionCache: new Map<string, readonly StorageInsertion[]>() };
+  const result = evaluateInvocation(child, summaries, {
+    callee: instance.callee,
+    facts: [...instance.facts, ...facts],
+    point,
+    owner,
+    actuals: [...instance.actuals, ...actuals],
+    receiver: instance.receiver,
+    forceGenerator,
+    execution,
+  });
+  groups.push(result?.effects ?? unknownEffects(point, owner, unresolved));
+  returns.push(result?.value ?? unknownFact);
+  stores.push(invocation.store);
+  arrays.push(invocation.arrays);
+  active.heap.push(...invocation.heap.slice(heapPrefix.length).map((insertion) => ({ ...insertion,
+    replace: insertion.replace && complete && instances.length === 1 && execution === "once" })));
+  return;
+}
+
+function evaluateLibraryAlternative(context: InvocationContext, instance: Extract<CallableInstance, { kind: "library" }>): void {
+  const { active, groups, returns } = context;
+  const { facts, point, owner } = context.request;
+  if (instance.semantics.kind === "effect") {
+    groups.push({ flows: [{ kind: instance.semantics.flow[0], description: instance.semantics.flow[1], node: point, owner }], writes: [], parameterCalls: [] });
+    returns.push(privateFact);
+  } else {
+    const settled = facts[0] ?? privateFact;
+    switch (instance.semantics.call.result) {
+      case "promise": returns.push(promiseFact(point, settled, active.frame.id)); break;
+      case "promise-elements": returns.push(promiseFact(point, shallowStorageFact(point, settled), active.frame.id)); break;
+      case "fresh": returns.push(privateFact); break;
+      default: returns.push(unknownFact);
+    }
+  }
+  return;
+}
+
+function evaluateSourceAlternative(context: InvocationContext, instance: Extract<CallableInstance, { kind: "source" }>): void {
+  const { state, summaries, active, groups, returns, stores, arrays, heapPrefix, complete, instances } = context;
+  const { forceGenerator, facts, point, owner, actuals, execution } = context.request;
+  const deferred = isGenerator(instance.target) && !forceGenerator;
+  if (!deferred && active.stack.includes(instance.target)) {
+    const approximation = summaries.get(instance.target);
+    groups.push(approximation ? instantiateCallableSummaryFromFacts(state, summaries, approximation, facts, point, owner)
+      : unknownEffects(point, owner, "has effects this analysis did not resolve"));
+    returns.push(approximation ? instantiateStorageFact(joinStorageFacts(approximation.returnedAliases), (index) => facts[index] ?? unknownFact) : unknownFact);
+    return;
+  }
+  const invocation = sourceInvocation(context, instance, deferred);
+  const frame = invocation.frame;
+  const child = { ...state, invocation, factCache: new Map<string, StorageFact>(), insertionCache: new Map<string, readonly StorageInsertion[]>() };
+  ownerParameters(instance.target).forEach((parameter, index) => {
+    const binding = state.model.bindings.find((item) => item.declarations.some((declaration) => declaration.node === parameter));
+    if (binding) {
+      invocation.store.set(cellKey(frame, binding), facts[index] ?? unknownFact);
+    }
+  });
+  const summary = summarizeCallable(child, summaries, instance.target, state.includeThis);
+  groups.push(combineEffects([
+    ...[...summary.flows].sort((left, right) => Number(!!right.argumentWrite) - Number(!!left.argumentWrite)).map((flow) => invocationFlow(state, summaries, flow, facts, actuals, point, owner)),
+    { flows: [], writes: summary.parameterWrites.map((write) => ({ ...write, node: point, description: `mutates argument ${parameterName(owner, write.parameterIndex)}` })), parameterCalls: summary.parameterCalls.map((parameterCall) => ({ ...parameterCall, node: point })) },
+  ]));
+  appendSourceReturns(context, instance, invocation, summary, deferred);
+  stores.push(invocation.store);
+  arrays.push(invocation.arrays);
+  active.heap.push(...invocation.heap.slice(heapPrefix.length).map((insertion) => ({ ...insertion,
+    replace: insertion.replace && complete && instances.length === 1 && execution === "once" })));
+}
+
+function sourceInvocation(context: InvocationContext, instance: Extract<CallableInstance, { kind: "source" }>, deferred: boolean): InvocationState {
+  const { active, heapPrefix } = context;
+  const { point, actuals, receiver } = context.request;
+  const callContext = [...active.frame.context, point.getStart()].slice(-2);
+  const frame: LexicalFrame = { id: `${ownerKey(instance.target)}>${callContext.join(">")}`, context: callContext, owner: instance.target, parent: instance.frame };
+  const invocation: InvocationState = { frame, caller: invocationCaller(context), store: new Map(active.store), receiver: ts.isArrowFunction(instance.target) ? instance.receiver : receiver, actuals, phase: deferred ? "parameters" : isGenerator(instance.target) ? "body" : undefined, arrays: new Map(active.arrays), heap: [...heapPrefix], registry: active.registry, values: new Map(), calls: new Map(), stack: [...active.stack, instance.target] };
+  return invocation;
+}
+
+function invocationCaller(context: InvocationContext): NonNullable<InvocationState["caller"]> {
+  const { state, active } = context;
+  const { point, owner, actuals, facts, execution } = context.request;
+  const callableExpression = ts.isExpression(point) ? point : undefined;
+  const callback = actuals.length === 0 && facts.length > 0 || !!callableExpression && parameterCallableIndex(state, callableExpression, owner) !== undefined;
+  const callSite = invocationAt(point);
+  return { owner, point, callback, repeated: execution === "callback" || !!active.caller?.repeated || !!callSite && repeatedCall(callSite, owner) };
+}
+
+function appendSourceReturns(context: InvocationContext, instance: Extract<CallableInstance, { kind: "source" }>, invocation: InvocationState, summary: CallableSummary, deferred: boolean): void {
+  const { state, active, returns } = context;
+  const { point, facts, actuals, receiver } = context.request;
+  const frame = invocation.frame;
+  if (deferred) {
+    const origin: StorageOrigin = `private:${allocationId(point)}:iterator=${active.frame.id}`;
+    const parameters = ownerParameters(instance.target).map((parameter, index) => {
+      const binding = state.model.bindings.find((item) => item.declarations.some((declaration) => declaration.node === parameter));
+      return binding ? invocation.store.get(cellKey(frame, binding)) ?? facts[index] ?? unknownFact : facts[index] ?? unknownFact;
+    });
+    active.registry.set(origin, { kind: "iterator", source: instance, facts: parameters, actuals, receiver });
+    returns.push({ outer: [origin], reachable: [origin] });
+  } else if (isGenerator(instance.target)) {
+    returns.push(...summary.yieldedAliases, ...summary.returnedAliases);
+  } else {
+    returns.push(...(isAsync(instance.target) ? [promiseFact(point, joinStorageFacts(summary.returnedAliases), active.frame.id)] : summary.returnedAliases));
+  }
+}
+
+function evaluateAlternative(context: InvocationContext, instance: Exclude<CallableInstance, { kind: "iterator" }>): void {
+  switch (instance.kind) {
+    case "advance": return evaluateAdvanceAlternative(context, instance);
+    case "bound": return evaluateBoundAlternative(context, instance);
+    case "library": return evaluateLibraryAlternative(context, instance);
+    case "source": return evaluateSourceAlternative(context, instance);
+  }
+}
+
+function forceIterator(
+  state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, expression: ts.Expression, point: ts.Node, owner: EffectOwner,
+  operation: "iterate" | "advance" = "iterate",
+): CallEffects | undefined {
+  const active = state.invocation;
+  if (!active) { return undefined; }
+  const fact = storageFactForExpression(state, summaries, expression, owner, point);
+  if (operation === "advance" && heapWritesMember(state, fact, "next")) { return undefined; }
+  const instances = fact.outer.flatMap((origin) => {
+    const instance = active.registry.get(origin);
+    return instance?.kind === "iterator" ? [{ origin, instance }] : [];
+  });
+  if (!instances.length) { return undefined; }
+  const groups = instances.flatMap(({ origin, instance }) => {
+    const callee = callableFact(active, instance.source.target, instance.source.frame);
+    const result = evaluateInvocation(state, summaries, {
+      callee,
+      facts: instance.facts,
+      point,
+      owner,
+      actuals: instance.actuals,
+      receiver: instance.receiver,
+      forceGenerator: true,
+      execution: operation === "iterate" ? "callback" : "once",
+    });
+    if (result) {
+      active.heap.push({ kind: "cell", node: point, origin: point, target: { outer: [origin], reachable: [origin] }, value: result.value, replace: false });
+    }
+    return result ? [result.effects] : [];
+  });
+  appendUnresolvedIteration(state, active, fact, point, owner, operation, groups);
+  return combineEffects(groups);
+}
+
+function appendUnresolvedIteration(state: AnalysisState, active: InvocationState, fact: StorageFact, point: ts.Node, owner: EffectOwner, operation: "iterate" | "advance", groups: CallEffects[]): void {
+  const unresolvedOrigins = fact.outer.filter((origin) => active.registry.get(origin)?.kind !== "iterator");
+  const complete = operation === "iterate" && unresolvedOrigins.every((origin) => {
+    const position = /^private:(\d+)(?::frame=.*)?$/.exec(origin)?.[1];
+    return position !== undefined && state.arrayLiterals.has(Number(position)) &&
+      !heapWritesMember(state, { outer: [origin], reachable: [origin] }, "Symbol.iterator");
+  });
+  if (unresolvedOrigins.length > 0 && !complete) {
+    const unresolved = unknownEffects(point, owner, operation === "advance" ? "calls unresolved callable" : "uses unresolved iterate protocol");
+    if (operation === "advance") { groups.unshift(unresolved); } else { groups.push(unresolved); }
+  }
+}
+
+function joinArrayStates(state: AnalysisState, initial: ReadonlyMap<StorageOrigin, PushStart | undefined>, branches: readonly ReadonlyMap<StorageOrigin, PushStart | undefined>[]): Map<StorageOrigin, PushStart | undefined> {
+  const joined = new Map(initial);
+  for (const origin of new Set(branches.flatMap((branch) => [...branch.keys()]))) {
+    const states = branches.map((branch) => branch.has(origin) ? branch.get(origin) : initial.has(origin) ? initial.get(origin)
+      : literalAllocationLength(state, origin) === undefined ? undefined : { lowerBound: literalAllocationLength(state, origin) ?? 0, exact: true });
+    const known = states.filter((start): start is PushStart => start !== undefined);
+    joined.set(origin, known.length !== states.length ? undefined : {
+      lowerBound: Math.min(...known.map((start) => start.lowerBound)),
+      exact: known.every((start) => start.exact && start.lowerBound === known[0].lowerBound),
+    });
+  }
+  return joined;
+}
+
+function arrayLengthValue(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, expression: ts.Expression, owner: EffectOwner, point: ts.Node): number | undefined {
+  const value = unwrapExpression(expression);
+  if (ts.isNumericLiteral(value)) { return Number(value.text); }
+  if (ts.isPropertyAccessExpression(value) && value.name.text === "length") {
+    return propertyArrayLength(state, summaries, value.expression, owner, point);
+  }
+  if (ts.isBinaryExpression(value)) {
+    const left = arrayLengthValue(state, summaries, value.left, owner, point);
+    const right = arrayLengthValue(state, summaries, value.right, owner, point);
+    if (left !== undefined && right !== undefined) {
+      if (value.operatorToken.kind === ts.SyntaxKind.PlusToken) { return left + right; }
+      if (value.operatorToken.kind === ts.SyntaxKind.MinusToken) { return Math.max(0, left - right); }
+    }
+  }
+  return undefined;
+}
+
+function propertyArrayLength(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, expression: ts.Expression, owner: EffectOwner, point: ts.Node): number | undefined {
+  const fact = storageFactForExpression(state, summaries, expression, owner, point);
+  const call = invocationAt(point);
+  const start = call ? knownPushStartFromFact(state, fact, owner, call) : fact.outer.length === 1
+    ? state.invocation?.arrays.get(fact.outer[0]) ?? (literalAllocationLength(state, fact.outer[0]) === undefined ? undefined
+      : { lowerBound: literalAllocationLength(state, fact.outer[0]) ?? 0, exact: true }) : undefined;
+  return start?.exact ? start.lowerBound : undefined;
+}
+
+function evaluatedSlot(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, target: ts.AccessExpression, owner: EffectOwner, point: ts.Node): string | undefined {
+  const literal = storageSlot(target);
+  if (literal !== undefined || !ts.isElementAccessExpression(target)) { return literal; }
+  const index = arrayLengthValue(state, summaries, target.argumentExpression, owner, point);
+  if (index !== undefined) { return `property:${index}`; }
+  if (appendIndex(state, target)) {
+    const fact = storageFactForExpression(state, summaries, target.expression, owner, point);
+    const origin = fact.outer.length === 1 ? fact.outer[0] : undefined;
+    const start = origin && state.invocation?.arrays.get(origin);
+    if (start) { return `append:${start.lowerBound}`; }
+  }
+  return undefined;
+}
+
+function advanceArrayState(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, node: ts.Node, owner: EffectOwner): void {
+  const active = state.invocation;
+  if (!active) { return; }
+  if (ts.isCallExpression(node) && !active.calls.has(node)) {
+    advanceArrayCall(state, summaries, node, owner, active);
+  } else if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+    advanceArrayAssignment(state, summaries, node, owner, active);
+  }
+}
+
+function advanceArrayCall(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, node: ts.CallExpression, owner: EffectOwner, active: InvocationState): void {
+  const known = libraryCall(node, state.model);
+  const callee = unwrapExpression(node.expression);
+  if (known?.kind !== "mutating" || known.target !== "receiver" ||
+      (!isAccessExpression(callee))) { return; }
+  const name = methodName(callee);
+  if (!["push", "pop", "shift", "unshift", "splice"].includes(name ?? "")) { return; }
+  const fact = storageFactForExpression(state, summaries, callee.expression, owner, node);
+  const start = knownPushStartFromFact(state, fact, owner, node);
+  const delta = arrayMutationDelta(state, summaries, node, owner, name, start);
+  const next = arrayLengthAfterCall(node, owner, active, start, delta);
+  for (const origin of fact.outer) { active.arrays.set(origin, next); }
+
+}
+
+function arrayLengthAfterCall(node: ts.CallExpression, owner: EffectOwner, active: InvocationState, start: PushStart | undefined, delta: number | undefined): PushStart | undefined {
+  return start && delta !== undefined && !node.arguments.some(ts.isSpreadElement) ? {
+    lowerBound: Math.max(0, start.lowerBound + delta),
+    exact: start.exact && !repeatedCall(node, owner) && !active.caller?.repeated,
+  } : undefined;
+}
+
+function arrayMutationDelta(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, node: ts.CallExpression, owner: EffectOwner, name: string | undefined, start: PushStart | undefined): number | undefined {
+  const removed = node.arguments[1] && arrayLengthValue(state, summaries, node.arguments[1], owner, node);
+  const offset = node.arguments[0] && arrayLengthValue(state, summaries, node.arguments[0], owner, node);
+  if (name === "push" || name === "unshift") { return node.arguments.length; }
+  if (name === "pop" || name === "shift") { return -1; }
+  return spliceLengthDelta(name, node.arguments.length, removed, offset, start);
+
+}
+
+function spliceLengthDelta(name: string | undefined, argumentCount: number, removed: number | undefined, offset: number | undefined, start: PushStart | undefined): number | undefined {
+  return name === "splice" && removed !== undefined && offset !== undefined && start?.exact
+    ? Math.max(0, argumentCount - 2) - Math.min(removed, Math.max(0, start.lowerBound - offset)) : undefined;
+}
+
+function advanceArrayAssignment(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, node: ts.BinaryExpression, owner: EffectOwner, active: InvocationState): void {
+  const left = unwrapExpression(node.left);
+  if (!isAccessExpression(left)) { return; }
+  const slot = evaluatedSlot(state, summaries, left, owner, node);
+  const fact = storageFactForExpression(state, summaries, left.expression, owner, node);
+  if (slot === "property:length") {
+    const length = arrayLengthValue(state, summaries, node.right, owner, node);
+    setArrayLength(active, fact, length);
+  } else if (slot?.startsWith("property:") && /^(0|[1-9][0-9]*)$/.test(slot.slice(9))) {
+    advanceArrayIndex(state, active, fact, Number(slot.slice(9)));
+  } else if (slot?.startsWith("append:")) {
+    const lowerBound = Number(slot.slice(7));
+    fact.outer.forEach((origin) => active.arrays.set(origin, { lowerBound, exact: false }));
+  } else if (slot === undefined) {
+    fact.outer.forEach((origin) => active.arrays.set(origin, undefined));
+  }
+}
+
+function setArrayLength(active: InvocationState, fact: StorageFact, length: number | undefined): void {
+  const start = length === undefined ? undefined : { lowerBound: length, exact: true };
+  fact.outer.forEach((origin) => active.arrays.set(origin, start));
+}
+
+function advanceArrayIndex(state: AnalysisState, active: InvocationState, fact: StorageFact, index: number): void {
+  for (const origin of fact.outer) {
+    const initial = literalAllocationLength(state, origin);
+    const start = active.arrays.has(origin) ? active.arrays.get(origin)
+      : initial === undefined ? undefined : { lowerBound: initial, exact: true };
+    active.arrays.set(origin, start ? { ...start, lowerBound: Math.max(start.lowerBound, index + 1) } : undefined);
+  }
+}
+
 type SummaryDraft = {
   flows: ImplicitFlow[];
   parameterWrites: ParameterWrite[];
   parameterCalls: ParameterCall[];
   storageInsertions: StorageInsertion[];
   returnedAliases: StorageFact[];
-  returnedCallables: EffectOwner[];
-  opaqueReturn: boolean;
+  yieldedAliases: StorageFact[];
   returnedRuns: (CallEffects | undefined)[];
 };
+
+function literalTruth(value: ts.Expression): boolean | undefined {
+  if (value.kind === ts.SyntaxKind.TrueKeyword) { return true; }
+  return value.kind === ts.SyntaxKind.FalseKeyword ? false : undefined;
+}
+
+function literalNullish(value: ts.Expression, truth: boolean | undefined): boolean | undefined {
+  if (value.kind === ts.SyntaxKind.NullKeyword || ts.isVoidExpression(value)) { return true; }
+  return truth !== undefined || ts.isLiteralExpression(value) || ts.isArrayLiteralExpression(value) || ts.isObjectLiteralExpression(value) ? false : undefined;
+}
+
+function shortCircuitRuns(operator: ts.SyntaxKind, truth: boolean | undefined, nullish: boolean | undefined): boolean | undefined {
+  if (operator === ts.SyntaxKind.AmpersandAmpersandToken || operator === ts.SyntaxKind.AmpersandAmpersandEqualsToken) { return truth; }
+  if (operator === ts.SyntaxKind.BarBarToken || operator === ts.SyntaxKind.BarBarEqualsToken) { return truth === undefined ? undefined : !truth; }
+  return nullish;
+}
+
+function shortCircuitBranch(node: ts.BinaryExpression): { readonly children: readonly ts.Node[]; readonly optional: boolean } {
+  const left = unwrapExpression(node.left);
+  const truth = literalTruth(left);
+  const runs = shortCircuitRuns(node.operatorToken.kind, truth, literalNullish(left, truth));
+  return { children: runs === false ? [node.left] : [node.left, node.right], optional: runs === undefined };
+}
+
+function refineCallableBranch(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, condition: ts.Expression, truth: boolean, owner: EffectOwner): boolean {
+  const active = state.invocation;
+  const test = callableTypeTest(condition);
+  if (!active || !test) { return true; }
+  const { expression, equal } = test;
+  const binding = state.model.resolve(expression);
+  const frame = binding && frameForBinding(state, binding);
+  if (!binding || !frame) { return true; }
+  const fact = storageFactForBinding(state, summaries, binding, owner, condition);
+  const callable = truth === equal;
+  const outer = fact.outer.filter((origin) => callableOriginPossible(state, active, origin, callable));
+  const removed = new Set(fact.outer.filter((origin) => !outer.includes(origin)));
+  active.store.set(cellKey(frame, binding), { outer, reachable: fact.reachable.filter((origin) => !removed.has(origin)),
+    cells: fact.cells?.filter((cell) => !removed.has(cell.allocation)) });
+  return outer.length > 0;
+}
+
+function callableTypeTest(condition: ts.Expression): { readonly expression: ts.Identifier; readonly equal: boolean } | undefined {
+  const comparison = unwrapExpression(condition);
+  if (!ts.isBinaryExpression(comparison)) { return undefined; }
+  const operator = comparison.operatorToken.kind;
+  const equal = operator === ts.SyntaxKind.EqualsEqualsEqualsToken || operator === ts.SyntaxKind.EqualsEqualsToken;
+  if (!equal && operator !== ts.SyntaxKind.ExclamationEqualsEqualsToken && operator !== ts.SyntaxKind.ExclamationEqualsToken) { return undefined; }
+  const expression = functionTypeOperand(unwrapExpression(comparison.left), unwrapExpression(comparison.right));
+  return expression ? { expression, equal } : undefined;
+}
+
+function functionTypeOperand(left: ts.Expression, right: ts.Expression): ts.Identifier | undefined {
+  const type = ts.isTypeOfExpression(left) ? left : ts.isTypeOfExpression(right) ? right : undefined;
+  const literal = type === left ? right : left;
+  if (!type || !ts.isStringLiteral(literal) || literal.text !== "function") { return undefined; }
+  const expression = unwrapExpression(type.expression);
+  return ts.isIdentifier(expression) ? expression : undefined;
+}
+
+function callableOriginPossible(state: AnalysisState, active: InvocationState, origin: StorageOrigin, callable: boolean): boolean {
+  const instance = active.registry.get(origin);
+  if (instance) { return callable === (instance.kind !== "iterator"); }
+  const position = /^private:(\d+)(?::frame=.*)?$/.exec(origin)?.[1];
+  const nonCallable = position !== undefined && (state.arrayLiterals.has(Number(position)) || state.objectLiterals.has(Number(position)));
+  return !callable || !nonCallable;
+}
+
+function hasInvocation(state: AnalysisState): state is AnalysisState & { readonly invocation: InvocationState } {
+  return state.invocation !== undefined;
+}
 
 function summarizeCallable(
   state: AnalysisState,
@@ -3044,28 +3863,23 @@ function summarizeCallable(
   owner: EffectOwner,
   includeThis: boolean,
 ): CallableSummary {
+  if (!hasInvocation(state)) {
+    const frame = { id: ownerKey(owner), context: [], owner };
+    const store = new Map<string, StorageFact>();
+    for (const binding of state.model.bindings.filter((item) => isParameterOf(item, owner))) {
+      store.set(cellKey(frame, binding), storageFactAt(state.model, binding, owner, owner));
+    }
+    return summarizeCallable({ ...state, invocation: { frame, store, arrays: new Map(), heap: [], registry: state.callableRegistry, values: new Map(), calls: new Map(), stack: [owner] }, factCache: new Map(), insertionCache: new Map() }, summaries, owner, includeThis);
+  }
   const draft: SummaryDraft = {
-    flows: [], parameterWrites: [], parameterCalls: [], storageInsertions: [], returnedAliases: [], returnedCallables: [], opaqueReturn: false,
+    flows: [], parameterWrites: [], parameterCalls: [], storageInsertions: [], returnedAliases: [], yieldedAliases: [],
     returnedRuns: [],
   };
+  const context: SummaryContext = { state, summaries, owner, includeThis, draft, visit };
   function visit(node: ts.Node): void {
-    const deferred = deferredChildren(node, owner);
-    if (deferred !== undefined) {
-      deferred.forEach(visit);
-      return;
-    }
-    appendEffects(draft, nodeEffects(state, summaries, node, owner, includeThis), defaultParameterIndexFor(node, owner));
-    const returned = returnedExpression(node, owner);
-    if (returned) {
-      appendReturn(state, summaries, draft, returned, owner);
-    }
-    const reachable = reachableChildren(node);
-    if (reachable) {
-      reachable.forEach(visit);
-    } else {
-      ts.forEachChild(node, visit);
-    }
-    draft.storageInsertions.push(...storageInsertionsForNode(state, summaries, node, owner));
+    if (visitDeferredNode(context, node)) { return; }
+    const iterationEffects = visitExecutedChildren(context, node);
+    recordExecutedNode(context, node, iterationEffects);
   }
   executionRoots(owner).forEach(visit);
   appendEffects(draft, inheritedConstructorEffects(state, summaries, owner));
@@ -3076,11 +3890,277 @@ function summarizeCallable(
     parameterCalls: uniqueParameterCalls(draft.parameterCalls),
     storageInsertions: uniqueInsertions(draft.storageInsertions),
     returnedAliases: uniqueFacts(draft.returnedAliases),
-    returnedCallables: uniqueCallables(draft.returnedCallables),
-    opaqueReturn: draft.opaqueReturn,
+    yieldedAliases: uniqueFacts(draft.yieldedAliases),
     returnedRuns: draft.returnedRuns.length > 0 && draft.returnedRuns.every((runs) => runs !== undefined)
       ? combineEffects(draft.returnedRuns as CallEffects[]) : undefined,
   };
+}
+
+type SummaryContext = {
+  readonly state: AnalysisState & { readonly invocation: InvocationState };
+  readonly summaries: ReadonlyMap<EffectOwner, CallableSummary>;
+  readonly owner: EffectOwner;
+  readonly includeThis: boolean;
+  readonly draft: SummaryDraft;
+  readonly visit: (node: ts.Node) => void;
+};
+
+function visitDeferredNode(context: SummaryContext, node: ts.Node): boolean {
+  const { state, summaries, owner, draft, visit } = context;
+  if (state.invocation.phase === "parameters" && node === owner) {
+    ownerParameters(owner).forEach(visit);
+    return true;
+  }
+  if (state.invocation.phase === "body" && ts.isParameter(node)) { return true; }
+  if (ts.isParameter(node) && state.invocation.actuals) {
+    visitSuppliedParameter(context, node, state.invocation.actuals);
+    return true;
+  }
+  const deferred = deferredChildren(node, owner);
+  if (deferred !== undefined) {
+    deferred.forEach(visit);
+    const returned = returnedExpression(node, owner);
+    if (returned) { appendReturn(state, summaries, draft, returned, owner); }
+    return true;
+  }
+  return false;
+}
+
+function parameterBinding(state: AnalysisState, node: ts.ParameterDeclaration): Binding | undefined {
+  return state.model.bindings.find((item) => item.declarations.some((declaration) => declaration.node === node));
+}
+
+function suppliedDefaultMayRun(context: SummaryContext, node: ts.ParameterDeclaration, actuals: readonly ts.Expression[], index: number): boolean {
+  const { state } = context;
+  const binding = parameterBinding(state, node);
+  const supplied = binding && state.invocation.store.get(cellKey(state.invocation.frame, binding));
+  const knownObject = supplied && supplied.outer.length > 0 && supplied.outer.every((origin) => origin.startsWith("private:"));
+  return !knownObject && defaultMayRun(index, actuals, state.model);
+}
+
+function missingArgument(actual: ts.Expression | undefined, model: ScopeModel): boolean {
+  return !actual || (ts.isIdentifier(unwrapExpression(actual)) && globalName(actual, model) === "undefined");
+}
+
+function visitSuppliedParameter(context: SummaryContext, node: ts.ParameterDeclaration, actuals: readonly ts.Expression[]): void {
+  const { state, summaries, owner, visit } = context;
+  const index = ownerParameters(owner).indexOf(node);
+  if (!node.initializer || !suppliedDefaultMayRun(context, node, actuals, index)) { return; }
+  visit(node.initializer);
+  const binding = parameterBinding(state, node);
+  if (binding) {
+    const value = storageFactForExpression(state, summaries, node.initializer, owner, node);
+    const key = cellKey(state.invocation.frame, binding);
+    state.invocation.store.set(key, missingArgument(actuals[index], state.model) ? value : joinStorageFacts([state.invocation.store.get(key) ?? unknownFact, value]));
+  }
+}
+
+function nodeCondition(node: ts.Node): ts.Expression | undefined {
+  if (ts.isIfStatement(node)) { return node.expression; }
+  return ts.isConditionalExpression(node) ? node.condition : undefined;
+}
+
+function executionBranches(node: ts.Node): { readonly reachable?: readonly ts.Node[]; readonly condition?: ts.Expression; readonly split: boolean } {
+  const shortCircuit = ts.isBinaryExpression(node) && isShortCircuit(node.operatorToken.kind) ? shortCircuitBranch(node) : undefined;
+  const condition = nodeCondition(node);
+  const conditionalSplit = condition !== undefined && literalTruth(unwrapExpression(condition)) === undefined;
+  return { reachable: reachableChildren(node) ?? shortCircuit?.children, condition, split: !!shortCircuit?.optional || conditionalSplit };
+}
+
+function visitExecutedChildren(context: SummaryContext, node: ts.Node): CallEffects | undefined {
+  const { visit } = context;
+  const { reachable, condition, split } = executionBranches(node);
+  if (ts.isSwitchStatement(node)) {
+    visitSwitch(context, node);
+  } else if (reachable && split) {
+    visitConditional(context, reachable, condition);
+  } else if (ts.isIterationStatement(node, false) && !reachable) {
+    return visitLoop(context, node);
+  } else if (reachable) {
+    reachable.forEach(visit);
+  } else {
+    ts.forEachChild(node, visit);
+  }
+  return undefined;
+}
+
+function visitSwitch(context: SummaryContext, node: ts.SwitchStatement): void {
+  const { state, visit } = context;
+  visit(node.expression);
+  const active = state.invocation;
+  const initial = new Map(active.store);
+  const heap = [...active.heap];
+  const initialArrays = new Map(active.arrays);
+  const branchArrays: Map<StorageOrigin, PushStart | undefined>[] = [];
+  const values = new Map(active.values);
+  const calls = new Map(active.calls);
+  const clauses = node.caseBlock.clauses;
+  const stores: Map<string, StorageFact>[] = clauses.some(ts.isDefaultClause) ? [] : [initial];
+  const heaps: StorageInsertion[][] = clauses.some(ts.isDefaultClause) ? [] : [heap];
+  for (let start = 0; start < clauses.length; start++) {
+    active.store = new Map(initial);
+    active.heap = [...heap];
+    active.arrays = new Map(initialArrays);
+    active.values.clear();
+    values.forEach((value, key) => active.values.set(key, value));
+    active.calls.clear();
+    calls.forEach((value, key) => active.calls.set(key, value));
+    state.factCache.clear();
+    state.insertionCache.clear();
+    visitSwitchPath(context, clauses.slice(start));
+    stores.push(new Map(active.store));
+    branchArrays.push(new Map(active.arrays));
+    heaps.push([...active.heap]);
+  }
+  active.store = joinBindingStores(initial, stores);
+  active.heap = joinInvocationHeaps(heap, heaps);
+  active.arrays = joinArrayStates(state, initialArrays, clauses.some(ts.isDefaultClause) ? branchArrays : [initialArrays, ...branchArrays]);
+  active.values.clear();
+  values.forEach((value, key) => active.values.set(key, value));
+  active.calls.clear();
+  calls.forEach((value, key) => active.calls.set(key, value));
+}
+
+function visitSwitchPath(context: SummaryContext, clauses: readonly ts.CaseOrDefaultClause[]): void {
+  const { visit } = context;
+  for (const clause of clauses) {
+    if (ts.isCaseClause(clause)) { visit(clause.expression); }
+    for (const statement of clause.statements) {
+      if (ts.isBreakStatement(statement)) { return; }
+      visit(statement);
+      if (ts.isReturnStatement(statement) || ts.isThrowStatement(statement)) { return; }
+    }
+  }
+}
+
+function visitConditional(context: SummaryContext, reachable: readonly ts.Node[], condition: ts.Expression | undefined): void {
+  const { state, summaries, owner, visit } = context;
+  visit(reachable[0]);
+  const initial = new Map(state.invocation.store);
+  const heap = [...state.invocation.heap];
+  const initialArrays = new Map(state.invocation.arrays);
+  const branchArrays: Map<StorageOrigin, PushStart | undefined>[] = [];
+  const values = new Map(state.invocation.values);
+  const calls = new Map(state.invocation.calls);
+  const branches: Map<string, StorageFact>[] = reachable.length === 2 ? [initial] : [];
+  const heaps: StorageInsertion[][] = reachable.length === 2 ? [heap] : [];
+  for (const [branchIndex, branch] of reachable.slice(1).entries()) {
+    state.invocation.store = new Map(initial);
+    state.invocation.heap = [...heap];
+    state.invocation.arrays = new Map(initialArrays);
+    state.invocation.values.clear();
+    values.forEach((value, key) => state.invocation?.values.set(key, value));
+    state.invocation.calls.clear();
+    calls.forEach((value, key) => state.invocation?.calls.set(key, value));
+    state.factCache.clear();
+    state.insertionCache.clear();
+    if (!condition || refineCallableBranch(state, summaries, condition, branchIndex === 0, owner)) { visit(branch); }
+    branches.push(new Map(state.invocation.store));
+    branchArrays.push(new Map(state.invocation.arrays));
+    heaps.push([...state.invocation.heap]);
+  }
+  state.invocation.store = joinBindingStores(initial, branches);
+  state.invocation.heap = joinInvocationHeaps(heap, heaps);
+  state.invocation.arrays = joinArrayStates(state, initialArrays, reachable.length === 2 ? [initialArrays, ...branchArrays] : branchArrays);
+}
+
+function visitLoop(context: SummaryContext, node: ts.IterationStatement): CallEffects | undefined {
+  const { state } = context;
+  const initial = new Map(state.invocation.store);
+  const heap = [...state.invocation.heap];
+  const initialArrays = new Map(state.invocation.arrays);
+  const iterationEffects = visitInitialLoop(context, node);
+  state.invocation.arrays = joinArrayStates(state, initialArrays, [initialArrays, state.invocation.arrays]);
+  state.invocation.store = joinBindingStores(initial, [initial, state.invocation.store]);
+  state.invocation.heap = joinInvocationHeaps([], [heap, state.invocation.heap]);
+  let previous: string;
+  do {
+    const active = state.invocation;
+    previous = invocationStateKey(active);
+    const store = new Map(active.store);
+    const heap = [...active.heap];
+    const arrays = new Map(active.arrays);
+    for (const expression of active.values.keys()) {
+      if (repeatedPartOfIteration(expression, node)) { active.values.delete(expression); }
+    }
+    for (const call of active.calls.keys()) {
+      if (repeatedPartOfIteration(call, node)) { active.calls.delete(call); }
+    }
+    state.factCache.clear();
+    state.insertionCache.clear();
+    visitRepeatedLoop(context, node);
+    active.store = joinBindingStores(store, [store, active.store]);
+    active.heap = joinInvocationHeaps([], [heap, active.heap]);
+    active.arrays = joinArrayStates(state, arrays, [arrays, active.arrays]);
+  } while (invocationStateKey(state.invocation) !== previous);
+  return iterationEffects;
+}
+
+function bindIterationValues(context: SummaryContext, node: ts.ForOfStatement): void {
+  const { state, summaries, owner } = context;
+  const fact = storageFactForExpression(state, summaries, node.expression, owner, node);
+  for (const binding of state.model.bindings) {
+    const assignment = bindingAssignments(binding).find((item) => item.iterated && item.node === node.statement);
+    const frame = frameForBinding(state, binding);
+    if (assignment && frame) {
+      state.invocation.store.set(cellKey(frame, binding), selectedFact(fact, assignment,
+        (expression) => storageFactForExpression(state, summaries, expression, owner, node)));
+    }
+  }
+  state.factCache.clear();
+}
+
+function visitInitialLoop(context: SummaryContext, node: ts.IterationStatement): CallEffects | undefined {
+  const { state, summaries, owner, visit } = context;
+  let iterationEffects: CallEffects | undefined;
+  if (ts.isForOfStatement(node)) {
+    visit(node.expression);
+    iterationEffects = evaluationEffects(state, summaries, node, owner);
+    state.factCache.clear();
+    visit(node.initializer);
+    bindIterationValues(context, node);
+    visit(node.statement);
+  } else {
+    ts.forEachChild(node, visit);
+  }
+  return iterationEffects;
+}
+
+function visitRepeatedLoop(context: SummaryContext, node: ts.IterationStatement): void {
+  const { visit } = context;
+  if (ts.isForStatement(node)) {
+    if (node.condition) { visit(node.condition); }
+    visit(node.statement);
+    if (node.incrementor) { visit(node.incrementor); }
+  } else if (ts.isWhileStatement(node)) {
+    visit(node.expression);
+    visit(node.statement);
+  } else {
+    if (ts.isForOfStatement(node)) {
+      bindIterationValues(context, node);
+    }
+    visit(node.statement);
+    if (ts.isDoStatement(node)) { visit(node.expression); }
+  }
+}
+
+function recordExecutedNode(context: SummaryContext, node: ts.Node, iterationEffects?: CallEffects): void {
+  const { state, summaries, owner, includeThis, draft } = context;
+  invocationEvent(state, summaries, node, owner);
+  appendEffects(draft, nodeEffects(state, summaries, node, owner, includeThis, iterationEffects), defaultParameterIndexFor(node, owner));
+  if (ts.isYieldExpression(node) && node.expression && !node.asteriskToken) {
+    draft.yieldedAliases.push(storageFactForExpression(state, summaries, node.expression, owner, node));
+  }
+  const returned = returnedExpression(node, owner);
+  if (returned) {
+    appendReturn(state, summaries, draft, returned, owner);
+  }
+  const insertions = isInvocation(node) && state.invocation?.calls.has(node)
+    ? [] : storageInsertionsForNode(state, summaries, node, owner);
+  draft.storageInsertions.push(...insertions);
+  state.invocation?.heap.push(...insertions.filter((insertion) => insertion.kind === "cell"));
+  advanceArrayState(state, summaries, node, owner);
+  state.factCache.clear();
 }
 
 function storageInsertionsForNode(
@@ -3096,10 +4176,10 @@ function storageInsertionsForNode(
       return binding && !inside(binding.scope.node, owner) ? [{ kind: "binding", binding, node, origin: node,
         target: unknownFact, value: storageFactForExpression(state, summaries, node.right, owner, node), replace: unconditional(node, owner) }] : [];
     }
-    if (ts.isPropertyAccessExpression(target) || ts.isElementAccessExpression(target)) {
+    if (isAccessExpression(target)) {
       return [{ kind: "cell", node, origin: node, target: storageFactForExpression(state, summaries, target.expression, owner, node),
         value: storageFactForExpression(state, summaries, node.right, owner, node),
-        slot: storageSlot(target), replace: unconditional(node, owner) }];
+        slot: evaluatedSlot(state, summaries, target, owner, node), replace: state.invocation !== undefined || unconditional(node, owner) }];
     }
   }
   return isInvocation(node) ? callStorageInsertions(state, summaries, node, owner) : [];
@@ -3249,17 +4329,21 @@ function libraryStoredArguments(
   const parts = storedArguments(call, args, stores);
   const callee = unwrapExpression(call.expression);
   if (stores !== "arguments" || methodName(callee) !== "push" ||
-      (!ts.isPropertyAccessExpression(callee) && !ts.isElementAccessExpression(callee))) {
+      (!isAccessExpression(callee))) {
     return parts;
   }
   const start = knownPushStart(state, callee.expression, owner, call);
   if (!start) {
     return parts;
   }
-  const appendRange = !start.exact || repeatedCall(call, owner) || args.some(ts.isSpreadElement);
+  const appendRange = pushUsesRange(state, call, owner, start, args);
   return parts.map((part, index) => ({ ...part,
     slot: appendRange ? `append:${start.lowerBound}` : `property:${start.lowerBound + index}`,
   }));
+}
+
+function pushUsesRange(state: AnalysisState, call: ts.CallExpression, owner: EffectOwner, start: PushStart, args: readonly ts.Expression[]): boolean {
+  return !start.exact || !!state.invocation?.caller?.repeated || repeatedCall(call, owner) || args.some(ts.isSpreadElement);
 }
 
 type StoredArgument = { readonly expression: ts.Expression; readonly path: StoragePath; readonly slot?: string };
@@ -3375,15 +4459,28 @@ function nodeEffects(
   node: ts.Node,
   owner: EffectOwner,
   includeThis: boolean,
+  iterationEffects?: CallEffects,
 ): CallEffects {
-  const mutation = mutationEffectsFor(state, summaries, node, owner);
+  const receiverCall = ts.isIdentifier(node) ? methodCallOn(node) : undefined;
+  const deferredMutation = receiverCall && writeOf(state, node)?.contents && libraryCall(receiverCall, state.model)?.kind === "mutating";
+  const mutation = deferredMutation ? { flows: [], writes: [] } : mutationEffectsFor(state, summaries, node, owner);
+  const direct = deferredMutation ? [] : directFlowsFor(state, node, owner, includeThis);
+  const directEffects = directReceiverEffects(state, direct, node, owner);
   return combineEffects([
-    { flows: directFlowsFor(state, node, owner, includeThis), writes: [], parameterCalls: [] },
+    directEffects,
     { ...mutation, parameterCalls: [] },
     ...writeTargets(node).map((target) => computedWriteEffects(state, summaries, target, node, owner)),
     invocationEffects(state, summaries, node, owner),
-    evaluationEffects(state, summaries, node, owner),
+    iterationEffects ?? evaluationEffects(state, summaries, node, owner),
   ]);
+}
+
+function directReceiverEffects(state: AnalysisState, direct: ImplicitFlow[], node: ts.Node, owner: EffectOwner): CallEffects {
+  const receiver = state.invocation?.receiver;
+  return receiver
+    ? combineEffects(direct.map((flow) => flow.receiver ? receiverFlow(state, flow, receiver, node, owner)
+      : { flows: [flow], writes: [], parameterCalls: [] }))
+    : { flows: direct, writes: [], parameterCalls: [] };
 }
 
 function invocationEffects(
@@ -3393,15 +4490,40 @@ function invocationEffects(
   owner: EffectOwner,
 ): CallEffects {
   if (ts.isCallExpression(node)) {
-    return callEffects(state, summaries, node, owner);
+    return callReadEffects(state, summaries, node, owner);
   }
   if (ts.isNewExpression(node)) {
     return constructorEffects(state, summaries, node.expression, node.arguments ?? [], node.expression, owner);
   }
-  if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+  if (isAccessExpression(node)) {
     return accessorEffects(state, summaries, node, owner);
   }
+  const setter = assignedAccessor(node);
+  if (setter) { return accessorKindEffects(state, summaries, setter, owner, "set"); }
   return ts.isTaggedTemplateExpression(node) ? taggedTemplateEffects(state, summaries, node, owner) : emptyCallEffects();
+}
+
+function callReadEffects(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, node: ts.CallExpression, owner: EffectOwner): CallEffects {
+  const effects = callEffects(state, summaries, node, owner);
+  const result = state.invocation?.calls.get(node)?.value;
+  const read = result && externalReads(state, result, storageReadSites(state, node), owner, false);
+  return read ? combineEffects([effects, { flows: [{ kind: "input", node, owner, binding: read, access: "read", description: `reads ${read.name}` }], writes: [], parameterCalls: [] }]) : effects;
+}
+
+function assignedAccessor(node: ts.Node): ts.AccessExpression | undefined {
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
+    const left = unwrapExpression(node.left);
+    if (isAccessExpression(left)) {
+      return left;
+    }
+  }
+  if (isIncrement(node) && (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node))) {
+    const operand = unwrapExpression(node.operand);
+    if (isAccessExpression(operand)) {
+      return operand;
+    }
+  }
+  return undefined;
 }
 
 function taggedTemplateEffects(
@@ -3424,15 +4546,22 @@ function evaluationEffects(
   owner: EffectOwner,
 ): CallEffects {
   return combineEffects(protocolExpressions(node, state.model).map(({ expression, protocol }) => {
-    if (protocol === "iterate" && isKnownIterator(state, summaries, expression)) {
-      return emptyCallEffects();
+    if (protocol === "iterate") {
+      const forced = forceIterator(state, summaries, expression, node, owner);
+      if (forced) { return forced; }
+      if (isKnownIterator(state, summaries, expression)) { return emptyCallEffects(); }
     }
-    if (protocol === "await" && isHotAsyncCall(state, summaries, expression)) {
-      return emptyCallEffects();
-    }
+    if (protocol === "await" && awaitHasNoEffects(state, summaries, expression, node, owner)) { return emptyCallEffects(); }
     return supportsProtocol(state.model, expression, protocol) ? emptyCallEffects()
       : unknownEffects(node, owner, `uses unresolved ${protocol} protocol`);
   }));
+}
+
+function awaitHasNoEffects(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, expression: ts.Expression, node: ts.Node, owner: EffectOwner): boolean {
+  if (isHotAsyncCall(state, summaries, expression)) { return true; }
+  const fact = storageFactForExpression(state, summaries, expression, owner, node);
+  return fact.outer.length > 0 && fact.outer.every((origin) => state.invocation?.registry.get(origin)?.kind === "iterator") &&
+    !heapWritesMember(state, fact, "then");
 }
 
 function isHotAsyncCall(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, expression: ts.Expression): boolean {
@@ -3512,28 +4641,30 @@ function appendReturn(
   const facts = returnedStorageFactsForExpression(state, summaries, expression, owner);
   draft.returnedAliases.push(...facts);
   escapeReturnedStorage(state, facts, expression, owner);
-  const returned = returnedCallablesForExpression(state, summaries, expression);
-  draft.returnedCallables.push(...returned.targets);
-  draft.opaqueReturn ||= !returned.complete;
   draft.returnedRuns.push(iteratorRuns(state, summaries, expression, owner, new Set()));
 }
 
 function uniqueFlows(flows: readonly ImplicitFlow[]): readonly ImplicitFlow[] {
-  const seen = new Set<string>();
-  return flows.filter((flow) => {
-    const key = `${ownerKey(flow.owner)}:${flow.kind}:${flow.description}`;
-    if (seen.has(key)) {
-      return false;
+  return deduplicateFlows(flows, (flow) => `${ownerKey(flow.owner)}:${flow.kind}:${flow.description}`);
+}
+
+function deduplicateFlows(flows: readonly ImplicitFlow[], keyFor: (flow: ImplicitFlow) => string): ImplicitFlow[] {
+  const first = new Map<string, ImplicitFlow>();
+  for (const flow of flows) {
+    const key = keyFor(flow);
+    const previous = first.get(key);
+    if (!previous || flow.kind === "unknown" && (flow.node.getStart() < previous.node.getStart() ||
+        flow.node.getStart() === previous.node.getStart() && flow.node.end > previous.node.end)) {
+      first.set(key, flow);
     }
-    seen.add(key);
-    return true;
-  });
+  }
+  return flows.filter((flow) => first.get(keyFor(flow)) === flow);
 }
 
 function uniqueSummaryFlows(flows: readonly ImplicitFlow[]): readonly ImplicitFlow[] {
   const seen = new Set<string>();
   return flows.filter((flow) => {
-    const site = flow.access === "contents" ? `${flow.node.getStart()}:${flow.writeNode?.getStart()}` : "";
+    const site = flow.access === "contents" || flow.kind === "input" ? `${flow.node.getStart()}:${flow.writeNode?.getStart()}` : "";
     const key = `${ownerKey(flow.owner)}:${flow.kind}:${flow.description}:${site}`;
     if (seen.has(key)) {
       return false;
@@ -3568,25 +4699,27 @@ function uniqueParameterCalls(calls: readonly ParameterCall[]): readonly Paramet
 }
 
 function summaryKey(summary: CallableSummary): string {
+  const effects = (flows: readonly ImplicitFlow[], writes: readonly ParameterWrite[], calls: readonly ParameterCall[]) => ({
+    flows: flows.map((flow) => [flow.kind, flow.description, flow.node.getStart(), flow.defaultParameterIndex,
+      flow.binding && externalBindingOrigin(flow.binding), flow.access, flow.path, flow.receiver, flow.parameterIndex,
+      flow.writeNode?.getStart(), flow.origins, flow.argumentWrite, flow.readParameterIndex, flow.reads]).sort(),
+    writes: writes.map((write) => [write.parameterIndex, write.path, write.description, write.node.getStart(),
+      write.defaultParameterIndex, write.writeNode?.getStart()]).sort(),
+    calls: calls.map((call) => [call.parameterIndex, call.node.getStart(), call.argumentFacts, call.defaultParameterIndex]).sort(),
+  });
   return JSON.stringify({
-    flows: summary.flows.map((flow) => [flow.kind, flow.description, flow.node.getStart(), flow.defaultParameterIndex]).sort(),
-    writes: summary.parameterWrites.map((write) => [write.parameterIndex, write.path, write.description, write.node.getStart(), write.defaultParameterIndex]).sort(),
-    calls: summary.parameterCalls.map((call) => [call.parameterIndex, call.node.getStart(), call.argumentFacts, call.defaultParameterIndex]).sort(),
+    ...effects(summary.flows, summary.parameterWrites, summary.parameterCalls),
     insertions: summary.storageInsertions.map((insertion) => [insertion.node.getStart(), insertion.origin.getStart(), insertion.kind,
       insertion.target, insertion.value, insertion.slot, insertion.appendCall?.getStart(), insertion.replace]),
+    yielded: summary.yieldedAliases,
     aliases: summary.returnedAliases.map((fact) => [fact.outer, fact.reachable, fact.cells]).sort(),
-    opaque: summary.opaqueReturn,
-    returns: summary.returnedCallables.map((node) => node.pos).sort((left, right) => left - right),
-    runs: summary.returnedRuns && [summary.returnedRuns.flows.map((flow) => [flow.kind, flow.description]),
-      summary.returnedRuns.writes.map((write) => [write.parameterIndex, write.path]),
-      summary.returnedRuns.parameterCalls.map((call) => call.parameterIndex)],
+    runs: summary.returnedRuns && effects(summary.returnedRuns.flows, summary.returnedRuns.writes, summary.returnedRuns.parameterCalls),
   });
 }
 
 function clearEpoch(state: AnalysisState): void {
   state.factCache.clear();
   state.insertionCache.clear();
-  state.demands.clear();
 }
 
 function analyzeImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): ImplicitFlow[] {
@@ -3594,7 +4727,7 @@ function analyzeImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): 
   const state = collectCallables(sourceFile, model, includeThis);
   const summaries = new Map<EffectOwner, CallableSummary>(state.callables.map((owner) => [
     owner,
-    { owner, flows: [], parameterWrites: [], parameterCalls: [], storageInsertions: [], returnedAliases: [], returnedCallables: [], opaqueReturn: false },
+    { owner, flows: [], parameterWrites: [], parameterCalls: [], storageInsertions: [], returnedAliases: [], yieldedAliases: [] },
   ]));
   state.summaries = summaries;
   const keys = new Map<EffectOwner, string>();
@@ -3646,22 +4779,26 @@ function analyzeImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): 
 function firstStorageSites(flows: readonly ImplicitFlow[]): ImplicitFlow[] {
   const first = new Map<string, ImplicitFlow>();
   for (const flow of flows) {
-    const key = flowStorageKey(flow);
-    const earlier = key === undefined ? undefined : first.get(key);
-    if (key !== undefined && (!earlier || flow.node.getStart() < earlier.node.getStart())) {
-      first.set(key, flow);
+    for (const key of flowStorageKeys(flow)) {
+      const earlier = first.get(key);
+      if (!earlier || flow.node.getStart() < earlier.node.getStart()) { first.set(key, flow); }
     }
   }
   return flows.filter((flow) => {
-    const key = flowStorageKey(flow);
-    return key === undefined || first.get(key) === flow;
+    const keys = flowStorageKeys(flow);
+    return keys.length === 0 || keys.some((key) => first.get(key) === flow);
   });
 }
 
-function flowStorageKey(flow: ImplicitFlow): string | undefined {
-  const storage = flow.binding ? `binding:${flow.binding.declarations[0]?.identifier.getStart()}`
-    : flow.parameterIndex === undefined ? undefined : `parameter:${flow.parameterIndex}`;
-  return storage && `${ownerKey(flow.owner)}:${flow.kind}:${storage}`;
+function flowStorageKeys(flow: ImplicitFlow): readonly string[] {
+  const origins = flow.origins?.length ? flow.origins : flow.binding ? [externalBindingOrigin(flow.binding)]
+    : flow.parameterIndex === undefined ? [] : [`param:${flow.parameterIndex}` satisfies StorageOrigin];
+  return origins.map((origin) => {
+    const projection = externalProjection(origin) ?? parameterProjection(origin);
+    const root = externalProjection(origin)?.base ?? (parameterProjection(origin) ? `param:${parameterProjection(origin)?.parameterIndex}` : origin);
+    const path = [...projection?.path ?? [], ...Array.isArray(flow.path) ? flow.path : []];
+    return `${ownerKey(flow.owner)}:${flow.kind}:${root}:${JSON.stringify(path)}`;
+  });
 }
 
 function withoutPassedReads(model: ScopeModel, flows: readonly ImplicitFlow[]): ImplicitFlow[] {
@@ -3688,14 +4825,11 @@ function sameLine(left: ts.Node, right: ts.Node): boolean {
 }
 
 function uniqueLines(flows: readonly ImplicitFlow[]): ImplicitFlow[] {
-  const seen = new Set<string>();
-  return flows.filter((flow) => {
+  const keyFor = (flow: ImplicitFlow): string => {
     const line = flow.node.getSourceFile().getLineAndCharacterOfPosition(flow.node.getStart()).line;
-    const key = `${ownerKey(flow.owner)}:${flow.kind}:${line}`;
-    const fresh = !seen.has(key);
-    seen.add(key);
-    return fresh;
-  });
+    return `${ownerKey(flow.owner)}:${flow.kind}:${line}`;
+  };
+  return deduplicateFlows(flows, keyFor);
 }
 
 const flowCacheSymbol = Symbol("explicitnessFlowCache");

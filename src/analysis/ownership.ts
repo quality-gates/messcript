@@ -26,6 +26,9 @@ export type StorageInsertion = ({ readonly kind: "cell" } | { readonly kind: "bi
 
 export type StorageResolver = {
   readonly call: CallStorageResolver;
+  readonly binding?: (binding: Binding, owner: EffectOwner, site: ts.Node) => StorageFact | undefined;
+  readonly callable?: Parameters<typeof storage.objectLiteralFact>[2];
+  readonly value?: (expression: ts.Expression, owner: EffectOwner, site: ts.Node) => StorageFact | undefined;
   readonly insertions: (owner: EffectOwner, site: ts.Node) => readonly StorageInsertion[];
   readonly cache?: Map<string, StorageFact>;
   readonly cycles?: { count: number };
@@ -62,7 +65,7 @@ const PRIMITIVE_GLOBALS = new Set(["undefined", "NaN", "Infinity"]);
 
 const HANDLERS = new Map<number, Handler>([
   [ts.SyntaxKind.ArrayLiteralExpression, (value, context) => storage.arrayLiteralFact(value, (part) => expressionFact(part, context))],
-  [ts.SyntaxKind.ObjectLiteralExpression, (value, context) => storage.objectLiteralFact(value, (part) => expressionFact(part, context))],
+  [ts.SyntaxKind.ObjectLiteralExpression, (value, context) => storage.objectLiteralFact(value, (part) => expressionFact(part, context), context.resolver?.callable)],
   [ts.SyntaxKind.ThisKeyword, thisFact],
   [ts.SyntaxKind.PropertyAccessExpression, memberFact],
   [ts.SyntaxKind.ElementAccessExpression, memberFact],
@@ -81,6 +84,10 @@ export function storageFactAt(
   seen: ReadonlySet<Binding> = new Set(),
   resolver?: StorageResolver,
 ): StorageFact {
+  const resolved = resolver?.binding?.(binding, owner, site);
+  if (resolved) {
+    return insertedFact(resolved, { model, owner, site, seen, resolver });
+  }
   const cached = cachedBindingFact(binding, owner, site, resolver);
   if (cached) {
     return cached;
@@ -91,11 +98,13 @@ export function storageFactAt(
   const beforeCycle = cycleCount(resolver);
   const context = { model, owner, seen: new Set(seen).add(binding), resolver };
   let fact = initialFact(model, binding, owner);
-  const alias = assignments.ambientAlias(binding, owner);
-  if (alias) {
-    const resolve = (part: ts.Expression): StorageFact => expressionFact(part, { ...context, site });
-    fact = storage.selectedFact(resolve(alias.value), alias, resolve);
-  }
+  fact = ambientBindingFact(binding, { ...context, site }, fact);
+  fact = replayBindingEvents(binding, { ...context, site }, fact);
+  return cacheBindingFact(binding, owner, site, resolver, beforeCycle, insertedFact(fact, { ...context, site }));
+}
+
+function replayBindingEvents(binding: Binding, context: FactContext, fact: StorageFact): StorageFact {
+  const { owner, site, resolver } = context;
   const events = [
     ...assignments.assignmentsBeforeSite(binding, owner, site).map((assignment) => ({
       node: assignment.node, replace: !assignment.join,
@@ -112,7 +121,14 @@ export function storageFactAt(
     const next = storage.selectedFact(event.value, event, (part) => expressionFact(part, event.context));
     fact = event.replace ? next : storage.joinFacts(fact, next);
   }
-  return cacheBindingFact(binding, owner, site, resolver, beforeCycle, insertedFact(fact, { ...context, site }));
+  return fact;
+}
+
+function ambientBindingFact(binding: Binding, context: FactContext, initial: StorageFact): StorageFact {
+  const alias = assignments.ambientAlias(binding, context.owner);
+  if (!alias) { return initial; }
+  const resolve = (part: ts.Expression): StorageFact => expressionFact(part, context);
+  return storage.selectedFact(resolve(alias.value), alias, resolve);
 }
 
 export function nodeKey(node: ts.Node): string {
@@ -180,6 +196,10 @@ function initialFact(model: ScopeModel, binding: Binding, owner: EffectOwner): S
 
 function expressionFact(expression: ts.Expression, context: FactContext): StorageFact {
   const value = unwrapExpression(expression);
+  const resolved = context.resolver?.value?.(value, context.owner, context.site);
+  if (resolved) {
+    return insertedFact(resolved, context);
+  }
   if (ts.isIdentifier(value)) {
     const binding = context.model.resolve(value);
     if (binding) {

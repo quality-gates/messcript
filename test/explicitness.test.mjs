@@ -2043,7 +2043,7 @@ test("array slots stay exact only for provably ordered pushes and otherwise over
     ["iife-then-direct-push-0.ts", "function outer() {\n  const values = [0];\n  function read() { return values[0]; }\n  (() => { values.push(1); })();\n  values.push(2);\n  return read();\n}\n", [], ["function outer()", "function read()"]],
     ["escaped-pusher-after-precise-push-2.ts", "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[2] ?? -1; }\n  values.push(1);\n  return { add, read };\n}\n", [["function add()", "ImplicitOutput", 3], ["function read()", "ImplicitInput", 4]], ["function add()", "function read()"]],
     ["escaped-pusher-after-precise-push-0.ts", "function outer() {\n  const values = [0];\n  function add(item: number) { values.push(item); }\n  function read() { return values[0] ?? -1; }\n  values.push(1);\n  return { add, read };\n}\n", [["function add()", "ImplicitOutput", 3]], ["function add()", "function read()"]],
-    ["escaped-unshift-after-precise-push.ts", "function outer() {\n  const values = [0];\n  function shift(item: number) { values.unshift(item); }\n  function read() { return values[0]; }\n  values.push(1);\n  return { shift, read };\n}\n", [["function read()", "ImplicitInput", 4], ["function shift()", "ImplicitOutput", 3]], ["function shift()", "function read()"]],
+    ["escaped-unshift-after-precise-push.ts", "function outer() {\n  const values = [0];\n  function shift(item: number) { values.unshift(item); }\n  function read() { return values[0]; }\n  values.push(1);\n  return { shift, read };\n}\n", [["function read()", "ImplicitInput", 4], ["function shift()", "ImplicitInput", 3], ["function shift()", "ImplicitOutput", 3]], ["function shift()", "function read()"]],
     ["escaped-alias-pusher.ts", "function outer() {\n  const values = [0];\n  const alias = values;\n  function add(item: number) { alias.push(item); }\n  function read() { return values[1] ?? -1; }\n  return { add, read };\n}\n", [["function add()", "ImplicitOutput", 4], ["function read()", "ImplicitInput", 5]], ["function add()", "function read()"]],
     ["escaped-alias-copier.ts", "function outer() {\n  const values = [0];\n  const alias = values;\n  function add(item: number) { return [...alias, item]; }\n  function read() { return values[1] ?? -1; }\n  return { add, read };\n}\n", [], ["function add()", "function read()"]],
     ["length-truncate-1.ts", "function outer() {\n  const values = [0, 7];\n  function read() { return values[1] ?? -1; }\n  values.length = 1;\n  return read();\n}\n", [["function read()", "ImplicitInput", 3]], []],
@@ -2507,13 +2507,12 @@ export function boxed() {
 }
 export function spread() {
   const base = { run: () => { log.push(1); } };
-  const api = { run: () => {}, ...base };
+  const api = { ...{ run: () => {} }, ...base };
   api.run();
 }
 `), [
     "2:ImplicitOutput: The function gen() writes log, an implicit output.",
     "5:ImplicitOutput: The function boxed() writes log, an implicit output.",
-    "5:UnknownEffect: The function boxed() calls unresolved callable, an unknown effect.",
     "8:ImplicitOutput: The arrow function anonymous() writes log, an implicit output.",
     "10:ImplicitOutput: The function spread() writes log, an implicit output.",
   ]);
