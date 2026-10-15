@@ -43,13 +43,46 @@ function bindingClasses(
 
 export function classShape(model: ScopeModel, node: ts.ClassLikeDeclaration, seen: ReadonlySet<ts.Node> = new Set()): Resolution<ts.ClassLikeDeclaration> {
   if (seen.has(node)) { return resolution.unresolved([node]); }
-  const decorated = (part: ts.Node): boolean => ts.canHaveDecorators(part) && (ts.getDecorators(part)?.length ?? 0) > 0;
+  const decorated = (part: ts.Node): boolean => ts.canHaveDecorators(part) &&
+    (ts.getDecorators(part) ?? []).some((decorator) => !inertDecorator(model, decorator));
   const immediate = decorated(node) || node.members.some(member => decorated(member) ||
     ((ts.isConstructorDeclaration(member) || ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) &&
       member.parameters.some(decorated)));
   const base = owners.baseClassExpression(node);
   const parents = base ? classTargets(model, base, new Set(), new Set(seen).add(node)) : resolution.complete([]);
   return immediate || resolution.isDecorated(parents) ? resolution.decorated([node]) : resolution.complete([node]);
+}
+
+/**
+ * Tells if the decorator can neither replace what it decorates nor change it: it names only known function declarations
+ * that read none of their arguments and return nothing.
+ */
+function inertDecorator(model: ScopeModel, decorator: ts.Decorator): boolean {
+  const callee = expressions.unwrapExpression(decorator.expression);
+  const binding = ts.isIdentifier(callee) ? model.resolve(callee) : undefined;
+  return !!binding && binding.declarations.length > 0 && assignments.bindingAssignments(binding).length === 0 &&
+    binding.declarations.every((declaration) => ts.isFunctionDeclaration(declaration.node) && ignoresArguments(model, declaration.node));
+}
+
+/** Tells if the function can reach none of its arguments: it names none of its parameters, uses no arguments object, and calls no direct eval. */
+function ignoresArguments(model: ScopeModel, declaration: ts.FunctionDeclaration): boolean {
+  const names = new Set<ts.Node>(declaration.parameters.map((parameter) => parameter.name));
+  let reaches = false;
+  const visit = (node: ts.Node): void => {
+    reaches ||= ts.isIdentifier(node) && (node.text === "arguments" || node.text === "eval" ||
+      (model.resolve(node)?.declarations.some((entry) => names.has(entry.identifier)) ?? false));
+    ts.forEachChild(node, visit);
+  };
+  if (declaration.body) {
+    visit(declaration.body);
+  }
+  return !!declaration.body && !reaches && !owners.isGenerator(declaration) && !isAsync(declaration) &&
+    declaration.parameters.every((parameter) => ts.isIdentifier(parameter.name) && !parameter.initializer) &&
+    returnedValues(declaration).every((value) => ts.isVoidExpression(value) || isUndefined(model, value));
+}
+
+function isUndefined(model: ScopeModel, value: ts.Expression): boolean {
+  return ts.isIdentifier(value) && value.text === "undefined" && !model.resolve(value);
 }
 
 /** Gives every callable that a call can run, marked incomplete when some are not known. */
@@ -92,7 +125,47 @@ function namedShapes(model: ScopeModel, name: ts.Expression, seen: ReadonlySet<B
 
 function constructedShapes(model: ScopeModel, constructor: ts.Expression): Resolution<Shape> {
   const classes = classTargets(model, constructor);
-  return classes.complete && classes.targets.every(inertConstruction) ? classes : closedShapes(model, classes);
+  const own = classes.complete && classes.targets.every(inertConstruction) ? classes : closedShapes(model, classes);
+  const replacements = classes.targets.flatMap((shape) => replacementValues(model, shape, new Set()));
+  return resolution.join([own, ...replacements.map((value) => replacementShapes(model, value))]);
+}
+
+/**
+ * Gives the values that the constructors of the class, its own and its parents', can return in place of the new object.
+ * A parent that is not known is left to the construction check, which reports it as an unresolved base class.
+ */
+function replacementValues(model: ScopeModel, shape: ts.ClassLikeDeclaration, seen: ReadonlySet<ts.Node>): ts.Expression[] {
+  if (seen.has(shape)) {
+    return [];
+  }
+  const constructor = shape.members.find((member): member is ts.ConstructorDeclaration => ts.isConstructorDeclaration(member) && !!member.body);
+  const base = owners.baseClassExpression(shape);
+  const parents = base ? classTargets(model, base).targets : [];
+  return [...(constructor ? returnedValues(constructor) : []), ...parents.flatMap((parent) => replacementValues(model, parent, new Set(seen).add(shape)))];
+}
+
+/** Gives the shapes a constructor's returned value puts in place of the new object: none for this or a primitive. */
+function replacementShapes(model: ScopeModel, returned: ts.Expression): Resolution<Shape> {
+  const value = expressions.unwrapExpression(returned);
+  const branches = alternatives(value);
+  if (branches) {
+    return resolution.join(branches.map((branch) => replacementShapes(model, branch)));
+  }
+  if (value.kind === ts.SyntaxKind.ThisKeyword || isPrimitive(value) || isUndefined(model, value)) {
+    return resolution.complete([]);
+  }
+  return ts.isObjectLiteralExpression(value) ? literalShapes(model, value) : resolution.unresolved();
+}
+
+/** Kinds of expression whose value is always a primitive, as "a", -1, !x, typeof x, and void x. */
+const PRIMITIVE_KINDS = new Set<ts.SyntaxKind>([
+  ts.SyntaxKind.StringLiteral, ts.SyntaxKind.NoSubstitutionTemplateLiteral, ts.SyntaxKind.TemplateExpression, ts.SyntaxKind.NumericLiteral,
+  ts.SyntaxKind.BigIntLiteral, ts.SyntaxKind.PrefixUnaryExpression, ts.SyntaxKind.TypeOfExpression, ts.SyntaxKind.VoidExpression,
+  ts.SyntaxKind.NullKeyword, ts.SyntaxKind.TrueKeyword, ts.SyntaxKind.FalseKeyword,
+]);
+
+function isPrimitive(value: ts.Expression): boolean {
+  return PRIMITIVE_KINDS.has(value.kind);
 }
 
 function inertConstruction(shape: ts.ClassLikeDeclaration): boolean {
@@ -239,7 +312,6 @@ export function openName(member: ts.Node): boolean {
   return !symbol && expressions.literalName(key) === undefined;
 }
 
-/** Gives the value a property member holds, as x for { add: x }, { x }, and a field initializer. */
 /** Gives the properties of the literal that can hold the member: a later data member replaces the members before it. */
 export function liveProperties(shape: ts.ObjectLiteralExpression, name: string): readonly ts.Node[] {
   const last = shape.properties.reduce((found, property, index) => expressions.declarationName(property) === name &&
@@ -247,6 +319,7 @@ export function liveProperties(shape: ts.ObjectLiteralExpression, name: string):
   return shape.properties.slice(last);
 }
 
+/** Gives the value a property member holds, as x for { add: x }, { x }, and a field initializer. */
 export function memberValue(member: ts.Node): ts.Expression | undefined {
   if (ts.isShorthandPropertyAssignment(member)) {
     return member.name;

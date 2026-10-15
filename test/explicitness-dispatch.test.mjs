@@ -530,3 +530,29 @@ function outer(box: { a: number[] }) {
     "5:ImplicitOutput: The function outer() writes shared, an implicit output.",
   ]);
 });
+
+test("a constructor that returns an object puts its members in place of the class members", () => {
+  const source = (body, base = "") => `const log: number[] = [];
+${base}
+class Counter${base ? " extends Base" : ""} {
+  ${body}
+  tick() { return 0; }
+}
+function outer() {
+  return new Counter().tick();
+}
+`.split("\n").filter(Boolean).join("\n") + "\n";
+  const outer = (name, text) => messages(name, text).filter(message => message.includes("outer()"));
+  const replacing = "constructor() { return { tick: () => { log.push(1); return 1; } }; }";
+  assert.deepEqual(outer("ctor-return-own.ts", source(replacing)), ["7:ImplicitOutput: The function outer() writes log, an implicit output."]);
+  assert.deepEqual(outer("ctor-return-quiet.ts", source("constructor() { return { tick: () => 1 }; }")), []);
+  assert.deepEqual(outer("ctor-return-inherited.ts", source("", `class Base { ${replacing} }`)),
+    ["8:ImplicitOutput: The function outer() writes log, an implicit output."]);
+  assert.deepEqual(outer("ctor-return-opaque.ts", source("constructor() { return make(); }",
+    "function make() { return { tick: () => { log.push(1); return 1; } }; }")),
+  ["8:UnknownEffect: The function outer() calls overridable method, an unknown effect."]);
+  assert.deepEqual(outer("ctor-return-overload.ts", source(`constructor();
+  constructor(x?: number) { return { tick: () => { log.push(1); return 1; } }; }`)),
+  ["8:ImplicitOutput: The function outer() writes log, an implicit output."]);
+  assert.deepEqual(outer("ctor-return-primitive.ts", source("constructor(flag = false) { if (flag) { return undefined; } return -1 as any; }")), []);
+});

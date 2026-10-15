@@ -16,7 +16,7 @@ for (const [name, setup, invoke] of [
   ["returned", "function expose() { return local; }", "expose().go()"],
 ]) {
   test(`decorated member ${name} calls retain replacement uncertainty`, () => {
-    unknown("run", `function mark(...args: unknown[]) {}
+    unknown("run", `declare function mark(...args: unknown[]): any;
 class Local { @mark go() { return 1; } }
 const local = new Local();
 ${setup}
@@ -26,7 +26,7 @@ function run() { ${invoke}; }
 }
 
 test("decorated construction does not certify the original constructor", () => {
-  unknown("run", `function mark(...args: unknown[]) {}
+  unknown("run", `declare function mark(...args: unknown[]): any;
 @mark class Local { value = 1; }
 function run() { return new Local(); }
 `, "constructs unresolved class");
@@ -40,7 +40,7 @@ for (const [name, member, action] of [
   ["static getter", "@mark static go() {} static value = 1;", "Local.value"],
 ]) {
   test(`decorator initializers can change an undecorated ${name}`, () => {
-    unknown("run", `function mark(...args: unknown[]) {}
+    unknown("run", `declare function mark(...args: unknown[]): any;
 class Local { ${member} }
 const local = new Local();
 function run() { return ${action}; }
@@ -50,7 +50,7 @@ function run() { return ${action}; }
 
 for (const [name, action] of [["this", "this.go()"], ["super", "super.go()"]]) {
   test(`decorated base uncertainty survives ${name} dispatch`, () => {
-    unknown("run", `function mark(...args: unknown[]) {}
+    unknown("run", `declare function mark(...args: unknown[]): any;
 class Base { @mark go() { return 1; } }
 class Child extends Base { run() { return ${action}; } }
 `, "calls ");
@@ -58,7 +58,7 @@ class Child extends Base { run() { return ${action}; } }
 }
 
 test("constructor parameter decorators can replace runtime members", () => {
-  unknown("run", `function mark(...args: unknown[]) {}
+  unknown("run", `declare function mark(...args: unknown[]): any;
 class Local { constructor(@mark value: number) {} go() { return 1; } }
 const local = new Local(1);
 function run() { return local.go(); }
@@ -66,7 +66,7 @@ function run() { return local.go(); }
 });
 
 test("unrelated nested decorators do not invalidate an outer class", () => {
-  const source = `function mark(...args: unknown[]) {}
+  const source = `declare function mark(...args: unknown[]): any;
 class Local {
   unrelated() { @mark class Nested {} return Nested; }
   go() { return 1; }
@@ -86,7 +86,7 @@ function run() { const local = new Local(); return local.go(); }
 test("mixed decorated and unresolved aliases retain introduced accessor uncertainty", () => {
   unknown("run", `declare const choose: boolean;
 declare const other: object;
-function mark(...args: unknown[]) {}
+declare function mark(...args: unknown[]): any;
 class Local { @mark go() {} value = 1; }
 const local = choose ? new Local() : other;
 function run() { return local.value; }
@@ -104,7 +104,7 @@ for (const [name, members, setup, action] of [
     const found = messages("partly-known.ts", `declare const choose: boolean;
 declare const other: object;
 let counter = 0;
-function mark(...args: unknown[]) {}
+declare function mark(...args: unknown[]): any;
 class A { ${members} }
 class B { ${member} }
 ${setup}
@@ -112,5 +112,46 @@ function run(x: any) { ${action} }
 `).filter(message => message.includes("run()"));
     assert.ok(found.some(message => message.includes("ImplicitOutput") && message.includes("writes counter")), JSON.stringify(found));
     assert.ok(found.some(message => message.includes("UnknownEffect")), JSON.stringify(found));
+  });
+}
+
+test("a known decorator that ignores its arguments and returns nothing keeps members resolved", () => {
+  assert.deepEqual(messages("inert-decorator.ts", `const log: number[] = [];
+function mark(value: unknown, context: ClassMethodDecoratorContext) {
+  log.push(1);
+  return undefined;
+}
+function outer() {
+  class Box {
+    @mark
+    run() { return 1; }
+  }
+  return new Box().run();
+}
+`).filter(message => message.includes("outer()")), [
+    "8:UnknownEffect: The function outer() uses unresolved decorator application, an unknown effect.",
+  ]);
+});
+
+for (const [name, body, extra = ""] of [
+  ["returns a replacement", "return () => { log.push(1); return 2; };"],
+  ["reads its arguments", "(value as any).patched = true;"],
+  ["reads arguments", "void arguments;"],
+  ["reads arguments in a parameter default", "", ", seen = arguments[0]"],
+  ["calls eval", "eval(\"value.patched = true\");"],
+]) {
+  test(`a known decorator that ${name} keeps replacement uncertainty`, () => {
+    unknown("outer", `const log: number[] = [];
+function mark(value: unknown, context: ClassMethodDecoratorContext${extra}): any {
+  ${body}
+}
+function outer() {
+  class Box {
+    @mark
+    run() { return 1; }
+  }
+  return new Box().run();
+}
+`, "calls ");
   });
 }
