@@ -154,7 +154,7 @@ const { [computedKey]: alias = fallback } = source;
 const object = { [computedKey]: alias, value: source.value };
 const External = class {
   private unusedExternal = 1;
-  private usedExternal = 2;
+  private static usedExternal = 2;
 };
 External.usedExternal;
 `);
@@ -276,7 +276,7 @@ class Access {
   private readHash = 2;
   private readString = 3;
   private writeOnly = 4;
-  private readExternal = 5;
+  private static readExternal = 5;
   read() {
     this.readDot;
     this.#readHash;
@@ -654,6 +654,70 @@ export class C {
 `);
   assert.deepEqual(findingNames(findUnusedPrivateField(file)), ["unused"]);
   assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), ["hidden"]);
+});
+
+test("literal Service[\"secret\"] counts as a use of the static field and does not suppress other unused privates", () => {
+  const file = sourceFile(`
+class Service {
+  private static secret = 1;
+  private static unused = 2;
+  private static hidden() { return 1; }
+  read() {
+    return Service["secret"];
+  }
+}
+`);
+  assert.deepEqual(findingNames(findUnusedPrivateField(file)), ["unused"]);
+  assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), ["hidden"]);
+});
+
+test("numeric this[0] counts as that key only and does not suppress other unused privates", () => {
+  const file = sourceFile(`
+class Service {
+  private secret = 1;
+  private 0 = 2;
+  private 1() { return 1; }
+  private hidden() { return 1; }
+  read() {
+    this[1]();
+    return this[0];
+  }
+}
+`);
+  assert.deepEqual(findingNames(findUnusedPrivateField(file)), ["secret"]);
+  assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), ["hidden"]);
+});
+
+test("Service.member and Service[\"member\"] count only as uses of static private members", () => {
+  const file = sourceFile(`
+class Service {
+  private secret = 1;
+  private keyed = 2;
+  private static shared = 3;
+  private helper() { return 1; }
+  private static build() { return 1; }
+  read() {
+    return [Service.secret, Service["keyed"], Service.shared, Service.helper, Service.build()];
+  }
+}
+`);
+  assert.deepEqual(findingNames(findUnusedPrivateField(file)), ["secret", "keyed"]);
+  assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), ["helper"]);
+});
+
+test("dynamic Service[expr] suppresses unused private members of the named class only", () => {
+  const file = sourceFile(`
+class Service {
+  private static secret = 1;
+  private static hidden() { return 1; }
+}
+class Other {
+  private leftover = 1;
+  read(key: string) { return Service[key]; }
+}
+`);
+  assert.deepEqual(findingNames(findUnusedPrivateField(file)), ["leftover"]);
+  assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), []);
 });
 
 test("classes without dynamic this[expr] still report unused private fields and methods", () => {

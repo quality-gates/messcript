@@ -840,6 +840,52 @@ class StaticCohesion {
   assert.equal(calculateLcom4(staticCohesionFile.statements[1]), 1);
 });
 
+test("GlobalVariable reports loop-target, delete, and copyWithin mutations", () => {
+  const cases = [
+    ["export let current = 0;\nfor (current of [1, 2]) {}", "current"],
+    ["export let key = '';\nfor (key in { a: 1 }) {}", "key"],
+    ["export let current = 0;\nexport async function run() { for await (current of [1]) {} }", "current"],
+    ["export let pair = [0, 0];\nexport let first = 0;\nfor ([first] of [[1]]) {}", "first"],
+    ["export let bag = { a: 1 };\ndelete bag.a;", "bag"],
+    ["export const items = [];\nitems.copyWithin(0, 1);", "items"],
+  ];
+  for (const [source, name] of cases) {
+    assert.deepEqual(messages(findGlobalVariable([sourceFile(source)])), [`Avoid using static mutable state: ${name}.`], source);
+  }
+  const declared = sourceFile("for (const current of [1]) {}\nfor (const key in { a: 1 }) {}");
+  assert.deepEqual(findGlobalVariable([declared]), []);
+});
+
+test("GlobalVariable reports each mutating method call on module state", () => {
+  const methods = ["add", "copyWithin", "delete", "fill", "pop", "push", "reverse", "set", "shift", "sort", "splice", "unshift"];
+  for (const method of methods) {
+    const source = `export const state: any = [];\nstate.${method}(0);`;
+    assert.deepEqual(messages(findGlobalVariable([sourceFile(source)])), ["Avoid using static mutable state: state."], source);
+  }
+  assert.deepEqual(findGlobalVariable([sourceFile("export const state: any = [];\nstate.at(0);")]), []);
+});
+
+test("GlobalVariable reports only Object.assign targets as assign mutations", () => {
+  const mutating = [
+    "Object.assign(state, { value: 1 });",
+    "Object[\"assign\"](state, { value: 1 });",
+    "(Object).assign((state), { value: 1 });",
+  ];
+  for (const call of mutating) {
+    const source = `export let state = { value: 0 };\n${call}`;
+    assert.deepEqual(messages(findGlobalVariable([sourceFile(source)])), ["Avoid using static mutable state: state."], source);
+  }
+  const reading = [
+    "function helper(logger: { assign: (value: object) => void }) {\n  logger.assign(state);\n}",
+    "Object.assign({}, state);",
+    "Object.freeze(state);",
+  ];
+  for (const code of reading) {
+    const source = `export let state = { value: 0 };\n${code}`;
+    assert.deepEqual(findGlobalVariable([sourceFile(source)]), [], source);
+  }
+});
+
 test("structural rules support JavaScript syntax and configured opt-ins", () => {
   const file = sourceFile(`
 let state = 0;
