@@ -53,6 +53,7 @@ import {
   originsForPath,
   parameterOriginIndexes,
   parameterProjection,
+  type StorageCell,
   type StorageFact,
   type StorageOrigin,
   type StoragePath,
@@ -110,6 +111,7 @@ type CallableSummary = {
   readonly parameterWrites: readonly ParameterWrite[];
   readonly deferredCalls: readonly DeferredCall[];
   readonly storageInsertions: readonly StorageInsertion[];
+  readonly arrayResets: readonly StorageFact[];
   readonly returnedAliases: readonly StorageFact[];
   readonly yieldedAliases: readonly StorageFact[];
   readonly returnedRuns?: CallEffects;
@@ -144,6 +146,8 @@ type InvocationState = {
   readonly caller?: { readonly owner: EffectOwner; readonly point: ts.Node; readonly callback: boolean; readonly repeated: boolean };
   store: Map<string, StorageFact>;
   heap: StorageInsertion[];
+  readonly storageWrites: StorageInsertion[];
+  readonly arrayResets: StorageFact[];
   arrays: Map<StorageOrigin, PushStart | undefined>;
   readonly registry: Map<StorageOrigin, CallableInstance>;
   readonly values: Map<ts.Expression, StorageFact>;
@@ -2170,7 +2174,11 @@ function escapeStorage(state: AnalysisState, facts: readonly StorageFact[], site
   const active = state.invocation;
   if (active) {
     const target: StorageFact = { outer: origins, reachable: origins, cells: facts.flatMap((fact) => fact.cells ?? []) };
-    active.heap.push({ kind: "cell", node: site, origin: site, target, value: unknownFact, replace: false });
+    const insertion: StorageInsertion = { kind: "cell", node: site, origin: site, target, value: unknownFact, replace: false };
+    active.heap.push(insertion);
+    active.storageWrites.push(insertion);
+    active.arrayResets.push(target);
+    origins.forEach((origin) => active.arrays.set(origin, undefined));
     state.factCache.clear();
   }
 }
@@ -2265,7 +2273,7 @@ function defaultEffects(summary: CallableSummary, defaults: boolean): CallEffect
 function runSummary(summary: CallableSummary, runs: CallEffects): CallableSummary {
   return {
     owner: summary.owner, flows: runs.flows, parameterWrites: runs.writes, deferredCalls: runs.deferredCalls,
-    storageInsertions: [], returnedAliases: [], yieldedAliases: [],
+    storageInsertions: [], arrayResets: [], returnedAliases: [], yieldedAliases: [],
   };
 }
 
@@ -2571,6 +2579,7 @@ function reboundFlow(
   if (flow.receiver && receiver) {
     return receiverFlow(state, flow, receiver, node, owner);
   }
+  if (flow.kind === "unknown" && resolvedReassignment(state, flow)) { return emptyCallEffects(); }
   const captured = flow.binding && captures.get(flow.binding);
   if (captured) {
     return capturedFlow(state, flow, captured, node, owner);
@@ -3127,6 +3136,15 @@ function frameForBinding(state: AnalysisState, binding: Binding): LexicalFrame |
   return undefined;
 }
 
+function resolvedReassignment(state: AnalysisState, flow: ImplicitFlow): boolean {
+  return flow.binding !== undefined && flow.access === "reassign" && hasLexicalCell(state, flow.binding);
+}
+
+function hasLexicalCell(state: AnalysisState, binding: Binding): boolean {
+  const frame = frameForBinding(state, binding);
+  return frame !== undefined && state.invocation?.store.has(cellKey(frame, binding)) === true;
+}
+
 function cellKey(frame: LexicalFrame, binding: Binding): string {
   return `${frame.id}/${binding.declarations[0].identifier.getStart()}`;
 }
@@ -3469,11 +3487,16 @@ function invocationCallee(state: AnalysisState, summaries: ReadonlyMap<EffectOwn
   return callee;
 }
 
-function invocationFlow(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, flow: ImplicitFlow, facts: readonly StorageFact[], actuals: readonly ts.Expression[], point: ts.Node, owner: EffectOwner): CallEffects {
+function hasOwnedOutput(state: AnalysisState, flow: ImplicitFlow, owner: EffectOwner): boolean {
+  return flow.kind === "output" && flow.origins?.some((origin) => ownedOrigin(state, origin, owner)) === true;
+}
+
+function invocationFlow(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, flow: ImplicitFlow, facts: readonly StorageFact[], actuals: readonly ts.Expression[], point: ts.Node, owner: EffectOwner, lexical: AnalysisState): CallEffects {
+  if (resolvedReassignment(lexical, flow)) { return emptyCallEffects(); }
   if (flow.binding && ownsStorage(flow.binding, owner)) {
     return ownedBindingFlow(state, summaries, flow, flow.binding, point, owner);
   }
-  if (flow.kind === "output" && flow.origins?.some((origin) => ownedOrigin(state, origin, owner))) {
+  if (hasOwnedOutput(state, flow, owner)) {
     return forwardedFlow(state, summaries, flow, point, owner);
   }
   const moved = movedInvocationFlow(state, flow, actuals, point, owner);
@@ -3613,7 +3636,7 @@ function evaluateAdvanceAlternative(context: InvocationContext, instance: Extrac
 function evaluateBoundAlternative(context: InvocationContext, instance: Extract<CallableInstance, { kind: "bound" }>): void {
   const { state, summaries, active, heapPrefix, groups, returns, stores, arrays, complete, instances, unresolved } = context;
   const { facts, point, owner, actuals, forceGenerator, execution } = context.request;
-  const invocation: InvocationState = { ...active, store: new Map(active.store), heap: [...heapPrefix], arrays: new Map(active.arrays), values: new Map(active.values), calls: new Map(active.calls) };
+  const invocation: InvocationState = { ...active, storageWrites: [], arrayResets: [], store: new Map(active.store), heap: [...heapPrefix], arrays: new Map(active.arrays), values: new Map(active.values), calls: new Map(active.calls) };
   const child = { ...state, invocation, factCache: new Map<string, StorageFact>(), insertionCache: new Map<string, readonly StorageInsertion[]>() };
   const result = evaluateInvocation(child, summaries, {
     callee: instance.callee,
@@ -3631,6 +3654,10 @@ function evaluateBoundAlternative(context: InvocationContext, instance: Extract<
   arrays.push(invocation.arrays);
   active.heap.push(...invocation.heap.slice(heapPrefix.length).map((insertion) => ({ ...insertion,
     replace: insertion.replace && complete && instances.length === 1 && execution === "once" })));
+  active.storageWrites.push(...invocation.storageWrites.map((insertion) => ({ ...insertion,
+    node: invocationAt(context.request.point) ?? context.request.point,
+    replace: insertion.replace && complete && instances.length === 1 && execution === "once" && unconditional(context.request.point, context.request.owner) })));
+  active.arrayResets.push(...invocation.arrayResets);
   return;
 }
 
@@ -3667,6 +3694,12 @@ function evaluateSourceAlternative(context: InvocationContext, instance: Extract
   });
   if (!deferred && active.stack.includes(instance.target)) {
     const approximation = summaries.get(instance.target);
+    if (approximation) {
+      groups.push({ flows: applyRecursiveStorage(child, approximation, facts, point).map((binding) => ({
+        kind: "unknown", node: point, owner, binding, access: "reassign",
+        description: "has storage writes this analysis did not resolve",
+      })), writes: [], deferredCalls: [] });
+    }
     groups.push(approximation ? instantiateCallableSummaryFromFacts(child, summaries, approximation, facts, point, owner)
       : unknownEffects(point, owner, "has effects this analysis did not resolve"));
     returns.push(approximation ? instantiateStorageFact(joinStorageFacts(approximation.returnedAliases), (index) => facts[index] ?? unknownFact) : unknownFact);
@@ -3675,12 +3708,104 @@ function evaluateSourceAlternative(context: InvocationContext, instance: Extract
   }
   const summary = summarizeCallable(child, summaries, instance.target, state.includeThis);
   groups.push(combineEffects([
-    ...[...summary.flows].sort((left, right) => Number(!!right.argumentWrite) - Number(!!left.argumentWrite)).map((flow) => invocationFlow(state, summaries, flow, facts, actuals, point, owner)),
+    ...[...summary.flows].sort((left, right) => Number(!!right.argumentWrite) - Number(!!left.argumentWrite)).map((flow) => invocationFlow(state, summaries, flow, facts, actuals, point, owner, child)),
     { flows: [], writes: summary.parameterWrites.map((write) => ({ ...write, node: point, description: `mutates argument ${parameterName(owner, write.parameterIndex)}` })), deferredCalls: [] },
   ]));
   groups.push(instantiateDeferredCalls(child, summaries, summary.deferredCalls, (index) => facts[index] ?? unknownFact, point, owner, instance.target));
   appendSourceReturns(context, instance, invocation, summary, deferred);
   mergeSourceState(context, invocation);
+}
+
+function recursiveCaptures(state: AnalysisState, origins: readonly StorageOrigin[]): ReadonlyMap<StorageOrigin, StorageFact> {
+  const captures = new Map<StorageOrigin, StorageFact>();
+  for (const origin of origins) {
+    const capture = originBinding(state, origin);
+    const value = capture && invocationBinding(state, capture.binding);
+    if (capture && value) {
+      captures.set(origin, capture.path.reduce((current, slot) => memberStorageFact(current, slot), value));
+    }
+  }
+  return captures;
+}
+
+function recursivePrivateOrigins(active: InvocationState | undefined, origin: StorageOrigin, path: "outer" | "reachable"): readonly StorageOrigin[] {
+  if (!active) { return [origin]; }
+  const instance = active.registry.get(origin);
+  if (instance?.kind === "source" && instance.frame.owner === active.frame.owner) {
+    return originsForPath(callableFact(active, instance.target, active.frame), path);
+  }
+  return origin.startsWith("private:") && !instance
+    ? [`private:${Number(origin.split(":")[1])}:frame=${active.frame.id}`] : [origin];
+}
+
+function recursiveStorageOrigins(state: AnalysisState, origins: readonly StorageOrigin[], path: "outer" | "reachable",
+  facts: readonly StorageFact[], captures: ReadonlyMap<StorageOrigin, StorageFact>): readonly StorageOrigin[] {
+  return joinStorageOrigins(origins.flatMap((origin): readonly StorageOrigin[] => {
+    if (parameterProjection(origin)) { return instantiateOrigins([origin], path, (index) => facts[index] ?? unknownFact); }
+    const receiver = state.invocation?.receiver;
+    if (origin === "receiver" && receiver) { return originsForPath(receiver, path); }
+    const capture = captures.get(origin);
+    return capture ? originsForPath(capture, path) : recursivePrivateOrigins(state.invocation, origin, path);
+  }));
+}
+
+function recursiveReceiverCells(state: AnalysisState, origins: readonly StorageOrigin[]): readonly StorageCell[] {
+  return origins.includes("receiver") ? state.invocation?.receiver?.cells ?? [] : [];
+}
+
+function recursiveStorageFact(state: AnalysisState, fact: StorageFact, facts: readonly StorageFact[]): StorageFact {
+  const origins = [...fact.outer, ...fact.reachable, ...(fact.cells ?? []).flatMap((cell) => [cell.allocation, ...cell.origins])];
+  const captures = recursiveCaptures(state, origins);
+  const actualFact = (index: number) => facts[index] ?? unknownFact;
+  const cells = [...recursiveReceiverCells(state, origins), ...parameterOriginIndexes(origins).flatMap((index) => actualFact(index).cells ?? []),
+    ...[...captures.values()].flatMap((capture) => capture.cells ?? [])];
+  return mapStorageFact(fact, (origins) => recursiveStorageOrigins(state, origins, "outer", facts, captures),
+    (origins) => recursiveStorageOrigins(state, origins, "reachable", facts, captures), cells);
+}
+
+function recursiveInsertion(state: AnalysisState, summary: CallableSummary, facts: readonly StorageFact[], insertion: StorageInsertion, point: ts.Node): StorageInsertion {
+  const target = recursiveStorageFact(state, calleeOwnCellsRemoved(insertion.target), facts);
+  const value = recursiveStorageFact(state, insertion.value, facts);
+  const start = insertion.appendCall && knownPushStartFromFact(state, target, summary.owner, insertion.appendCall);
+  const slot = insertion.appendCall ? start ? `append:${start.lowerBound}` : undefined : insertion.slot;
+  return { ...insertion, node: invocationAt(point) ?? point, target, value, slot, replace: false };
+}
+
+function applyRecursiveInsertion(state: AnalysisState, active: InvocationState, insertion: StorageInsertion): Binding | undefined {
+  active.storageWrites.push(insertion);
+  if (insertion.kind === "cell") {
+    active.heap.push(insertion);
+    if (insertion.appendCall) {
+      const start = insertion.slot?.startsWith("append:") ? { lowerBound: Number(insertion.slot.slice(7)), exact: false } : undefined;
+      insertion.target.outer.forEach((origin) => active.arrays.set(origin, start));
+    }
+  } else {
+    const frame = frameForBinding(state, insertion.binding);
+    if (frame) {
+      const key = cellKey(frame, insertion.binding);
+      active.store.set(key, joinStorageFacts([active.store.get(key) ?? unknownFact, insertion.value]));
+    } else if (!isModuleScope(insertion.binding)) {
+      return insertion.binding;
+    }
+  }
+  return undefined;
+}
+
+function applyRecursiveStorage(state: AnalysisState, summary: CallableSummary, facts: readonly StorageFact[], point: ts.Node): readonly Binding[] {
+  const active = state.invocation;
+  if (!active) { return []; }
+  const unresolved = new Set<Binding>();
+  for (const reset of summary.arrayResets) {
+    const fact = recursiveStorageFact(state, reset, facts);
+    active.arrayResets.push(fact);
+    fact.outer.forEach((origin) => active.arrays.set(origin, undefined));
+  }
+  for (const insertion of summary.storageInsertions) {
+    const binding = applyRecursiveInsertion(state, active, recursiveInsertion(state, summary, facts, insertion, point));
+    if (binding) { unresolved.add(binding); }
+  }
+  state.factCache.clear();
+  return [...unresolved];
 }
 
 function mergeSourceState(context: InvocationContext, invocation: InvocationState): void {
@@ -3690,6 +3815,10 @@ function mergeSourceState(context: InvocationContext, invocation: InvocationStat
   arrays.push(invocation.arrays);
   active.heap.push(...invocation.heap.slice(heapPrefix.length).map((insertion) => ({ ...insertion,
     replace: insertion.replace && complete && instances.length === 1 && execution === "once" })));
+  active.storageWrites.push(...invocation.storageWrites.map((insertion) => ({ ...insertion,
+    node: invocationAt(context.request.point) ?? context.request.point,
+    replace: insertion.replace && complete && instances.length === 1 && execution === "once" && unconditional(context.request.point, context.request.owner) })));
+  active.arrayResets.push(...invocation.arrayResets);
 }
 
 function sourceInvocation(context: InvocationContext, instance: Extract<CallableInstance, { kind: "source" }>, deferred: boolean): InvocationState {
@@ -3697,7 +3826,7 @@ function sourceInvocation(context: InvocationContext, instance: Extract<Callable
   const { point, actuals, receiver } = context.request;
   const callContext = [...active.frame.context, point.getStart()].slice(-2);
   const frame: LexicalFrame = { id: `${ownerKey(instance.target)}>${callContext.join(">")}`, context: callContext, owner: instance.target, parent: instance.frame };
-  const invocation: InvocationState = { frame, caller: invocationCaller(context), store: new Map(active.store), receiver: ts.isArrowFunction(instance.target) ? instance.receiver : receiver, actuals, phase: deferred ? "parameters" : isGenerator(instance.target) ? "body" : undefined, arrays: new Map(active.arrays), heap: [...heapPrefix], registry: active.registry, values: new Map(), calls: new Map(), stack: [...active.stack, instance.target] };
+  const invocation: InvocationState = { frame, caller: invocationCaller(context), store: new Map(active.store), receiver: ts.isArrowFunction(instance.target) ? instance.receiver : receiver, actuals, phase: deferred ? "parameters" : isGenerator(instance.target) ? "body" : undefined, arrays: new Map(active.arrays), heap: [...heapPrefix], storageWrites: [], arrayResets: [], registry: active.registry, values: new Map(), calls: new Map(), stack: [...active.stack, instance.target] };
   return invocation;
 }
 
@@ -3857,6 +3986,7 @@ function advanceArrayCall(state: AnalysisState, summaries: ReadonlyMap<EffectOwn
   const name = methodName(callee);
   if (!["push", "pop", "shift", "unshift", "splice"].includes(name ?? "")) { return; }
   const fact = storageFactForExpression(state, summaries, callee.expression, owner, node);
+  if (name !== "push") { active.arrayResets.push(fact); }
   const start = knownPushStartFromFact(state, fact, owner, node);
   const delta = arrayMutationDelta(state, summaries, node, owner, name, start);
   const next = arrayLengthAfterCall(node, owner, active, start, delta);
@@ -3899,11 +4029,13 @@ function advanceArrayAssignment(state: AnalysisState, summaries: ReadonlyMap<Eff
     const lowerBound = Number(slot.slice(7));
     fact.outer.forEach((origin) => active.arrays.set(origin, { lowerBound, exact: false }));
   } else if (slot === undefined) {
+    active.arrayResets.push(fact);
     fact.outer.forEach((origin) => active.arrays.set(origin, undefined));
   }
 }
 
 function setArrayLength(active: InvocationState, fact: StorageFact, length: number | undefined): void {
+  active.arrayResets.push(fact);
   const start = length === undefined ? undefined : { lowerBound: length, exact: true };
   fact.outer.forEach((origin) => active.arrays.set(origin, start));
 }
@@ -4009,7 +4141,9 @@ function summarizeCallable(
     for (const binding of state.model.bindings.filter((item) => isParameterOf(item, owner))) {
       store.set(cellKey(frame, binding), storageFactAt(state.model, binding, owner, owner));
     }
-    return summarizeCallable({ ...state, invocation: { frame, store, arrays: new Map(), heap: [], registry: state.callableRegistry, values: new Map(), calls: new Map(), stack: [owner] }, factCache: new Map(), insertionCache: new Map() }, summaries, owner, includeThis);
+    const invocation: InvocationState = { frame, store, arrays: new Map(), heap: [], storageWrites: [], arrayResets: [], registry: state.callableRegistry, values: new Map(), calls: new Map(), stack: [owner] };
+    const summary = summarizeCallable({ ...state, invocation, factCache: new Map(), insertionCache: new Map() }, summaries, owner, includeThis);
+    return { ...summary, storageInsertions: uniqueInsertions(invocation.storageWrites), arrayResets: uniqueFacts(invocation.arrayResets) };
   }
   const draft: SummaryDraft = {
     flows: [], parameterWrites: [], deferredCalls: [], storageInsertions: [], returnedAliases: [], yieldedAliases: [],
@@ -4029,6 +4163,7 @@ function summarizeCallable(
     parameterWrites: uniqueWrites(draft.parameterWrites),
     deferredCalls: uniqueDeferredCalls(draft.deferredCalls),
     storageInsertions: uniqueInsertions(draft.storageInsertions),
+    arrayResets: uniqueFacts(state.invocation.arrayResets),
     returnedAliases: uniqueFacts(draft.returnedAliases),
     yieldedAliases: uniqueFacts(draft.yieldedAliases),
     returnedRuns: draft.returnedRuns.length > 0 && draft.returnedRuns.every((runs) => runs !== undefined)
@@ -4298,6 +4433,7 @@ function recordExecutedNode(context: SummaryContext, node: ts.Node, iterationEff
   const insertions = isInvocation(node) && state.invocation?.calls.has(node)
     ? [] : storageInsertionsForNode(state, summaries, node, owner);
   draft.storageInsertions.push(...insertions);
+  state.invocation.storageWrites.push(...insertions);
   state.invocation?.heap.push(...insertions.filter((insertion) => insertion.kind === "cell"));
   advanceArrayState(state, summaries, node, owner);
   state.factCache.clear();
@@ -4859,6 +4995,7 @@ function summaryKey(summary: CallableSummary): string {
     ...effects(summary.flows, summary.parameterWrites, summary.deferredCalls),
     insertions: summary.storageInsertions.map((insertion) => [insertion.node.getStart(), insertion.origin.getStart(), insertion.kind,
       insertion.target, insertion.value, insertion.slot, insertion.appendCall?.getStart(), insertion.replace]),
+    resets: summary.arrayResets,
     yielded: summary.yieldedAliases,
     aliases: summary.returnedAliases.map((fact) => [fact.outer, fact.reachable, fact.cells]).sort(),
     runs: summary.returnedRuns && effects(summary.returnedRuns.flows, summary.returnedRuns.writes, summary.returnedRuns.deferredCalls),
@@ -4875,7 +5012,7 @@ function analyzeImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): 
   const state = collectCallables(sourceFile, model, includeThis);
   const summaries = new Map<EffectOwner, CallableSummary>(state.callables.map((owner) => [
     owner,
-    { owner, flows: [], parameterWrites: [], deferredCalls: [], storageInsertions: [], returnedAliases: [], yieldedAliases: [] },
+    { owner, flows: [], parameterWrites: [], deferredCalls: [], storageInsertions: [], arrayResets: [], returnedAliases: [], yieldedAliases: [] },
   ]));
   state.summaries = summaries;
   const keys = new Map<EffectOwner, string>();

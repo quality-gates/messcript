@@ -1389,3 +1389,113 @@ function loop(x: number[], y: number[], f: (x: number[]) => void, n: number): vo
 function outer(y: number[]) { loop([], y, z => z.push(1), 1); }`;
   assert.deepEqual(ownerMessages("outer", "recursive-payload-private.ts", source), []);
 });
+
+
+for (const [label, body] of [
+  ["direct", `acc.push(b); fill(acc, b, n - 1);`],
+  ["helper", `add(0, b, acc); fill(acc, b, n - 1);`],
+  ["mutual", `other(acc, b, n - 1);`],
+]) {
+  test(`recursive ${label} appends retain caller-owned suffix values`, () => {
+    const source = `type Box = { n: number };
+function add(unused: number, b: Box, acc: Box[]) { acc.push(b); }
+function other(acc: Box[], b: Box, n: number): void { acc.push(b); fill(acc, b, n); }
+function fill(acc: Box[], b: Box, n: number): void {
+  if (n <= 0) return;
+  ${body}
+}
+function outer(o: Box) {
+  const xs: Box[] = [{ n: 0 }];
+  fill(xs, o, 2);
+  xs[2].n = 5;
+}`;
+    assert.deepEqual(ownerMessages("outer", `recursive-${label}-storage.ts`, source).map(message => message.split(":")[1]), ["ImplicitOutput"]);
+    assert.deepEqual(ownerMessages("outer", `recursive-${label}-prefix.ts`, source.replace("xs[2].n = 5", "xs[0].n = 5")), []);
+  });
+}
+
+test("recursive shrinking cannot preserve an invalid append prefix", () => {
+  const source = `type Box = { n: number };
+function fill(acc: Box[], b: Box, n: number): void {
+  acc.pop();
+  if (n > 0) fill(acc, b, n - 1);
+  acc.push(b);
+}
+function outer(o: Box) {
+  const xs: Box[] = [{ n: 0 }, { n: 0 }, { n: 0 }];
+  fill(xs, o, 2);
+  xs[0].n = 5;
+}`;
+  assert.deepEqual(ownerMessages("outer", "recursive-shrink-storage.ts", source).map(message => message.split(":")[1]), ["ImplicitOutput"]);
+});
+
+for (const [label, operation] of [
+  ["capture", "xs.push(o)"],
+  ["callback", "append()"],
+]) {
+  test(`recursive ${label} storage keeps enclosing parameter coordinates`, () => {
+    const source = `type Box = { n: number };
+function outer(o: Box) {
+  const xs: Box[] = [{ n: 0 }];
+  const append = () => xs.push(o);
+  function fill(n: number): void {
+    if (n <= 0) return;
+    ${operation};
+    fill(n - 1);
+  }
+  fill(2);
+  xs[2].n = 5;
+}`;
+    assert.deepEqual(ownerMessages("outer", `recursive-${label}-coordinates.ts`, source).map(message => message.split(":")[1]), ["ImplicitOutput"]);
+    assert.deepEqual(ownerMessages("outer", `recursive-${label}-private.ts`, source.replace("xs[2].n = 5", "xs[0].n = 5")), []);
+  });
+}
+
+test("recursive binding writes retain separate closure instances", () => {
+  const source = `type Box = { n: number };
+function make(b: Box) {
+  let selected: Box = { n: 0 };
+  function fill(n: number): void {
+    if (n > 0) fill(n - 1);
+    selected = b;
+  }
+  return () => { fill(2); return selected; };
+}
+function outer(o: Box) {
+  const caller = make(o);
+  const local = make({ n: 0 });
+  local().n = 5;
+  caller().n = 5;
+}`;
+  assert.deepEqual(ownerMessages("outer", "recursive-binding-instances.ts", source).map(message => message.split(":")[1]), ["ImplicitOutput"]);
+  assert.deepEqual(ownerMessages("outer", "recursive-binding-private.ts", source.replace("  caller().n = 5;", "")), []);
+});
+
+test("callbacks created by recursive appends capture the concrete invocation", () => {
+  const source = `type Box = { n: number };
+function fill(acc: (() => void)[], b: Box, n: number): void {
+  if (n <= 0) return;
+  acc.push(() => { b.n = 1; });
+  fill(acc, b, n - 1);
+}
+function outer(o: Box) {
+  const xs = [() => {}];
+  fill(xs, o, 2);
+  xs[2]();
+}`;
+  assert.deepEqual(ownerMessages("outer", "recursive-created-callback.ts", source).map(message => message.split(":")[1]), ["ImplicitOutput"]);
+  assert.deepEqual(ownerMessages("outer", "recursive-created-callback-private.ts", source.replace("fill(xs, o, 2)", "fill(xs, { n: 0 }, 2)")), []);
+});
+
+test("retained setters keep their captured writes outside a local factory call", () => {
+  const source = `function make() {
+  let selected = 0;
+  return function setter() { selected = 1; };
+}
+const retained = make();
+function external() { retained(); }
+function outer() { const local = make(); local(); }`;
+  assert.deepEqual(ownerMessages("setter", "retained-setter.ts", source).map(message => message.split(":")[1]), ["ImplicitOutput"]);
+  assert.deepEqual(ownerMessages("external", "retained-setter-call.ts", source).map(message => message.split(":")[1]), ["ImplicitOutput"]);
+  assert.deepEqual(ownerMessages("outer", "local-setter-call.ts", source), []);
+});
