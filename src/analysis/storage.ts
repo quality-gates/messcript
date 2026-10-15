@@ -9,7 +9,7 @@ import { globalName } from "../ast/global-reference";
  * Receiver storage belongs to this. A parameter origin names the argument that supplies the storage.
  * Unknown storage has an origin this analysis does not trace.
  */
-export type StorageOrigin = "private" | "unknown" | "external" | "receiver" | `private:${number}` | `private:${number}:${string}` | `param:${number}` | `param:${number}:${string}` | `external:${number}` | `external:${number}:${string}`;
+export type StorageOrigin = `host:${string}` | "private" | "unknown" | "external" | "receiver" | `private:${number}` | `private:${number}:${string}` | `param:${number}` | `param:${number}:${string}` | `external:${number}` | `external:${number}:${string}`;
 
 /** The origins of a value's own storage, its direct references, and the storage reachable at the query site. */
 export type StorageFact = {
@@ -104,7 +104,30 @@ function projectedPath(path: readonly string[], slot: string): string {
   return next.map(encodeURIComponent).join("/");
 }
 
+export function hostName(origin: StorageOrigin): string | undefined {
+  if (!origin.startsWith("host:")) { return undefined; }
+  const [root = "", ...path] = origin.slice(5).split("/");
+  const slots = path.map(decodeURIComponent);
+  const name = decodeURIComponent(root);
+  return !name.includes(".") && slots.every((slot) => slot.startsWith("property:") &&
+    slot.length > 9 && !slot.slice(9).includes("."))
+    ? [name, ...slots.map((slot) => slot.slice(9))].filter(Boolean).join(".") : undefined;
+}
+
+function projectedHostOrigin(origin: `host:${string}`, slot: string): StorageOrigin {
+  if (origin === "host:" && slot.startsWith("property:")) {
+    const name = slot.slice(9);
+    if (["globalThis", "window", "self"].includes(name)) { return origin; }
+    return name ? `host:${encodeURIComponent(name)}` : "host:/property%3A";
+  }
+  const [root = "", ...path] = origin.slice(5).split("/");
+  return `host:${root}/${projectedPath(path.map(decodeURIComponent), slot)}`;
+}
+
 function projectedOrigin(origin: StorageOrigin, slot: string): StorageOrigin {
+  if (origin.startsWith("host:")) {
+    return projectedHostOrigin(`host:${origin.slice(5)}`, slot);
+  }
   const projection = parameterProjection(origin);
   if (projection) {
     return `param:${projection.parameterIndex}:${projectedPath(projection.path, slot)}`;
@@ -114,7 +137,7 @@ function projectedOrigin(origin: StorageOrigin, slot: string): StorageOrigin {
 }
 
 export function hasExternalOrigin(origins: readonly StorageOrigin[]): boolean {
-  return origins.some((origin) => origin === "external" || origin.startsWith("external:"));
+  return origins.some((origin) => origin === "external" || origin.startsWith("external:") || origin.startsWith("host:"));
 }
 
 export function hasUnknownOrigin(origins: readonly StorageOrigin[]): boolean {

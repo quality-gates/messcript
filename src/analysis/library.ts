@@ -17,7 +17,6 @@ export type LibraryStorage = "none" | "arguments" | "sources" | "splice" | "entr
 
 /**
  * A standard library call this analysis models.
- * An effect call reads or writes ambient state, which the identifier that names it reports.
  * A mutating call writes its receiver, or its first argument for Object.assign.
  * Callbacks are the argument indexes the call invokes before it returns.
  */
@@ -119,18 +118,21 @@ export function isPureConstructor(name: string | undefined): boolean {
   return name !== undefined && PURE_CONSTRUCTORS.has(name);
 }
 
-export function libraryCallback(expression: ts.Expression, model: ScopeModel): LibraryCallback | undefined {
-  const name = globalName(expression, model);
+function isOutputCallable(name: string): boolean {
+  return name.startsWith("console.") || name !== "console" && OUTPUT_SINKS.has(name);
+}
+
+export function libraryCallbackNamed(name: string | undefined): LibraryCallback | undefined {
   if (!name) {
     return undefined;
   }
   if (NONDETERMINISTIC_CALLS.has(name)) {
     return { kind: "effect", flow: ["input", `calls ${name}`] };
   }
-  if (name.startsWith("console.") || OUTPUT_SINKS.has(name)) {
+  if (isOutputCallable(name)) {
     return { kind: "effect", flow: ["output", `uses ${name.startsWith("console.") ? "console" : name}`] };
   }
-  const call = FRESH_GLOBAL_CALLS.has(name) ? globalCall(name, expression) : undefined;
+  const call = FRESH_GLOBAL_CALLS.has(name) ? globalCall(name) : undefined;
   return call && call.kind !== "effect" ? { kind: "pure", call } : undefined;
 }
 
@@ -177,9 +179,13 @@ function nonCallableArgument(argument: ts.Expression, model: ScopeModel): boolea
     globalName(value, model) === "undefined" || standardMethod(model, value, "toString");
 }
 
-function globalCall(name: string, callee: ts.Expression): LibraryCall | undefined {
-  const roots = [name.split(".")[0], globalObjectMember(callee) ?? ""];
-  if (roots.some((root) => OUTPUT_SINKS.has(root)) || NONDETERMINISTIC_CALLS.has(name) || name === "Date") {
+function isEffectCall(name: string, callee: ts.Expression | undefined): boolean {
+  const roots = [name.split(".")[0], callee ? globalObjectMember(callee) ?? "" : ""];
+  return roots.some((root) => OUTPUT_SINKS.has(root)) || NONDETERMINISTIC_CALLS.has(name) || name === "Date";
+}
+
+function globalCall(name: string, callee?: ts.Expression): LibraryCall | undefined {
+  if (isEffectCall(name, callee)) {
     return { kind: "effect" };
   }
   if (name === "Object.assign") {
@@ -302,15 +308,49 @@ function sinkName(node: ts.Identifier, name: string): string {
   return (access && globalObjectMember(access)) ?? name;
 }
 
-/** Gives the ambient input or output that an identifier naming the unbound global reaches. */
+const HOST_ROOTS = new Set([
+  ...HOST_OBJECTS, ...OUTPUT_SINKS, ...PURE_CONSTRUCTORS,
+  ...[...NONDETERMINISTIC_CALLS, ...FRESH_GLOBAL_CALLS, ...CALLBACK_GLOBAL_CALLS,
+    ...ITERATING_GLOBAL_CALLS, ...HOLDING_GLOBAL_CALLS.keys()].map((name) => name.split(".")[0] ?? name),
+]);
+
+export function isHostRoot(name: string | undefined): boolean {
+  return name !== undefined && HOST_ROOTS.has(name);
+}
+
+export function hostReference(node: ts.Expression, model: ScopeModel): string | undefined {
+  return ts.isIdentifier(node) && !model.resolve(node) && isHostRoot(node.text)
+    ? ["globalThis", "window", "self"].includes(node.text) ? "" : node.text : undefined;
+}
+
+function referencedHost(node: ts.Identifier, name: string): string | undefined {
+  const slots: string[] = [];
+  let current: ts.Expression = outerExpression(node);
+  while ((ts.isPropertyAccessExpression(current.parent) || ts.isElementAccessExpression(current.parent)) &&
+      current.parent.expression === current) {
+    const member = methodName(current.parent);
+    if (member === undefined || member === "" || member.includes(".")) { return undefined; }
+    slots.push(member);
+    current = outerExpression(current.parent);
+  }
+  return [name, ...slots].join(".").replace(/^(globalThis|window|self)\./, "");
+}
+
+function capturesHostGlobal(node: ts.Identifier, name: string): boolean {
+  if (!["globalThis", "window", "self"].includes(name)) { return false; }
+  const full = referencedHost(node, name);
+  return full === name || full !== undefined && (HOST_ROOTS.has(full) || libraryCallbackNamed(full) !== undefined);
+}
+
 export function ambientFlow(node: ts.Identifier, written: boolean, name = node.text): AmbientFlow | undefined {
   const sink = sinkName(node, name);
-  if (OUTPUT_SINKS.has(sink)) {
+  if (written && OUTPUT_SINKS.has(sink)) {
     return ["output", `uses ${sink}`];
   }
-  if (HOST_OBJECTS.has(name)) {
+  const capturedGlobal = capturesHostGlobal(node, name);
+  if (HOST_OBJECTS.has(name) && (written || !capturedGlobal)) {
     return written ? ["output", `writes ${name}`] : ["input", `reads ${name}`];
   }
   const call = ambientCallDescription(node, name);
-  return call ? ["input", call] : undefined;
+  return call && name === "Date" ? ["input", call] : undefined;
 }

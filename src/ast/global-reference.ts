@@ -41,9 +41,8 @@ function dottedName(node: ts.Expression, resolvesRoot: boolean): string | undefi
     return undefined;
   }
   const key = memberKey(expression);
-  if (key === undefined || isGlobalObject(expression.expression)) {
-    return key;
-  }
+  if (!key || key.includes(".")) { return undefined; }
+  if (isGlobalObject(expression.expression)) { return key; }
   const receiver = dottedName(expression.expression, resolvesRoot);
   return receiver === undefined ? undefined : `${receiver}.${key}`;
 }

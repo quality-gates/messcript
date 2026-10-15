@@ -128,7 +128,9 @@ function ambientBindingFact(binding: Binding, context: FactContext, initial: Sto
   const alias = assignments.ambientAlias(binding, context.owner);
   if (!alias) { return initial; }
   const resolve = (part: ts.Expression): StorageFact => expressionFact(part, context);
-  return storage.selectedFact(resolve(alias.value), alias, resolve);
+  const fact = storage.selectedFact(resolve(alias.value), alias, resolve);
+  return ts.isVariableDeclaration(alias.node) && !(alias.node.parent.flags & ts.NodeFlags.Const) &&
+    fact.outer.some((origin) => origin.startsWith("host:")) ? initial : fact;
 }
 
 export function nodeKey(node: ts.Node): string {

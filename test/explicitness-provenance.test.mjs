@@ -1499,3 +1499,161 @@ function outer() { const local = make(); local(); }`;
   assert.deepEqual(ownerMessages("external", "retained-setter-call.ts", source).map(message => message.split(":")[1]), ["ImplicitOutput"]);
   assert.deepEqual(ownerMessages("outer", "local-setter-call.ts", source), []);
 });
+
+for (const [label, declaration, call, kind] of [
+  ["constant", "const out = console", 'out.log("a")', "ImplicitOutput"],
+  ["mutable", "let out = console", 'out.log("a")', "ImplicitOutput"],
+  ["double", "const out = console; const other = out", 'other.log("a")', "ImplicitOutput"],
+  ["element", "const out = console", 'out["log"]("a")', "ImplicitOutput"],
+  ["global", "const g = globalThis", 'g.console.log("a")', "ImplicitOutput"],
+  ["window", "const g = window", 'g.console.log("a")', "ImplicitOutput"],
+  ["clock", "const g = globalThis", "g.Date.now()", "ImplicitInput"],
+]) {
+  test(`host aliases report ${label} effects when invoked`, () => {
+    const source = `function outer() {
+  ${declaration};
+  ${call};
+  return 1;
+}`;
+    assert.deepEqual(ownerMessages("outer", `host-alias-${label}.ts`, source).map(message => message.split(":").slice(0, 2).join(":")), [`3:${kind}`]);
+  });
+}
+
+test("host references keep invocation effects out of their capture", () => {
+  const source = `function outer() {
+  const out = console;
+  const log = out.log;
+  const now = Date.now;
+  return () => { log("a"); return now(); };
+}`;
+  assert.deepEqual(ownerMessages("outer", "host-reference-capture.ts", source), []);
+});
+
+test("host aliases respect a definite replacement with a local logger", () => {
+  const source = `function outer() {
+  let out = console;
+  out = { log: (_message: string) => {} } as typeof console;
+  out.log("a");
+}`;
+  assert.deepEqual(ownerMessages("outer", "host-alias-replaced.ts", source), []);
+});
+
+test("module local arrow properties do not acquire host effects", () => {
+  const source = `const g = { Date: { now: () => 5 } };
+function outer() { return g.Date.now(); }`;
+  assert.deepEqual(ownerMessages("outer", "module-local-arrow-clock.ts", source), []);
+});
+
+test("host aliases keep member replacement visible and then invoke its current value", () => {
+  const source = `function outer() {
+  let out = console;
+  out.log = () => {};
+  out.log("a");
+}`;
+  assert.deepEqual(ownerMessages("outer", "host-member-replaced.ts", source).map(message => message.split(":").slice(0, 2).join(":")), ["3:ImplicitOutput"]);
+});
+
+test("host aliases retain global writes and data reads", () => {
+  const source = `function write() {
+  let host = globalThis;
+  host.answer = 1;
+}
+function read() {
+  let page = document;
+  return page.title;
+}`;
+  assert.deepEqual(ownerMessages("write", "host-global-write.ts", source).map(message => message.split(":").slice(0, 2).join(":")), ["3:ImplicitOutput"]);
+  assert.deepEqual(ownerMessages("read", "host-global-read.ts", source).map(message => message.split(":").slice(0, 2).join(":")), ["6:ImplicitInput"]);
+});
+
+test("host aliases keep bound callbacks and module references", () => {
+  const source = `const host = globalThis;
+const out = host.console;
+function outer() {
+  const log = out.log;
+  const bound = log.bind(out);
+  bound("a");
+}`;
+  assert.deepEqual(ownerMessages("outer", "host-module-bound.ts", source).map(message => message.split(":").slice(0, 2).join(":")), ["6:ImplicitOutput"]);
+});
+
+for (const callee of ["console.log", "out.log"]) {
+  test(`host replacement retains an unresolved ${callee} call`, () => {
+    const source = `declare const opaque: typeof console.log;
+function outer() {
+  const out = console;
+  out.log = opaque;
+  ${callee}("a");
+}`;
+    assert.deepEqual(ownerMessages("outer", `host-replaced-${callee}.ts`, source).filter(message => message.includes("UnknownEffect")).map(message => message.split(":")[0]), ["5"]);
+  });
+}
+
+test("host module arrows keep their lexical receiver during method invocation", () => {
+  const source = `const g = { f: () => { this.n = 1; } };
+class C { m() { g.f(); } }
+function outer() { const c = new C(); c.m(); }`;
+  assert.equal(ownerMessages("outer", "host-module-arrow-receiver.ts", source).some(message => message.includes("UnknownEffect") || message.includes("ImplicitOutput")), true);
+});
+
+for (const expression of ["Object.keys(document)", "({...document})", "JSON.stringify(document)", "String(location)"]) {
+  test(`host references retain ambient structural reads through ${expression}`, () => {
+    const source = `function outer() { return ${expression}; }`;
+    assert.equal(ownerMessages("outer", "host-structural-read.ts", source).some(message => message.includes(":ImplicitInput:")), true);
+  });
+}
+
+for (const key of ["Math.abs", "a/%", ""]) {
+  test(`host member keys preserve their exact identity for ${JSON.stringify(key)}`, () => {
+    const source = `function outer() { return globalThis[${JSON.stringify(key)}](); }`;
+    assert.equal(ownerMessages("outer", "host-member-key.ts", source).some(message => message.includes(":UnknownEffect:")), true);
+  });
+}
+
+test("host roots observe replacement through the global object", () => {
+  const source = `function outer() {
+  globalThis.console = { log: () => {} } as typeof console;
+  console.log("a");
+}`;
+  assert.deepEqual(ownerMessages("outer", "host-root-replacement.ts", source).map(message => message.split(":").slice(0, 2).join(":")), ["2:ImplicitOutput"]);
+});
+
+test("an opaque global root replacement cannot revive a known pure call", () => {
+  const source = `declare const opaque: typeof Math.abs;
+function outer() {
+  globalThis.Math = { abs: opaque } as typeof Math;
+  return Math.abs(1);
+}`;
+  assert.equal(ownerMessages("outer", "host-root-opaque.ts", source).some(message => message.startsWith("4:UnknownEffect:")), true);
+});
+
+for (const callee of ["Object.keys", "g.Object.keys"]) {
+  test(`host key readers retain external argument reads through ${callee}`, () => {
+    const source = `const data: Record<string, number> = { x: 1 };
+function change() { data.y = 2; }
+function outer() {
+  const g = globalThis;
+  return ${callee}(data);
+}`;
+    assert.equal(ownerMessages("outer", "host-key-reader.ts", source).some(message => message.includes(":ImplicitInput:")), true);
+  });
+}
+
+test("host deep readers retain external argument reads through a global alias", () => {
+  const source = `const data = { x: 1 };
+function mutate() { data.x = 2; }
+function outer() {
+  const g = globalThis;
+  return g.structuredClone(data);
+}`;
+  assert.equal(ownerMessages("outer", "host-deep-reader.ts", source).some(message => message.includes(":ImplicitInput:")), true);
+});
+
+test("conditional host replacement retains the unresolved callable alternative", () => {
+  const source = `declare const opaque: typeof JSON;
+function outer(flag: boolean) {
+  if (flag) globalThis.JSON = opaque;
+  return JSON.stringify({ x: 1 });
+}`;
+  assert.equal(ownerMessages("outer", "host-conditional-root.ts", source).some(message => message.startsWith("4:UnknownEffect:")), true);
+});
