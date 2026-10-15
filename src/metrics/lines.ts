@@ -14,6 +14,6 @@ export function calculateNodeLineCount(
 
   return sourceFile.text
     .slice(start, node.getEnd())
-    .split(/\r?\n/)
+    .split(/\r\n?|\n/)
     .filter((line) => line.trim().length > 0).length;
 }
