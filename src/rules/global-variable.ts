@@ -348,6 +348,12 @@ function globalBindingFor(name: string, node: ts.Node, bindings: readonly Bindin
   });
 }
 
+function isObjectAssign(node: ts.Expression): boolean {
+  const callee = unwrapExpression(node);
+  return (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) &&
+    receiverName(callee.expression) === "Object" && propertyName(callee) === "assign";
+}
+
 const mutatingMethods = new Set(["add", "copywithin", "delete", "fill", "pop", "push", "reverse", "set", "shift", "sort", "splice", "unshift"]);
 
 function markBindingMutation(node: ts.Node, name: string, bindings: readonly Binding[], mutated: Set<Binding>): void {
@@ -477,8 +483,8 @@ function observeMutations(
         }
       }
     }
-    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "assign") {
-      const target = node.arguments[0];
+    if (ts.isCallExpression(node) && isObjectAssign(node.expression)) {
+      const target = node.arguments[0] && unwrapExpression(node.arguments[0]);
       if (target && ts.isIdentifier(target)) {
         markBindingMutation(target, target.text, bindings, mutatedBindings);
       }
