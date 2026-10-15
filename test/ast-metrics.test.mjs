@@ -315,6 +315,24 @@ test("calculateNodeLineCount counts a function's lines and skips blank lines whe
   assert.equal(calculateNodeLineCount(node, file, true), 4);
 });
 
+test("calculateNodeLineCount skipping blank lines splits CR-only lines like the physical count", () => {
+  const file = sourceFile(
+    ["function sample() {", "", "  const value = 1;", "   ", "  return value;", "}", "const after = 1;"].join("\r"),
+  );
+  const node = file.statements[0];
+
+  assert.equal(calculateNodeLineCount(node, file, false), 6);
+  assert.equal(calculateNodeLineCount(node, file, true), 4);
+});
+
+test("calculateNodeLineCount skipping blank lines keeps U+2028 and U+2029 inside a line", () => {
+  const file = sourceFile("function sample() {\n  const a = ' ';\n  const b = ' ';\n}\n");
+  const node = file.statements[0];
+
+  assert.equal(calculateNodeLineCount(node, file, false), 4);
+  assert.equal(calculateNodeLineCount(node, file, true), 4);
+});
+
 test("getClassFields counts override constructor parameter properties once", () => {
   const file = sourceFile(`
 class OverrideOnly { constructor(override x: number) {} }

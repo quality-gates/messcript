@@ -8,6 +8,8 @@ import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "ExcessiveClassLength";
 export const priority = 3;
+// Rule option names are part of the public ruleset format.
+// messcript-disable-next-line CamelCasePropertyName
 export const properties = { minimum: 1000, "ignore-whitespace": false } as const;
 
 export function findExcessiveClassLength(sourceFile: ts.SourceFile): Finding[] {

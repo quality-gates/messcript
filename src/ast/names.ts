@@ -106,7 +106,10 @@ function addClassField(identifiers: NamedBinding[], field: ClassField): void {
   }
 }
 
-function addPropertyName(identifiers: NamedBinding[], node: ts.PropertyDeclaration | ts.PropertySignature): void {
+function addPropertyName(
+  identifiers: NamedBinding[],
+  node: ts.PropertySignature | ts.PropertyAssignment | ts.ShorthandPropertyAssignment,
+): void {
   if (isStaticallyKnownMemberName(node.name)) {
     addBinding(identifiers, node.name, `property ${bindingName(node.name)}`);
   }
@@ -169,7 +172,7 @@ export function collectProperties(sourceFile: ts.SourceFile): NamedBinding[] {
   const properties: NamedBinding[] = [];
   forEachClass(sourceFile, (node) => addClassFields(properties, node, sourceFile));
   function visit(node: ts.Node): void {
-    if (ts.isPropertySignature(node)) {
+    if (ts.isPropertySignature(node) || ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) {
       addPropertyName(properties, node);
     }
     ts.forEachChild(node, visit);

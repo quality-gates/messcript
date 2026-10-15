@@ -8,6 +8,8 @@ import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "CamelCaseParameterName";
 export const priority = 1;
+// Rule option names are part of the public ruleset format.
+// messcript-disable-next-line CamelCasePropertyName
 export const properties = { "allow-underscore": false } as const;
 
 export function findCamelCaseParameterName(sourceFile: ts.SourceFile): Finding[] {

@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- SARIF `artifactLocation.uri` now percent-encodes each path segment, so a path such as `my files/note.ts` becomes `my%20files/note.ts` ([#323](https://github.com/quality-gates/messcript/issues/323)). Characters such as `%`, `#`, and `?` are encoded too. Other formats still print the plain path.
 - `UnusedPrivateField` and `UnusedPrivateMethod` no longer count `ClassName.member` or `ClassName["member"]` as a use of an instance private member ([#320](https://github.com/quality-gates/messcript/issues/320)). That access reads the constructor, so it now marks only static private members used.
 - `UnusedPrivateField` and `UnusedPrivateMethod` now treat a numeric key such as `this[0]` as that key only, like `this["other"]` ([#319](https://github.com/quality-gates/messcript/issues/319)). It no longer suppresses every private-member finding in the class.
 - `UnusedPrivateField` and `UnusedPrivateMethod` now count `ClassName["member"]` as a use of a static private member, matching `ClassName.member` and `this["member"]` ([#318](https://github.com/quality-gates/messcript/issues/318)). A non-literal key, such as `ClassName[key]`, suppresses that class's private-member findings the same way `this[key]` does.

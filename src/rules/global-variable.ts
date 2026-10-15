@@ -9,6 +9,8 @@ import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "GlobalVariable";
 export const priority = 1;
+// Rule option names are part of the public ruleset format.
+// messcript-disable-next-line CamelCasePropertyName
 export const properties = { "report-immutable": false } as const;
 
 type Binding = {

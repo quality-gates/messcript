@@ -8,6 +8,8 @@ import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "UnusedLocalVariable";
 export const priority = 3;
+// Rule option names are part of the public ruleset format.
+// messcript-disable-next-line CamelCasePropertyName
 export const properties = { "allow-unused-foreach-variables": false, exceptions: "" } as const;
 
 function findVariableDeclaration(node: ts.Node): ts.VariableDeclaration | undefined {

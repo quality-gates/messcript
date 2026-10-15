@@ -27,7 +27,8 @@ export function compareLocations(left: Located, right: Located): number {
 const lineStartsByFile = new WeakMap<ts.SourceFile, readonly number[]>();
 
 function computeLineStarts(text: string): number[] {
-  const starts = [0];
+  // A leading BOM has no visible column. Keep all other source offsets intact.
+  const starts = [text.startsWith("\ufeff") ? 1 : 0];
   for (let index = 0; index < text.length; index += 1) {
     const code = text.charCodeAt(index);
     if (code === 13 /* \r */) {
@@ -63,5 +64,5 @@ export function locate(sourceFile: ts.SourceFile, position: number): ts.LineAndC
       high = mid - 1;
     }
   }
-  return { line: low, character: position - starts[low] };
+  return { line: low, character: Math.max(0, position - starts[low]) };
 }

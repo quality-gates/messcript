@@ -8,6 +8,8 @@ import type { RuleDefinition } from "./catalog";
 
 export const ruleName = "ImplicitOutput";
 export const priority = 3;
+// Rule option names are part of the public ruleset format.
+// messcript-disable-next-line CamelCasePropertyName
 export const properties = { "include-this": false } as const;
 
 export function findImplicitOutput(sourceFile: ts.SourceFile): Finding[] {
