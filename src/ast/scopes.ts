@@ -52,7 +52,7 @@ export type ScopeModel = {
   writeOf(node: ts.Node): Write | undefined;
   /** Tells if the file assigns, updates, or deletes the member access, as a.b in a.b = 1. */
   writesMember(access: ts.Node): boolean;
-  /** Tells if the file writes or defines a member of the name, as add in o.add = f or Object.defineProperty(o, "add", d). */
+  /** Tells if the file writes or defines a member of the name, as add in o.add = f, Object.defineProperty(o, "add", d), or Object.defineProperties(o, { add: d }). */
   writesMemberName(name: string): boolean;
 };
 
@@ -451,6 +451,9 @@ function libraryNames(library: string, args: readonly ts.Expression[]): string[]
   if (definingCalls.has(library)) {
     const key = args[1] && unwrapExpression(args[1]);
     return key && ts.isStringLiteralLike(key) ? [key.text] : undefined;
+  }
+  if (library === "Object.defineProperties") {
+    return sourceNames(args.slice(1, 2));
   }
   return library === "Object.assign" ? sourceNames(args.slice(1)) : [];
 }

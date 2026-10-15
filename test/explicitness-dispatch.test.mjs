@@ -252,6 +252,24 @@ function outer() {
 `), []);
 });
 
+test("a member defined through a property map can replace the class member", () => {
+  const source = (map) => `const log: number[] = [];
+class Counter {
+  tick() { return 0; }
+}
+Object.defineProperties(Counter.prototype, ${map});
+function outer() {
+  return new Counter().tick();
+}
+`;
+  const outer = (name, text) => messages(name, text).filter(message => message.includes("outer()"));
+  assert.deepEqual(outer("define-properties-literal.ts", source("{ tick: { value: () => { log.push(1); return 1; } } }")),
+    ["7:UnknownEffect: The function outer() calls overridable method, an unknown effect."]);
+  assert.deepEqual(outer("define-properties-opaque.ts", source("descriptors()")),
+    ["7:UnknownEffect: The function outer() calls overridable method, an unknown effect."]);
+  assert.deepEqual(outer("define-properties-other.ts", source("{ other: { value: 1 } }")), []);
+});
+
 test("creating a generator runs its default parameters at the call", () => {
   assert.deepEqual(messages("generator-default-create.ts", `const log: number[] = [];
 function* gen(
