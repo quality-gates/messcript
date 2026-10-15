@@ -154,7 +154,7 @@ const { [computedKey]: alias = fallback } = source;
 const object = { [computedKey]: alias, value: source.value };
 const External = class {
   private unusedExternal = 1;
-  private usedExternal = 2;
+  private static usedExternal = 2;
 };
 External.usedExternal;
 `);
@@ -276,7 +276,7 @@ class Access {
   private readHash = 2;
   private readString = 3;
   private writeOnly = 4;
-  private readExternal = 5;
+  private static readExternal = 5;
   read() {
     this.readDot;
     this.#readHash;
@@ -686,6 +686,23 @@ class Service {
 `);
   assert.deepEqual(findingNames(findUnusedPrivateField(file)), ["secret"]);
   assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), ["hidden"]);
+});
+
+test("Service.member and Service[\"member\"] count only as uses of static private members", () => {
+  const file = sourceFile(`
+class Service {
+  private secret = 1;
+  private keyed = 2;
+  private static shared = 3;
+  private helper() { return 1; }
+  private static build() { return 1; }
+  read() {
+    return [Service.secret, Service["keyed"], Service.shared, Service.helper, Service.build()];
+  }
+}
+`);
+  assert.deepEqual(findingNames(findUnusedPrivateField(file)), ["secret", "keyed"]);
+  assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), ["helper"]);
 });
 
 test("dynamic Service[expr] suppresses unused private members of the named class only", () => {
