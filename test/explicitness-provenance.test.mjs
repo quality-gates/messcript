@@ -748,6 +748,21 @@ function outer() {
   ]);
 });
 
+test("a map built from a generator keeps the storage its yielded entries hold", () => {
+  const source = `const shared: number[] = [1];
+function bump() { shared[0] = 2; }
+function* gen(): Generator<[string, number[]]> { yield ["a", shared]; }
+function outer() {
+  const m = new Map(gen());
+  return m.get("a")![0];
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "generator-map.ts", source), [
+    "6:ImplicitInput: The function outer() reads shared, an implicit input.",
+  ]);
+  assert.deepEqual(ownerMessages("outer", "generator-map-fresh.ts", source.replace('["a", shared]', '["a", [1]]')), []);
+});
+
 
 test("replaced bind and next members execute their replacement", () => {
   const bind = `let original = 0;

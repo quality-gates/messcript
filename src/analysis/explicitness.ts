@@ -4492,7 +4492,9 @@ function visitRepeatedLoop(context: SummaryContext, node: ts.IterationStatement)
 function recordExecutedNode(context: SummaryContext, node: ts.Node, iterationEffects?: CallEffects): void {
   const { state, summaries, owner, includeThis, draft } = context;
   invocationEvent(state, summaries, node, owner);
+  const heapSize = heapLength(state);
   appendEffects(draft, nodeEffects(state, summaries, node, owner, includeThis, iterationEffects), defaultParameterIndexFor(node, owner));
+  recacheIteratedValue(state, summaries, node, owner, heapSize);
   if (ts.isYieldExpression(node) && node.expression && !node.asteriskToken) {
     draft.yieldedAliases.push(storageFactForExpression(state, summaries, node.expression, owner, node));
   }
@@ -4507,6 +4509,24 @@ function recordExecutedNode(context: SummaryContext, node: ts.Node, iterationEff
   state.invocation?.heap.push(...insertions.filter((insertion) => insertion.kind === "cell"));
   advanceArrayState(state, summaries, node, owner);
   state.factCache.clear();
+}
+
+function heapLength(state: AnalysisState): number {
+  return state.invocation?.heap.length ?? 0;
+}
+
+/**
+ * Caches a node's value again once running the node stored something new, as when "new Map(gen())" runs the generator and
+ * holds what it yielded. The value cached before the node ran cannot see that storage.
+ */
+function recacheIteratedValue(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, node: ts.Node, owner: EffectOwner, heapSize: number): void {
+  const active = state.invocation;
+  if (active && ts.isExpression(node) && active.values.has(node) && active.heap.slice(heapSize).some((insertion) => insertion.node === node)) {
+    active.values.delete(node);
+    state.factCache.clear();
+    state.insertionCache.clear();
+    cacheInvocationValue(state, summaries, node, owner, active);
+  }
 }
 
 function storageInsertionsForNode(
