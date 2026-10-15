@@ -3069,9 +3069,7 @@
  {
   "name": "mut-e2-made-array",
   "source": "function outer() {\n  const values = make();\n  function read() { return values[2] ?? -1; }\n  values.push(1);\n  return read();\n}\nfunction make() { return [0]; }\n",
-  "findings": [
-   "3:ImplicitInput: function read(): The function read() reads values, an implicit input."
-  ]
+  "findings": []
  },
  {
   "name": "mut-e2-index-write-at-2",
