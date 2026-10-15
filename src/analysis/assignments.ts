@@ -54,13 +54,13 @@ function reaching(assignment: Assignment, owner: EffectOwner, site: ts.Node): As
     return [{ ...assignment, join: true }];
   }
   if (assignment.node.end > site.getStart()) {
-    return [];
+    return deferred(site, owner) ? [{ ...assignment, join: true }] : [];
   }
   return [dominates(assignment.node, owner, site) ? assignment : { ...assignment, join: true }];
 }
 
 export function canReachSite(node: ts.Node, owner: EffectOwner, site: ts.Node): boolean {
-  return node.end <= site.getStart() || deferred(node, owner) || repeated({ node }, owner, site);
+  return node.end <= site.getStart() || deferred(node, owner) || deferred(site, owner) || repeated({ node }, owner, site);
 }
 
 function repeated(assignment: Assignment, owner: EffectOwner, site: ts.Node): boolean {

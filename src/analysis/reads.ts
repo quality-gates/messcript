@@ -92,7 +92,8 @@ function consumerSites(expression: ts.Expression, argumentSites: ArgumentSites):
     return REFERENCE;
   }
   if (ts.isSpreadElement(parent) || ts.isSpreadAssignment(parent)) {
-    return [{ path: ["*"], reference: !ts.isCallExpression(parent.parent) && !ts.isNewExpression(parent.parent) }];
+    return ts.isCallExpression(parent.parent) || ts.isNewExpression(parent.parent) ? [{ path: ["*"], reference: false }]
+      : readSites(parent.parent, argumentSites).map((site) => ({ path: ["*", ...site.path.slice(1)], reference: site.reference }));
   }
   const name = initializedName(parent, expression);
   if (name) {

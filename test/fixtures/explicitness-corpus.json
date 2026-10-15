@@ -5394,5 +5394,135 @@
    "3:ImplicitOutput: function bump(): The function bump() writes state, an implicit output.",
    "7:ImplicitInput: function dump(): The function dump() reads state, an implicit input."
   ]
+ },
+ {
+  "name": "mut-s1-held-captured-push",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const xs: number[][] = [];\n  xs.push(shared);\n  const inner = () => xs[0][0];\n  return inner();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "8:ImplicitInput: arrow function inner(): The arrow function inner() reads shared, an implicit input.",
+   "9:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-held-push-after-closure",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const xs: number[][] = [];\n  const inner = () => xs[0][0];\n  xs.push(shared);\n  return inner();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "7:ImplicitInput: arrow function inner(): The arrow function inner() reads shared, an implicit input.",
+   "9:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-held-rebind-after-closure",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  let xs: number[] = [5];\n  const inner = () => xs[0];\n  xs = shared;\n  return inner();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "7:ImplicitInput: arrow function inner(): The arrow function inner() reads shared, an implicit input.",
+   "9:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-held-rebind-before-closure",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  let xs: number[] = [5];\n  xs = shared;\n  const inner = () => xs[0];\n  return inner();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "8:ImplicitInput: arrow function inner(): The arrow function inner() reads shared, an implicit input.",
+   "9:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-held-captured-index-store",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const xs: number[][] = [];\n  xs[0] = shared;\n  const inner = () => xs[0][0];\n  return inner();\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "8:ImplicitInput: arrow function inner(): The arrow function inner() reads shared, an implicit input.",
+   "9:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-held-map-value",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const m = new Map<string, number[]>();\n  m.set(\"k\", shared);\n  return m.get(\"k\")![0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "8:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-held-push-set-direct",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const s = new Set<number[]>();\n  s.add(shared);\n  return [...s][0][0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "8:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-held-later-rebind-joins",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  let held = [shared];\n  const inner = () => held[0][0];\n  const a = inner();\n  held = [[0]];\n  return a;\n}",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "5:ImplicitInput: arrow function inner(): The arrow function inner() reads shared, an implicit input.",
+   "6:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-held-compound-write-through",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const held = [shared];\n  const inc = () => { held[0][0] += 1; };\n  inc();\n  return 0;\n}",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "5:ImplicitInput: arrow function inc(): The arrow function inc() reads held, an implicit input.",
+   "5:ImplicitOutput: arrow function inc(): The arrow function inc() writes held, an implicit output.",
+   "6:ImplicitOutput: function outer(): The function outer() mutates caller-owned value held, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-held-map-key-not-element",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const held = [shared];\n  const m = new Map<number[][], number[]>([[held, [5]]]);\n  return m.get(held)![0];\n}",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-s1-held-call-spread-read",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const held = [shared];\n  return Math.max(...held[0]);\n}",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "5:UnknownEffect: function outer(): The function outer() uses unresolved iterate protocol, an unknown effect.",
+   "5:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-held-call-spread-nested-write",
+  "source": "const shared: number[][] = [[1]];\nfunction bump() { shared[0][0] = 2; }\nfunction outer() {\n  const held = [shared];\n  return String(...held[0]);\n}",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "5:UnknownEffect: function outer(): The function outer() uses unresolved iterate protocol, an unknown effect.",
+   "5:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-held-literal-spread-index",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const held = [[0], shared];\n  return [...held][1][0];\n}",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "5:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-held-find-element-read",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const held = [shared];\n  return held.find((row) => row.length > 0)![0];\n}",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "5:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-s1-held-captured-find-element-read",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const held = [shared];\n  const inner = () => held.find((row) => row.length > 0)![0];\n  return inner();\n}",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "5:ImplicitInput: arrow function inner(): The arrow function inner() reads shared, an implicit input.",
+   "6:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
  }
 ]

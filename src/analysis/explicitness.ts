@@ -356,7 +356,8 @@ function boundFlows(state: AnalysisState, binding: Binding, node: ts.Identifier,
   const shared = bindingSharesRead(state, binding, node, owner);
   const direct = bindingFlow(binding, node, owner, write, shared);
   if (direct) {
-    return accessFlows(direct, binding, node, owner, write);
+    const held = write ? undefined : localStorageRead(state, binding, node, owner, undefined);
+    return held ? [{ kind: "input", node, owner, description: `reads ${held.name}` }] : accessFlows(direct, binding, node, owner, write);
   }
   const target = aliasTarget(state.model, binding, new Set());
   const aliased = target && bindingFlow(target, node, owner, write, shared || bindingSharesRead(state, target, node, owner));
@@ -406,10 +407,11 @@ function externalReads(
 
 /**
  * Pairs each origin a read reaches with the path still read below it. A contents read of a copy also reaches the
- * source members the copy holds; whole bindings held inside local containers stay out of scope.
+ * source members the copy holds; whole bindings held inside local containers stay out of scope. A reference read that
+ * ends on an origin only holds that storage, so it reaches nothing there.
  */
 function readOrigins(fact: StorageFact, site: ReadSite): { origin: StorageOrigin; rest: readonly string[] }[] {
-  const selected = Array.from({ length: site.path.length + 1 }, (_, length) =>
+  const selected = Array.from({ length: site.path.length + (site.reference ? 0 : 1) }, (_, length) =>
     originsForPath(fact, length ? site.path.slice(0, length) : "outer").map((origin) => ({ origin, rest: site.path.slice(length) })));
   const held = site.reference ? [] : site.path.reduce((value, slot) => memberStorageFact(value, slot), fact).reachable
     .filter((origin) => (externalProjection(origin)?.path.length ?? 0) > 0);
@@ -471,7 +473,18 @@ function storageReadAffected(state: AnalysisState, binding: Binding, site: ReadS
 
 function storageReadSites(state: AnalysisState, node: ts.Expression, seen = new Set<string>()): ReadSite[] {
   return readSites(node, (site, index) => ts.isCallExpression(site) && index !== "this" && storesArguments(site, state.model)
-    ? [{ path: [], reference: true }] : argumentReadSites(state, site, index, seen));
+    ? [{ path: [], reference: true }] : elementReadSites(state, site, index, seen) ?? argumentReadSites(state, site, index, seen));
+}
+
+/** Follows a read through a library call that returns an element the receiver holds, as in map.get(key)[0]. */
+function elementReadSites(
+  state: AnalysisState, site: ts.CallExpression | ts.AccessExpression, index: number | "this", seen: Set<string>,
+): ReadSite[] | undefined {
+  const known = index === "this" && ts.isCallExpression(site) ? libraryCall(site, state.model) : undefined;
+  if (known?.kind !== "pure" || known.result !== "element") {
+    return undefined;
+  }
+  return storageReadSites(state, site, seen).map((read) => ({ path: ["*", ...read.path], reference: read.reference }));
 }
 
 function argumentReadSites(
