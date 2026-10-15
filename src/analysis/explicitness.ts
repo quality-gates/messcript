@@ -427,7 +427,7 @@ function callbackReadSites(state: AnalysisState, call: ts.CallExpression, index:
   }
   const roles = callbackRoles(methodName(unwrapExpression(call.expression)));
   const dispatch = dispatchFor(state, state.summaries);
-  return [{ path: [], reference: false }, ...known.callbacks.flatMap((position) => {
+  return known.callbacks.flatMap((position) => {
     const resolved = call.arguments[position] ? resolveTargets(dispatch, call.arguments[position]) : undefined;
     if (!resolved?.complete) {
       return resolved ? [{ path: ["*"], reference: false }] : [];
@@ -441,7 +441,7 @@ function callbackReadSites(state: AnalysisState, call: ts.CallExpression, index:
       const prefix = role === "receiver" ? [] : ["*"];
       return parameterReadSites(state, target, parameter, seen).map((site) => ({ path: [...prefix, ...site.path], reference: site.reference }));
     }));
-  })];
+  });
 }
 
 function externalReads(
@@ -537,21 +537,7 @@ function callReadSites(state: AnalysisState, site: ts.CallExpression, index: num
   if (index === "this" && known?.kind === "mutating" && known.target === "receiver") {
     return callbackReadSites(state, site, index, seen) ?? [{ path: [], reference: true }];
   }
-  return joinedSites(elementReadSites(state, site, index, seen), callbackReadSites(state, site, index, seen)) ??
-    argumentReadSites(state, site, index, seen);
-}
-
-function joinedSites(left: ReadSite[] | undefined, right: ReadSite[] | undefined): ReadSite[] | undefined {
-  return left && right ? [...left, ...right] : left ?? right;
-}
-
-/** Follows a read through a library call that returns an element the receiver holds, as in map.get(key)[0]. */
-function elementReadSites(state: AnalysisState, site: ts.CallExpression, index: number | "this", seen: Set<string>): ReadSite[] | undefined {
-  const known = index === "this" ? libraryCall(site, state.model) : undefined;
-  if (known?.kind !== "pure" || known.result !== "element") {
-    return undefined;
-  }
-  return storageReadSites(state, site, seen).map((read) => ({ path: [entrySlot(site) ?? "*", ...read.path], reference: read.reference }));
+  return callbackReadSites(state, site, index, seen) ?? argumentReadSites(state, site, index, seen);
 }
 
 function argumentReadSites(

@@ -5793,5 +5793,100 @@
   "findings": [
    "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
   ]
+ },
+ {
+  "name": "mut-r9-callback-index-only",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const held = [shared];\n  return held.map((_x, i) => i)[0];\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-r9-callback-receiver-argument",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const held = [shared];\n  let t = 0;\n  held.forEach((_x, _i, all) => { t += all[0][0]; });\n  return t;\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "6:ImplicitInput: function outer(): The function outer() reads shared, an implicit input.",
+   "6:ImplicitInput: arrow function anonymous(): The arrow function anonymous() reads t, an implicit input.",
+   "6:ImplicitOutput: arrow function anonymous(): The arrow function anonymous() writes t, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-r9-callback-unresolved",
+  "source": "const shared: number[] = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer(cb: (x: number[]) => void) {\n  const held = [shared];\n  held.forEach(cb);\n  return 0;\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "5:ImplicitInput: function outer(): The function outer() reads shared, an implicit input.",
+   "5:UnknownEffect: function outer(): The function outer() calls unresolved callable, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-r9-computed-member-two-arguments",
+  "source": "export function f(a: { x: number }, b: { x: number }, c: boolean) {\n  (c ? a : b).x = 1;\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function f(): The function f() mutates caller-owned value, an implicit output."
+  ]
+ },
+ {
+  "name": "mut-r9-computed-member-receiver",
+  "source": "export class C {\n  a = { x: 0 };\n  b = { x: 0 };\n  f(c: boolean) {\n    (c ? this.a : this.b).x = 1;\n  }\n}\n",
+  "findings": [
+   "5:UnknownEffect: method C.f(): The method C.f() mutates receiver state, an unknown effect."
+  ]
+ },
+ {
+  "name": "mut-r9-map-set-dynamic-keys",
+  "source": "const shared = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const m = new Map<number[], number>();\n  m.set(shared, 1);\n  m.set([0], 2);\n  let t = 0;\n  for (const k of m.keys()) t += k[0];\n  return t;\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "8:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-r9-map-set-dynamic-key-get",
+  "source": "const shared = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer(k: string) {\n  const m = new Map<string, number[]>();\n  m.set(k, shared);\n  return m.get(\"x\")![0];\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "6:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-r9-map-constructor-dynamic-key-get",
+  "source": "const shared = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer(k: string) {\n  const m = new Map([[k, shared]]);\n  return m.get(\"x\")![0];\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "5:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-r9-map-constructor-pair-variable",
+  "source": "const shared = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const pair: [string, number[]] = [\"a\", shared];\n  const m = new Map([pair]);\n  return m.get(\"a\")![0];\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "6:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-r9-map-constructor-spread-pair",
+  "source": "const shared = [1];\nfunction bump() { shared[0] = 2; }\nfunction outer() {\n  const pair: [string, number[]] = [\"a\", shared];\n  const m = new Map([[...pair] as [string, number[]]]);\n  return m.get(\"a\")![0];\n}\n",
+  "findings": [
+   "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "6:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-r9-literal-element-after-spread",
+  "source": "const shared = [1];\nconst other = [5];\nfunction bump() { shared[0] = 2; }\nfunction outer(pre: number[][]) {\n  return [...pre, shared][0][0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "5:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "mut-r9-literal-element-before-spread",
+  "source": "const shared = [1];\nconst other = [5];\nfunction bump() { shared[0] = 2; }\nfunction outer(rest: number[][]) {\n  return [shared, other, ...rest][1][0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
  }
 ]
