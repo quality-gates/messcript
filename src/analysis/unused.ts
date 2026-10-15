@@ -222,7 +222,7 @@ class UnusedAnalyzer {
       return;
     }
     const key = unwrapExpression(node.argumentExpression);
-    if (ts.isStringLiteralLike(key)) {
+    if (ts.isStringLiteralLike(key) || ts.isNumericLiteral(key)) {
       this.markPrivate(key.text, node, classInfo);
     } else {
       this.markClassUncertain(classInfo);
