@@ -178,6 +178,14 @@ type AnalysisState = {
   readonly exposedOwners: ReadonlySet<ts.Node>;
   readonly ownerReferences: Map<EffectOwner, readonly OwnerReferences[]>;
   readonly assignments: Map<Binding, Assignment[]>;
+  readonly assignmentSites: AssignmentSites;
+};
+
+/** Indexes the bindings that each node assigns, built once per file, so recording an assignment does not scan every binding. */
+type AssignmentSites = {
+  declared?: Map<ts.Node, readonly (readonly [Binding, Assignment])[]>;
+  iterated?: Map<ts.Node, readonly (readonly [Binding, Assignment])[]>;
+  references?: readonly (readonly [ts.Identifier, number])[];
 };
 
 type OwnerReferences = { readonly binding: Binding; readonly references: readonly ts.Identifier[] };
@@ -988,7 +996,7 @@ function collectCallables(sourceFile: ts.SourceFile, model: ScopeModel, includeT
     factCache: new Map(), insertionCache: new Map(), cycles: { count: 0 }, includeThis,
     sharedBindings: new Map(), sharedLocalBindings: new Map(),
     bindingOrigins: new Map(model.bindings.map((binding) => [externalBindingOrigin(binding), binding])),
-    arrayLiterals, objectLiterals, exposedOwners: exposedOwners(model), ownerReferences: new Map(), assignments: new Map(),
+    arrayLiterals, objectLiterals, exposedOwners: exposedOwners(model), ownerReferences: new Map(), assignments: new Map(), assignmentSites: {},
   };
 }
 
@@ -1003,15 +1011,21 @@ function exposedOwners(model: ScopeModel): Set<ts.Node> {
   return owners;
 }
 
-function shareOrigins(state: AnalysisState, origins: readonly StorageOrigin[], slots: readonly string[] = ["*"]): void {
+function shareOrigins(state: AnalysisState, origins: readonly StorageOrigin[], slots: readonly string[] = ["*"]): boolean {
+  let changed = false;
   for (const origin of origins) {
     const external = originBinding(state, origin);
     if (external) {
       const marks = state.sharedBindings.get(external.binding) ?? new Set<string>();
-      slots.forEach((slot) => marks.add(JSON.stringify([...external.path, slot])));
+      for (const slot of slots) {
+        const mark = JSON.stringify([...external.path, slot]);
+        changed ||= !marks.has(mark);
+        marks.add(mark);
+      }
       state.sharedBindings.set(external.binding, marks);
     }
   }
+  return changed;
 }
 
 function originBinding(state: AnalysisState, origin: StorageOrigin): { binding: Binding; path: readonly string[] } | undefined {
@@ -1176,11 +1190,12 @@ function shareAliasedLocalBindings(
   site: ts.Node,
   owner: EffectOwner,
   slots = mutatedSlots(state, site, owner),
-): void {
+): boolean {
   const localOrigins = origins.filter((origin) => origin.startsWith("private:") || origin.startsWith("param:"));
   if (localOrigins.length === 0) {
-    return;
+    return false;
   }
+  let changed = false;
   const bindings = state.model.bindings.filter((binding) => isLocalBindingOfOwner(binding, owner) || frameForBinding(state, binding));
   for (const binding of bindings) {
     const fact = storageFactForBinding(state, state.summaries, binding, owner, site);
@@ -1188,12 +1203,19 @@ function shareAliasedLocalBindings(
       if ([...fact.outer, ...fact.reachable].includes(origin)) {
         const writes = state.sharedLocalBindings.get(binding) ?? new Map();
         for (const slot of slots) {
-          writes.set(`${site.getStart()}/${origin}/${slot ?? "*"}`, { fact, origin, site, slot });
+          const key = `${site.getStart()}/${origin}/${slot ?? "*"}`;
+          changed ||= !sameSharedWrite(writes.get(key), site, fact);
+          writes.set(key, { fact, origin, site, slot });
         }
         state.sharedLocalBindings.set(binding, writes);
       }
     }
   }
+  return changed;
+}
+
+function sameSharedWrite(earlier: SharedWrite | undefined, site: ts.Node, fact: StorageFact): boolean {
+  return !!earlier && earlier.site === site && (earlier.fact === fact || JSON.stringify(earlier.fact) === JSON.stringify(fact));
 }
 
 function isLocalBindingOfOwner(binding: Binding, owner: EffectOwner): boolean {
@@ -2221,17 +2243,22 @@ function callOperandFacts(
 
 function escapeStorage(state: AnalysisState, facts: readonly StorageFact[], site: ts.Node, owner: EffectOwner): void {
   const origins = joinStorageOrigins(facts.flatMap((fact) => [...fact.outer, ...fact.reachable]));
-  shareOrigins(state, origins);
-  shareAliasedLocalBindings(state, origins, site, owner, [undefined]);
+  const sharedOrigins = shareOrigins(state, origins);
+  const sharedLocals = shareAliasedLocalBindings(state, origins, site, owner, [undefined]);
   const active = state.invocation;
   if (active) {
     const target: StorageFact = { outer: origins, reachable: origins, cells: facts.flatMap((fact) => fact.cells ?? []) };
     const insertion: StorageInsertion = { kind: "cell", node: site, origin: site, target, value: unknownFact, replace: false };
-    active.heap.push(insertion);
+    const heapLength = active.heap.length;
+    pushHeap(active.heap, [insertion]);
     active.storageWrites.push(insertion);
     active.arrayResets.push(target);
+    const resetsArrays = origins.some((origin) => !active.arrays.has(origin) || active.arrays.get(origin) !== undefined);
     origins.forEach((origin) => active.arrays.set(origin, undefined));
-    state.factCache.clear();
+    // A repeated escape that changes no state leaves every cached fact as it would be recomputed.
+    if (sharedOrigins || sharedLocals || resetsArrays || active.heap.length !== heapLength) {
+      state.factCache.clear();
+    }
   }
 }
 
@@ -3419,10 +3446,9 @@ function escapeComputedKey(state: AnalysisState, summaries: ReadonlyMap<EffectOw
 }
 
 function recordVariableAssignment(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, node: ts.VariableDeclaration, owner: EffectOwner, active: InvocationState, initializer: ts.Expression): void {
-  for (const binding of state.model.bindings) {
-    const assignment = bindingAssignments(binding).find((item) => item.node === node);
+  for (const [binding, assignment] of assignedAt(state, "declared", node)) {
     const frame = frameForBinding(state, binding);
-    if (assignment && frame) {
+    if (frame) {
       const fact = storageFactForExpression(state, summaries, initializer, owner, node);
       active.store.set(cellKey(frame, binding), selectedFact(fact, assignment, (expression) => storageFactForExpression(state, summaries, expression, owner, node)));
     }
@@ -3430,7 +3456,7 @@ function recordVariableAssignment(state: AnalysisState, summaries: ReadonlyMap<E
 }
 
 function recordBinaryAssignment(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, node: ts.BinaryExpression, owner: EffectOwner, active: InvocationState): void {
-  for (const binding of state.model.bindings) {
+  for (const binding of bindingsReferencedIn(state, node.left)) {
     const assignment = binding.references.filter((reference) => inside(reference, node.left)).map(referenceAssignment).find((item) => item !== undefined);
     const frame = frameForBinding(state, binding);
     if (assignment) { escapeModuleAssignment(state, summaries, binding, assignment, node, owner); }
@@ -3441,6 +3467,46 @@ function recordBinaryAssignment(state: AnalysisState, summaries: ReadonlyMap<Eff
       active.store.set(key, assignment.join ? joinStorageFacts([active.store.get(key) ?? storageFactForBinding(state, summaries, binding, owner, node.left), next]) : next);
     }
   }
+}
+
+/** Gives each binding, in model order, with its first assignment at the node; iterated assignments are indexed apart. */
+function assignedAt(state: AnalysisState, kind: "declared" | "iterated", node: ts.Node): readonly (readonly [Binding, Assignment])[] {
+  let index = state.assignmentSites[kind];
+  if (!index) {
+    index = new Map();
+    for (const binding of state.model.bindings) {
+      const seen = new Set<ts.Node>();
+      for (const assignment of cachedAssignments(state, binding)) {
+        if ((kind === "declared" || assignment.iterated) && !seen.has(assignment.node)) {
+          seen.add(assignment.node);
+          index.set(assignment.node, [...index.get(assignment.node) ?? [], [binding, assignment]]);
+        }
+      }
+    }
+    state.assignmentSites[kind] = index;
+  }
+  return index.get(node) ?? [];
+}
+
+/** Gives the bindings, in model order, with a reference inside the node. */
+function bindingsReferencedIn(state: AnalysisState, node: ts.Node): Binding[] {
+  let references = state.assignmentSites.references;
+  if (!references) {
+    references = state.model.bindings.flatMap((binding, order) => binding.references.map((reference) => [reference, order] as const))
+      .sort((left, right) => left[0].pos - right[0].pos);
+    state.assignmentSites.references = references;
+  }
+  let low = 0;
+  let high = references.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (references[middle][0].pos < node.pos) { low = middle + 1; } else { high = middle; }
+  }
+  const orders = new Set<number>();
+  for (let index = low; index < references.length && references[index][0].pos <= node.end; index++) {
+    if (inside(references[index][0], node)) { orders.add(references[index][1]); }
+  }
+  return [...orders].sort((left, right) => left - right).map((order) => state.model.bindings[order]);
 }
 
 function escapeModuleAssignment(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, binding: Binding, assignment: Assignment, node: ts.Node, owner: EffectOwner): void {
@@ -3470,6 +3536,36 @@ function invocationStateKey(active: InvocationState): string {
         : instance]);
   return JSON.stringify([ [...active.store], active.heap.map((insertion) =>
     [insertion.target, insertion.slot, insertion.value, insertion.replace]), [...active.arrays], registry ]);
+}
+
+const heapWriteKeys = new WeakMap<StorageInsertion, string>();
+
+function heapWriteKey(insertion: StorageInsertion): string {
+  const known = heapWriteKeys.get(insertion);
+  if (known !== undefined) { return known; }
+  const key = JSON.stringify([insertion.target, insertion.slot, insertion.value]);
+  heapWriteKeys.set(insertion, key);
+  return key;
+}
+
+/**
+ * Appends heap writes, leaving out a weak write that repeats an earlier one when nothing in between wrote to its
+ * storage. Joining the same value into the same cells twice changes nothing, so every later read sees the same heap.
+ */
+function pushHeap(heap: StorageInsertion[], insertions: readonly StorageInsertion[]): void {
+  for (const insertion of insertions) {
+    if (!repeatsHeapWrite(heap, insertion)) { heap.push(insertion); }
+  }
+}
+
+function repeatsHeapWrite(heap: readonly StorageInsertion[], insertion: StorageInsertion): boolean {
+  if (insertion.kind !== "cell" || insertion.replace) { return false; }
+  for (let index = heap.length - 1; index >= 0 && index >= heap.length - 64; index -= 1) {
+    const earlier = heap[index];
+    if (earlier.kind === "cell" && !earlier.replace && heapWriteKey(earlier) === heapWriteKey(insertion)) { return true; }
+    if (earlier.target.outer.some((origin) => insertion.target.outer.includes(origin))) { return false; }
+  }
+  return false;
 }
 
 function joinInvocationHeaps(prefix: readonly StorageInsertion[], branches: readonly (readonly StorageInsertion[])[]): StorageInsertion[] {
@@ -3722,7 +3818,7 @@ function evaluateBoundAlternative(context: InvocationContext, instance: Extract<
   returns.push(result?.value ?? unknownFact);
   stores.push(invocation.store);
   arrays.push(invocation.arrays);
-  active.heap.push(...invocation.heap.slice(heapPrefix.length).map((insertion) => ({ ...insertion,
+  pushHeap(active.heap, invocation.heap.slice(heapPrefix.length).map((insertion) => ({ ...insertion,
     replace: insertion.replace && complete && instances.length === 1 && execution === "once" })));
   active.storageWrites.push(...invocation.storageWrites.map((insertion) => ({ ...insertion,
     node: invocationAt(context.request.point) ?? context.request.point,
@@ -3855,7 +3951,7 @@ function recursiveInsertion(state: AnalysisState, summary: CallableSummary, fact
 function applyRecursiveInsertion(state: AnalysisState, active: InvocationState, insertion: StorageInsertion): Binding | undefined {
   active.storageWrites.push(insertion);
   if (insertion.kind === "cell") {
-    active.heap.push(insertion);
+    pushHeap(active.heap, [insertion]);
     if (insertion.appendCall) {
       const start = insertion.slot?.startsWith("append:") ? { lowerBound: Number(insertion.slot.slice(7)), exact: false } : undefined;
       insertion.target.outer.forEach((origin) => active.arrays.set(origin, start));
@@ -3894,7 +3990,7 @@ function mergeSourceState(context: InvocationContext, invocation: InvocationStat
   const { execution } = context.request;
   stores.push(invocation.store);
   arrays.push(invocation.arrays);
-  active.heap.push(...invocation.heap.slice(heapPrefix.length).map((insertion) => ({ ...insertion,
+  pushHeap(active.heap, invocation.heap.slice(heapPrefix.length).map((insertion) => ({ ...insertion,
     replace: insertion.replace && complete && instances.length === 1 && execution === "once" })));
   active.storageWrites.push(...invocation.storageWrites.map((insertion) => ({ ...insertion,
     node: invocationAt(context.request.point) ?? context.request.point,
@@ -3974,7 +4070,7 @@ function forceIterator(
       execution: operation === "iterate" ? "callback" : "once",
     });
     if (result) {
-      active.heap.push({ kind: "cell", node: point, origin: point, target: { outer: [origin], reachable: [origin] }, value: result.value, replace: false });
+      pushHeap(active.heap, [{ kind: "cell", node: point, origin: point, target: { outer: [origin], reachable: [origin] }, value: result.value, replace: false }]);
     }
     return result ? [result.effects] : [];
   });
@@ -4512,10 +4608,9 @@ function visitLoop(context: SummaryContext, node: ts.IterationStatement): CallEf
 function bindIterationValues(context: SummaryContext, node: ts.ForOfStatement): void {
   const { state, summaries, owner } = context;
   const fact = storageFactForExpression(state, summaries, node.expression, owner, node);
-  for (const binding of state.model.bindings) {
-    const assignment = bindingAssignments(binding).find((item) => item.iterated && item.node === node.statement);
+  for (const [binding, assignment] of assignedAt(state, "iterated", node.statement)) {
     const frame = frameForBinding(state, binding);
-    if (assignment && frame) {
+    if (frame) {
       state.invocation.store.set(cellKey(frame, binding), selectedFact(fact, assignment,
         (expression) => storageFactForExpression(state, summaries, expression, owner, node)));
     }
@@ -4574,7 +4669,7 @@ function recordExecutedNode(context: SummaryContext, node: ts.Node, iterationEff
     ? [] : storageInsertionsForNode(state, summaries, node, owner);
   draft.storageInsertions.push(...insertions);
   state.invocation.storageWrites.push(...insertions);
-  state.invocation?.heap.push(...insertions.filter((insertion) => insertion.kind === "cell"));
+  pushHeap(state.invocation.heap, insertions.filter((insertion) => insertion.kind === "cell"));
   advanceArrayState(state, summaries, node, owner);
   state.factCache.clear();
 }
@@ -5109,6 +5204,7 @@ function deduplicateFlows(flows: readonly ImplicitFlow[], keyFor: (flow: Implici
 
 function uniqueSummaryFlows(flows: readonly ImplicitFlow[]): readonly ImplicitFlow[] {
   const seen = new Set<string>();
+  const inputs = new Set<string>();
   return flows.filter((flow) => {
     const site = flow.access === "contents" || flow.kind === "input" ? `${flow.node.getStart()}:${flow.writeNode?.getStart()}` : "";
     const key = `${ownerKey(flow.owner)}:${flow.kind}:${flow.description}:${site}`;
@@ -5116,8 +5212,36 @@ function uniqueSummaryFlows(flows: readonly ImplicitFlow[]): readonly ImplicitFl
       return false;
     }
     seen.add(key);
+    if (flow.kind !== "input") {
+      return true;
+    }
+    // A read keeps the forwarded write only as provenance, so reads that differ in nothing else are one read.
+    const content = inputFlowContent(flow);
+    if (inputs.has(content)) {
+      return false;
+    }
+    inputs.add(content);
     return true;
   });
+}
+
+const flowObjectIds = new WeakMap<object, number>();
+let flowObjectCount = 0;
+
+function flowObjectId(item: object | undefined): number | undefined {
+  if (!item) { return undefined; }
+  const known = flowObjectIds.get(item);
+  if (known !== undefined) { return known; }
+  flowObjectCount += 1;
+  const id = flowObjectCount;
+  flowObjectIds.set(item, id);
+  return id;
+}
+
+function inputFlowContent(flow: ImplicitFlow): string {
+  return JSON.stringify([flowObjectId(flow.owner), flow.kind, flow.description, flowObjectId(flow.node), flowObjectId(flow.binding),
+    flow.access, flow.path, flow.receiver, flow.defaultParameterIndex, flow.parameterIndex, flow.origins, flow.argumentWrite,
+    flow.readParameterIndex, flow.reads]);
 }
 
 function uniqueWrites(writes: readonly ParameterWrite[]): readonly ParameterWrite[] {

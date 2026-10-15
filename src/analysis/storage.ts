@@ -238,17 +238,17 @@ export function allocationId(node: ts.Node): number {
 
 export function allocatedFact(value: ts.Node, parts: readonly { slot: string; fact: StorageFact }[]): StorageFact {
   const allocation: StorageOrigin = `private:${allocationId(value)}`;
-  const heap = new Map<string, StorageCell>();
+  const heap = new CellHeap();
   const initial = { allocation, slot: "@allocation", origins: ["private"] } satisfies StorageCell;
-  heap.set(cellKey(initial), initial);
+  heap.set(initial);
   for (const { slot, fact } of parts) {
     for (const cell of fact.cells ?? []) {
-      heap.set(cellKey(cell), cell);
+      heap.set(cell);
     }
     applyHeapWrite(heap, { target: { outer: [allocation], reachable: [] }, value: fact,
       slot, replace: !isWildcardSlot(slot) });
   }
-  const cells = pruneCells([allocation], [...heap.values()]);
+  const cells = pruneCells([allocation], heap.values());
   return { outer: [allocation], reachable: reachableOrigins([allocation], cells), cells };
 }
 
@@ -288,14 +288,14 @@ function reachableOrigins(roots: readonly StorageOrigin[], cells: readonly Stora
   const reached = new Set<StorageOrigin>();
   const pending = [...roots];
   const visited = new Set<StorageOrigin>();
+  const contentsOf = cellOriginsByAllocation(cells);
   for (let index = 0; index < pending.length; index += 1) {
     const current = pending[index];
     if (visited.has(current)) {
       continue;
     }
     visited.add(current);
-    const contents = cells.filter((cell) => cell.allocation === current);
-    const origins = contents.length ? contents.flatMap((cell) => cell.origins) : [current];
+    const origins = contentsOf.get(current) ?? [current];
     for (const origin of origins) {
       reached.add(origin);
       pending.push(origin);
@@ -304,17 +304,71 @@ function reachableOrigins(roots: readonly StorageOrigin[], cells: readonly Stora
   return joinOrigins([...reached]);
 }
 
+function cellOriginsByAllocation(cells: readonly StorageCell[]): Map<StorageOrigin, StorageOrigin[]> {
+  const contents = new Map<StorageOrigin, StorageOrigin[]>();
+  for (const cell of cells) {
+    const origins = contents.get(cell.allocation);
+    if (origins) {
+      origins.push(...cell.origins);
+    } else {
+      contents.set(cell.allocation, [...cell.origins]);
+    }
+  }
+  return contents;
+}
+
 function cellKey(cell: StorageCell): string {
   return `${cell.allocation}/${cell.slot}`;
 }
 
+// The same order as String.prototype.localeCompare, without building a collator per comparison.
+const CELL_ORDER = new Intl.Collator();
+
 function mergeCells(cells: readonly StorageCell[]): StorageCell[] {
-  const result = new Map<string, StorageCell>();
+  const result = new Map<string, { cell: StorageCell; origins: StorageOrigin[] }>();
   for (const cell of cells) {
-    const origins = joinOrigins([...(result.get(cellKey(cell))?.origins ?? []), ...cell.origins]);
-    result.set(cellKey(cell), { ...cell, origins });
+    const key = cellKey(cell);
+    const merged = result.get(key);
+    if (merged) {
+      merged.cell = cell;
+      merged.origins.push(...cell.origins);
+    } else {
+      result.set(key, { cell, origins: [...cell.origins] });
+    }
   }
-  return [...result.values()].sort((left, right) => cellKey(left).localeCompare(cellKey(right)));
+  return [...result].sort(([left], [right]) => CELL_ORDER.compare(left, right))
+    .map(([, { cell, origins }]) => ({ ...cell, origins: joinOrigins(origins) }));
+}
+
+/** Cells by key, with each allocation's cells kept apart in the same order so a write reads only its own. */
+class CellHeap {
+  private readonly cells = new Map<string, StorageCell>();
+  private readonly allocations = new Map<StorageOrigin, Map<string, StorageCell>>();
+
+  set(cell: StorageCell): void {
+    const key = cellKey(cell);
+    this.cells.set(key, cell);
+    const own = this.allocations.get(cell.allocation);
+    if (own) {
+      own.set(key, cell);
+    } else {
+      this.allocations.set(cell.allocation, new Map([[key, cell]]));
+    }
+  }
+
+  delete(cell: StorageCell): void {
+    const key = cellKey(cell);
+    this.cells.delete(key);
+    this.allocations.get(cell.allocation)?.delete(key);
+  }
+
+  of(allocation: StorageOrigin): StorageCell[] {
+    return [...this.allocations.get(allocation)?.values() ?? []];
+  }
+
+  values(): StorageCell[] {
+    return [...this.cells.values()];
+  }
 }
 
 function pruneCells(outer: readonly StorageOrigin[], cells: readonly StorageCell[]): StorageCell[] {
@@ -474,6 +528,11 @@ export function constructorStorageFact(
 
 type HeapWrite = { readonly target: StorageFact; readonly value: StorageFact; readonly slot?: string; readonly replace: boolean };
 
+/**
+ * Replays heap writes over a fact and keeps the cells its outer storage reaches. A write to an allocation reads only
+ * that allocation's cells, so each allocation is replayed on its own and only when the walk from the fact reaches it.
+ * The cells keep the order one shared replay would give them: seeded cells by key, then each new cell as it is written.
+ */
 export function withInsertions(fact: StorageFact, insertions: readonly HeapWrite[]): StorageFact {
   if (insertions.length === 0 || fact.outer.every((origin) => origin === "private" || origin === "unknown")) {
     return fact;
@@ -485,42 +544,152 @@ export function withInsertions(fact: StorageFact, insertions: readonly HeapWrite
   if (!insertions.some((insertion) => insertion.target.outer.some((origin) => relevant.has(origin)))) {
     return fact;
   }
-  const heap = new Map<string, StorageCell>();
-  for (const cell of mergeCells([...(fact.cells ?? []), ...insertions.flatMap((insertion) => [
-    ...(insertion.target.cells ?? []), ...(insertion.value.cells ?? []),
-  ])])) {
-    heap.set(cellKey(cell), cell);
+  const heap = new ReplayedHeap(fact, insertions);
+  const reached = new Set<StorageOrigin>();
+  const pending = [...fact.outer];
+  const visited = new Set<StorageOrigin>();
+  for (let index = 0; index < pending.length; index += 1) {
+    const current = pending[index];
+    if (visited.has(current)) {
+      continue;
+    }
+    visited.add(current);
+    const contents = heap.of(current);
+    const origins = contents.length ? contents.flatMap((cell) => cell.cell.origins) : [current];
+    for (const origin of origins) {
+      reached.add(origin);
+      pending.push(origin);
+    }
   }
-  for (const insertion of insertions) {
-    applyHeapWrite(heap, insertion);
-  }
-  const allCells = [...heap.values()];
-  const reachableAllocations = new Set<StorageOrigin>(fact.outer);
-  for (const origin of reachableOrigins(fact.outer, allCells)) {
-    reachableAllocations.add(origin);
-  }
-  const cells = allCells.filter((cell) => reachableAllocations.has(cell.allocation));
+  const reachableAllocations = new Set<StorageOrigin>([...fact.outer, ...joinOrigins([...reached])]);
+  const cells = [...reachableAllocations].flatMap((allocation) => heap.of(allocation))
+    .sort(compareStampedCells).map((stamped) => stamped.cell);
   const reachable = fact.outer.flatMap((origin) => cells.some((cell) => cell.allocation === origin)
     ? reachableOrigins([origin], cells) : fact.reachable);
   return { outer: fact.outer, reachable: joinOrigins(reachable), cells };
 }
 
-function applyHeapWrite(heap: Map<string, StorageCell>, insertion: HeapWrite): void {
-  for (const allocation of insertion.target.outer.filter(isCellAllocation)) {
-    const cell = { allocation, slot: insertion.slot ?? "*", origins: insertion.value.outer };
-    if (replacesCell(insertion)) { excludeReplacedProperty(heap, allocation, insertion.slot); }
-    const previous = replacesCell(insertion) ? [] : allocationMemberOrigins({ ...insertion.target, cells: [...heap.values()] }, allocation, insertion.slot);
-    heap.set(cellKey(cell), { ...cell, origins: joinOrigins([...previous, ...cell.origins]) });
+/** A seeded cell sorts by key, with ties in first-seen order; a written cell sorts by write, target and step. */
+type CellStamp = { readonly key: string; readonly first: number } | { readonly write: readonly [number, number, number] };
+type StampedCell = { readonly cell: StorageCell; readonly stamp: CellStamp };
+
+function compareStampedCells(left: StampedCell, right: StampedCell): number {
+  const a = left.stamp;
+  const b = right.stamp;
+  if ("key" in a) {
+    return "key" in b ? CELL_ORDER.compare(a.key, b.key) || a.first - b.first : -1;
+  }
+  if ("key" in b) {
+    return 1;
+  }
+  return a.write[0] - b.write[0] || a.write[1] - b.write[1] || a.write[2] - b.write[2];
+}
+
+class ReplayedHeap {
+  private readonly seeds = new Map<StorageOrigin, { cell: StorageCell; first: number }[]>();
+  private readonly writes = new Map<StorageOrigin, { insertion: HeapWrite; index: number; position: number }[]>();
+  private readonly replayed = new Map<StorageOrigin, StampedCell[]>();
+
+  constructor(fact: StorageFact, insertions: readonly HeapWrite[]) {
+    let first = 0;
+    const seed = (cell: StorageCell) => {
+      const cells = this.seeds.get(cell.allocation);
+      if (cells) {
+        cells.push({ cell, first: first++ });
+      } else {
+        this.seeds.set(cell.allocation, [{ cell, first: first++ }]);
+      }
+    };
+    (fact.cells ?? []).forEach(seed);
+    for (const insertion of insertions) {
+      (insertion.target.cells ?? []).forEach(seed);
+      (insertion.value.cells ?? []).forEach(seed);
+    }
+    insertions.forEach((insertion, index) => insertion.target.outer.forEach((allocation, position) => {
+      if (!isCellAllocation(allocation)) {
+        return;
+      }
+      const writes = this.writes.get(allocation);
+      if (writes) {
+        writes.push({ insertion, index, position });
+      } else {
+        this.writes.set(allocation, [{ insertion, index, position }]);
+      }
+    }));
+  }
+
+  of(allocation: StorageOrigin): readonly StampedCell[] {
+    const known = this.replayed.get(allocation);
+    if (known) {
+      return known;
+    }
+    const cells = new Map<string, StampedCell>();
+    for (const { key, cell, first } of mergeSeededCells(this.seeds.get(allocation) ?? [])) {
+      cells.set(key, { cell, stamp: { key, first } });
+    }
+    for (const { insertion, index, position } of this.writes.get(allocation) ?? []) {
+      replayAllocationWrite(cells, allocation, insertion, [index, position]);
+    }
+    const result = [...cells.values()];
+    this.replayed.set(allocation, result);
+    return result;
   }
 }
 
-function excludeReplacedProperty(heap: Map<string, StorageCell>, allocation: StorageOrigin, slot: string | undefined): void {
+/** Merges one allocation's seeded cells as mergeCells does, keeping where each key was first seen. */
+function mergeSeededCells(seeds: readonly { cell: StorageCell; first: number }[]): { key: string; cell: StorageCell; first: number }[] {
+  const result = new Map<string, { cell: StorageCell; origins: StorageOrigin[]; first: number }>();
+  for (const { cell, first } of seeds) {
+    const key = cellKey(cell);
+    const merged = result.get(key);
+    if (merged) {
+      merged.cell = cell;
+      merged.origins.push(...cell.origins);
+    } else {
+      result.set(key, { cell, origins: [...cell.origins], first });
+    }
+  }
+  return [...result].sort(([left, a], [right, b]) => CELL_ORDER.compare(left, right) || a.first - b.first)
+    .map(([key, { cell, origins, first }]) => ({ key, cell: { ...cell, origins: joinOrigins(origins) }, first }));
+}
+
+/** Applies one write to one allocation's cells, as applyHeapWrite and excludeReplacedProperty do on the shared heap. */
+function replayAllocationWrite(cells: Map<string, StampedCell>, allocation: StorageOrigin, insertion: HeapWrite, at: readonly [number, number]): void {
+  let step = 0;
+  const set = (cell: StorageCell) => {
+    const key = cellKey(cell);
+    cells.set(key, { cell, stamp: cells.get(key)?.stamp ?? { write: [at[0], at[1], step++] } });
+  };
+  const slot = insertion.slot;
+  if (replacesCell(insertion) && slot?.startsWith("property:")) {
+    for (const { cell } of [...cells.values()]) {
+      if (cell.slot === "*" || cell.slot.startsWith(EXCEPT)) {
+        cells.delete(cellKey(cell));
+        set({ ...cell, slot: exceptSlot(cell.slot, [slot]) });
+      }
+    }
+  }
+  const previous = replacesCell(insertion) ? []
+    : allocationMemberOrigins({ ...insertion.target, cells: [...cells.values()].map((stamped) => stamped.cell) }, allocation, slot);
+  set({ allocation, slot: slot ?? "*", origins: joinOrigins([...previous, ...insertion.value.outer]) });
+}
+
+function applyHeapWrite(heap: CellHeap, insertion: HeapWrite): void {
+  for (const allocation of insertion.target.outer.filter(isCellAllocation)) {
+    const cell = { allocation, slot: insertion.slot ?? "*", origins: insertion.value.outer };
+    if (replacesCell(insertion)) { excludeReplacedProperty(heap, allocation, insertion.slot); }
+    const previous = replacesCell(insertion) ? [] : allocationMemberOrigins({ ...insertion.target, cells: heap.of(allocation) }, allocation, insertion.slot);
+    heap.set({ ...cell, origins: joinOrigins([...previous, ...cell.origins]) });
+  }
+}
+
+function excludeReplacedProperty(heap: CellHeap, allocation: StorageOrigin, slot: string | undefined): void {
   if (!slot?.startsWith("property:")) { return; }
-  for (const cell of [...heap.values()]) {
-    if (cell.allocation === allocation && (cell.slot === "*" || cell.slot.startsWith(EXCEPT))) {
-      heap.delete(cellKey(cell));
+  for (const cell of heap.of(allocation)) {
+    if (cell.slot === "*" || cell.slot.startsWith(EXCEPT)) {
+      heap.delete(cell);
       const excluded = { ...cell, slot: exceptSlot(cell.slot, [slot]) };
-      heap.set(cellKey(excluded), excluded);
+      heap.set(excluded);
     }
   }
 }
