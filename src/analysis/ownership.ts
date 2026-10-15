@@ -231,10 +231,15 @@ function callFact(value: ts.Expression, context: FactContext): StorageFact {
 }
 
 function newFact(value: ts.Expression, context: FactContext): StorageFact {
-  if (!ts.isNewExpression(value) || !knownConstructor(context.model, unwrapExpression(value.expression))) {
+  if (!ts.isNewExpression(value)) {
     return UNKNOWN_FACT;
   }
-  return storage.constructorStorageFact(value, (part) => expressionFact(part, context));
+  const callee = unwrapExpression(value.expression);
+  const global = storage.constructorName(value, context.model);
+  if (global === undefined ? !localConstructor(context.model, callee) : !FRESH_CONSTRUCTORS.has(global)) {
+    return UNKNOWN_FACT;
+  }
+  return storage.constructorStorageFact(value, global, (part) => expressionFact(part, context));
 }
 
 function insertedFact(fact: StorageFact, context: FactContext): StorageFact {
@@ -242,15 +247,9 @@ function insertedFact(fact: StorageFact, context: FactContext): StorageFact {
   return storage.withInsertions(fact, insertions);
 }
 
-function knownConstructor(model: ScopeModel, callee: ts.Expression): boolean {
-  if (!ts.isIdentifier(callee)) {
-    return false;
-  }
-  const binding = model.resolve(callee);
-  if (!binding) {
-    return FRESH_CONSTRUCTORS.has(callee.text);
-  }
-  const declaration = binding.declarations.length === 1 ? binding.declarations[0] : undefined;
+function localConstructor(model: ScopeModel, callee: ts.Expression): boolean {
+  const binding = ts.isIdentifier(callee) ? model.resolve(callee) : undefined;
+  const declaration = binding?.declarations.length === 1 ? binding.declarations[0] : undefined;
   return declaration?.kind === "class" && !extendsClass(declaration.node) && !returnsFromConstructor(declaration.node);
 }
 

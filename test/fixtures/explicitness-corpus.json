@@ -5997,5 +5997,215 @@
    "2:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
    "5:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
   ]
+ },
+ {
+  "name": "r11-inline-literal-get-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  return new Map([[\"a\", shared]]).get(\"a\")![0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "6:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r11-inline-literal-get-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  return new Map([[\"a\", [1]]]).get(\"a\")![0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r11-inline-pairs-values-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const pairs: [string, number[]][] = [[\"a\", shared]];\n  return [...new Map(pairs).values()][0][0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "7:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r11-inline-pairs-values-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const pairs: [string, number[]][] = [[\"a\", [1]]];\n  return [...new Map(pairs).values()][0][0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r11-inline-pairs-forof-values-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const pairs: [string, number[]][] = [[\"a\", shared]];\n  for (const v of new Map(pairs).values()) {\n    return v[0];\n  }\n  return 0;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "8:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r11-inline-pairs-forof-values-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const pairs: [string, number[]][] = [[\"a\", [1]]];\n  for (const v of new Map(pairs).values()) {\n    return v[0];\n  }\n  return 0;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r11-inline-paren-get-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const pairs: [string, number[]][] = [[\"a\", shared]];\n  return (new Map(pairs)).get(\"a\")![0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "7:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r11-inline-paren-get-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const pairs: [string, number[]][] = [[\"a\", [1]]];\n  return (new Map(pairs)).get(\"a\")![0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r11-inline-weakmap-get-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const key = {};\n  return new WeakMap([[key, shared]]).get(key)![0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "7:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r11-inline-weakmap-get-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const key = {};\n  return new WeakMap([[key, [1]]]).get(key)![0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r11-alias-ctor-bound-get-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const pairs: [string, number[]][] = [[\"a\", shared]];\n  const M = Map;\n  const m = new M(pairs);\n  return m.get(\"a\")![0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "9:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r11-alias-ctor-bound-get-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const pairs: [string, number[]][] = [[\"a\", [1]]];\n  const M = Map;\n  const m = new M(pairs);\n  return m.get(\"a\")![0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r11-alias-ctor-inline-get-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const M = Map;\n  return new M([[\"a\", shared]]).get(\"a\")![0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "7:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r11-alias-ctor-inline-get-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const M = Map;\n  return new M([[\"a\", [1]]]).get(\"a\")![0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r11-alias-weakmap-get-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const key = {};\n  const W = WeakMap;\n  const m = new W([[key, shared]]);\n  return m.get(key)![0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "9:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r11-alias-weakmap-get-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const key = {};\n  const W = WeakMap;\n  const m = new W([[key, [1]]]);\n  return m.get(key)![0];\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r11-callee-pairs-get-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction inner(pairs: [string, number[]][]) {\n  const m = new Map(pairs);\n  return m.get(\"a\")![0];\n}\nfunction outer() {\n  return inner([[\"a\", shared]]);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "10:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r11-callee-pairs-get-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction inner(pairs: [string, number[]][]) {\n  const m = new Map(pairs);\n  return m.get(\"a\")![0];\n}\nfunction outer() {\n  return inner([[\"a\", [1]]]);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r11-callee-pairs-values-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction inner(pairs: [string, number[]][]) {\n  return [...new Map(pairs).values()][0][0];\n}\nfunction outer() {\n  return inner([[\"a\", shared]]);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "9:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r11-callee-pairs-values-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction inner(pairs: [string, number[]][]) {\n  return [...new Map(pairs).values()][0][0];\n}\nfunction outer() {\n  return inner([[\"a\", [1]]]);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r11-callee-pairs-forof-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction inner(pairs: [string, number[]][]) {\n  for (const [, v] of new Map(pairs)) {\n    return v[0];\n  }\n  return 0;\n}\nfunction outer() {\n  return inner([[\"a\", shared]]);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "12:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r11-callee-pairs-forof-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction inner(pairs: [string, number[]][]) {\n  for (const [, v] of new Map(pairs)) {\n    return v[0];\n  }\n  return 0;\n}\nfunction outer() {\n  return inner([[\"a\", [1]]]);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r11-callee-held-pairs-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction inner(pairs: [string, number[]][]) {\n  const m = new Map(pairs);\n  return m.get(\"a\")![0];\n}\nfunction outer() {\n  const pairs: [string, number[]][] = [[\"a\", shared]];\n  return inner(pairs);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "11:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r11-callee-held-pairs-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction inner(pairs: [string, number[]][]) {\n  const m = new Map(pairs);\n  return m.get(\"a\")![0];\n}\nfunction outer() {\n  const pairs: [string, number[]][] = [[\"a\", [1]]];\n  return inner(pairs);\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r11-callee-map-param-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction inner(m: Map<string, number[]>) {\n  return m.get(\"a\")![0];\n}\nfunction outer() {\n  return inner(new Map([[\"a\", shared]]));\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "9:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r11-callee-map-param-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction inner(m: Map<string, number[]>) {\n  return m.get(\"a\")![0];\n}\nfunction outer() {\n  return inner(new Map([[\"a\", [1]]]));\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
+ },
+ {
+  "name": "r11-inline-values-iterator-binding-a",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const pairs: [string, number[]][] = [[\"a\", shared]];\n  const it = new Map(pairs).values();\n  for (const v of it) {\n    return v[0];\n  }\n  return 0;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output.",
+   "9:ImplicitInput: function outer(): The function outer() reads shared, an implicit input."
+  ]
+ },
+ {
+  "name": "r11-inline-values-iterator-binding-c",
+  "source": "const shared: number[] = [1];\nfunction bump() {\n  shared[0] = 2;\n}\nfunction outer() {\n  const pairs: [string, number[]][] = [[\"a\", [1]]];\n  const it = new Map(pairs).values();\n  for (const v of it) {\n    return v[0];\n  }\n  return 0;\n}\n",
+  "findings": [
+   "3:ImplicitOutput: function bump(): The function bump() writes shared, an implicit output."
+  ]
  }
 ]

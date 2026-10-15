@@ -36,6 +36,7 @@ import {
   hasUnknownOrigin,
   freshStorageFact,
   allocatedFact,
+  allocationId,
   iteratedFact,
   pairsStorageFact,
   shallowStorageFact,
@@ -329,6 +330,10 @@ function directFlowsFor(state: AnalysisState, node: ts.Node, owner: EffectOwner,
   if (ts.isIdentifier(node) && state.model.isReference(node)) {
     return identifierFlows(state, node, owner, write);
   }
+  if (ts.isNewExpression(node)) {
+    const read = heldRead(state, node, owner, owner, storageReadSites(state, node));
+    return read ? [{ kind: "input", node, owner, description: `reads ${read.name}` }] : [];
+  }
   return directReceiverFlows(state, node, owner, includeThis, write);
 }
 
@@ -382,7 +387,11 @@ function localStorageRead(state: AnalysisState, binding: Binding, node: ts.Ident
   if (!home) {
     return undefined;
   }
-  const sites = write ? writtenReadSites(state, node, write) : storageReadSites(state, node);
+  return heldRead(state, node, home, owner, write ? writtenReadSites(state, node, write) : storageReadSites(state, node));
+}
+
+/** Gives the shared binding that reading the storage of the expression, or of a result that holds it, reads. */
+function heldRead(state: AnalysisState, node: ts.Expression, home: EffectOwner, owner: EffectOwner, sites: readonly ReadSite[]): Binding | undefined {
   return externalReads(state, storageFactForExpression(state, state.summaries, node, home, node), sites, owner, false) ??
     derivedRead(state, node, home, owner);
 }
@@ -397,8 +406,7 @@ function writtenReadSites(state: AnalysisState, node: ts.Identifier, write: Writ
 
 function derivedRead(state: AnalysisState, node: ts.Expression, home: EffectOwner, owner: EffectOwner): Binding | undefined {
   const derived = derivedValue(state, selectedRead(node).expression);
-  return derived && (externalReads(state, storageFactForExpression(state, state.summaries, derived, home, derived), storageReadSites(state, derived), owner, false) ??
-    derivedRead(state, derived, home, owner));
+  return derived && heldRead(state, derived, home, owner, storageReadSites(state, derived));
 }
 
 function derivedValue(state: AnalysisState, target: ts.Expression): ts.Expression | undefined {
@@ -468,7 +476,7 @@ function readOrigins(fact: StorageFact, site: ReadSite): { origin: StorageOrigin
   const selected = Array.from({ length: site.path.length + (site.reference ? 0 : 1) }, (_, length) =>
     originsForPath(fact, length ? site.path.slice(0, length) : "outer").map((origin) => ({ origin, rest: site.path.slice(length) })));
   const held = site.reference ? [] : site.path.reduce((value, slot) => memberStorageFact(value, slot), fact).reachable
-    .filter((origin) => (externalProjection(origin)?.path.length ?? 0) > 0);
+    .filter((origin) => ((externalProjection(origin) ?? parameterProjection(origin))?.path.length ?? 0) > 0);
   return [...selected.flat(), ...held.map((origin) => ({ origin, rest: [] }))];
 }
 
@@ -595,13 +603,49 @@ function parameterReadSites(state: AnalysisState, target: EffectOwner, index: nu
   if (!binding || parameter.dotDotDotToken || !ts.isIdentifier(parameter.name) || isGenerator(target) || usesArguments(target)) {
     return [{ path: [], reference: false }];
   }
-  return binding.references.flatMap((reference) => {
+  return [...binding.references.flatMap((reference) => {
     if (enclosingFunction(reference) !== target) {
       return [{ path: [], reference: false }];
     }
     const write = writeOf(state, reference);
     return write && !write.viaCall ? [] : storageReadSites(state, reference, seen).map((site) => ({ path: site.path, reference: false }));
-  });
+  }), ...heldParameterReadSites(state, target, index, seen)];
+}
+
+/**
+ * Gives the reads of a parameter's members that the target makes through storage that holds them, as m.get(k) in
+ * const m = new Map(pairs) reads pairs[*][1]. The paths follow the same origins the target's own reads follow.
+ */
+function heldParameterReadSites(state: AnalysisState, target: EffectOwner, index: number, seen: Set<string>): ReadSite[] {
+  const sites: ReadSite[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isNewExpression(node) || (ts.isIdentifier(node) && state.model.isReference(node) && localTo(state, node, target))) {
+      sites.push(...heldParameterSites(state, node, target, index, storageReadSites(state, node, seen), seen));
+    }
+    if (!isFunctionLike(node) && !ts.isClassLike(node)) {
+      ts.forEachChild(node, visit);
+    }
+  };
+  ts.forEachChild(target, visit);
+  return sites;
+}
+
+function localTo(state: AnalysisState, node: ts.Identifier, target: EffectOwner): boolean {
+  const binding = state.model.resolve(node);
+  const write = writeOf(state, node);
+  return !!binding && isLocalBindingOfOwner(binding, target) && (!write || write.viaCall);
+}
+
+function heldParameterSites(
+  state: AnalysisState, node: ts.Expression, target: EffectOwner, index: number, sites: readonly ReadSite[], seen: Set<string>,
+): ReadSite[] {
+  const fact = storageFactForExpression(state, state.summaries, node, target, node);
+  const held = sites.flatMap((site) => readOrigins(fact, site).flatMap(({ origin, rest }) => {
+    const projection = parameterProjection(origin);
+    return projection?.parameterIndex === index ? [{ path: [...projection.path, ...rest], reference: site.reference }] : [];
+  }));
+  const derived = derivedValue(state, selectedRead(node).expression);
+  return derived ? [...held, ...heldParameterSites(state, derived, target, index, storageReadSites(state, derived, seen), seen)] : held;
 }
 
 function usesArguments(target: EffectOwner): boolean {
@@ -825,7 +869,7 @@ function collectCallables(sourceFile: ts.SourceFile, model: ScopeModel, includeT
   const arrayLiterals = new Map<number, ts.ArrayLiteralExpression>();
   const collectArrays = (node: ts.Node): void => {
     if (ts.isArrayLiteralExpression(node)) {
-      arrayLiterals.set(node.getStart(), node);
+      arrayLiterals.set(allocationId(node), node);
     }
     ts.forEachChild(node, collectArrays);
   };

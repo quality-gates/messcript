@@ -1,6 +1,7 @@
 import ts from "typescript";
 import type { ScopeModel } from "../ast/scopes";
 import { unwrapExpression } from "../ast/expressions";
+import { globalName } from "../ast/global-reference";
 
 /**
  * Where storage can come from.
@@ -198,8 +199,16 @@ export function mapStorageFact(
   return { outer: mappedOuter, reachable: reachable(fact.reachable), cells };
 }
 
+/**
+ * Names an allocation by its node's span, since a call on a fresh receiver, as new Map(e).values(), starts where the
+ * receiver's allocation does.
+ */
+export function allocationId(node: ts.Node): number {
+  return node.getStart() * (node.getSourceFile().end + 1) + node.end;
+}
+
 export function allocatedFact(value: ts.Node, parts: readonly { slot: string; fact: StorageFact }[]): StorageFact {
-  const allocation: StorageOrigin = `private:${value.getStart()}`;
+  const allocation: StorageOrigin = `private:${allocationId(value)}`;
   const heap = new Map<string, StorageCell>();
   const initial = { allocation, slot: "@allocation", origins: ["private"] } satisfies StorageCell;
   heap.set(cellKey(initial), initial);
@@ -338,10 +347,9 @@ function spreadProperties(source: StorageFact): { slot: string; fact: StorageFac
     : [{ slot: "*", fact: elementFact(source) }];
 }
 
-function mapEntries(value: ts.NewExpression): ts.Expression | undefined {
-  const name = unwrapExpression(value.expression);
+function mapEntries(value: ts.NewExpression, constructor: string | undefined): ts.Expression | undefined {
   const entries = value.arguments?.[0] && unwrapExpression(value.arguments[0]);
-  return ts.isIdentifier(name) && (name.text === "Map" || name.text === "WeakMap") ? entries : undefined;
+  return constructor === "Map" || constructor === "WeakMap" ? entries : undefined;
 }
 
 function mapEntryListParts(entries: ts.Expression, resolve: (value: ts.Expression) => StorageFact): { slot: string; fact: StorageFact }[] {
@@ -369,8 +377,16 @@ export function literalKey(value: ts.Expression): string | undefined {
   return ts.isStringLiteralLike(key) || ts.isNumericLiteral(key) ? key.text : undefined;
 }
 
-export function constructorStorageFact(value: ts.NewExpression, resolve: (value: ts.Expression) => StorageFact): StorageFact {
-  const entries = mapEntries(value);
+/** Gives the global a construction resolves to, through const aliases and globalThis, as Map in new M() after const M = Map. */
+export function constructorName(value: ts.NewExpression, model: ScopeModel): string | undefined {
+  return globalName(unwrapExpression(value.expression), model);
+}
+
+/** Gives the storage of a construction; constructor is the resolved global name, or undefined for a local class. */
+export function constructorStorageFact(
+  value: ts.NewExpression, constructor: string | undefined, resolve: (value: ts.Expression) => StorageFact,
+): StorageFact {
+  const entries = mapEntries(value, constructor);
   return entries ? allocatedFact(value, mapEntryListParts(entries, resolve))
     : allocatedFact(value, (value.arguments ?? []).flatMap((argument) => {
       const fact = resolve(argument);
