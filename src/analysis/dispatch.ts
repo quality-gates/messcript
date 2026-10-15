@@ -87,16 +87,52 @@ function bindingTargets(dispatch: Dispatch, binding: Binding, seen: ReadonlySet<
 }
 
 function elementTargets(dispatch: Dispatch, binding: Binding, node: ts.Node, value: ts.Expression, seen: ReadonlySet<Binding>): Targets {
-  const name = patternName(binding.declarations.find((declaration) => declaration.node === node)?.identifier.parent, node);
-  return name === undefined ? UNKNOWN : namedTargets(dispatch, value, name, "call", seen, node);
+  const path = patternPath(binding.declarations.find((declaration) => declaration.node === node)?.identifier.parent, node);
+  return path === undefined ? UNKNOWN : patternTargets(dispatch, value, path, seen, node);
 }
 
-function patternName(element: ts.Node | undefined, declaration: ts.Node): string | undefined {
-  if (!element || !ts.isBindingElement(element) || !ts.isObjectBindingPattern(element.parent) || element.parent.parent !== declaration ||
-      element.dotDotDotToken || element.initializer) {
-    return undefined;
+function patternPath(element: ts.Node | undefined, declaration: ts.Node): readonly string[] | undefined {
+  const path: string[] = [];
+  while (element && ts.isBindingElement(element) && ts.isObjectBindingPattern(element.parent)) {
+    const name = expressions.keyName(element.propertyName ?? element.name);
+    if (name === undefined || element.dotDotDotToken || element.initializer) {
+      return undefined;
+    }
+    path.unshift(name);
+    element = element.parent.parent;
+    if (element === declaration) {
+      return path;
+    }
   }
-  return expressions.keyName(element.propertyName ?? element.name);
+  return undefined;
+}
+
+function patternTargets(dispatch: Dispatch, value: ts.Expression, path: readonly string[], seen: ReadonlySet<Binding>, site: ts.Node): Targets {
+  const [name, ...rest] = path;
+  if (rest.length === 0) {
+    return namedTargets(dispatch, value, name, "call", seen, site);
+  }
+  const selected = shapes.receiverShapes(dispatch.model, value, seen, site, (call) => {
+    const callees = callableTargets(dispatch, call.expression, seen);
+    return callees.complete ? callees.targets : undefined;
+  });
+  if (!selected) {
+    return UNKNOWN;
+  }
+  return joinTargets([...selected.map((shape) => ts.isClassLike(shape) ? UNKNOWN : joinTargets(
+    shapes.liveProperties(shape, name).flatMap((member) => patternMemberTargets(dispatch, member, path, seen, site)),
+  )), patchedTargets(dispatch, name, "call")]);
+}
+
+function patternMemberTargets(dispatch: Dispatch, member: ts.Node, path: readonly string[], seen: ReadonlySet<Binding>, site: ts.Node): Targets[] {
+  if (ts.isSpreadAssignment(member)) {
+    return [patternTargets(dispatch, member.expression, path, seen, site)];
+  }
+  if (expressions.declarationName(member) !== path[0]) {
+    return shapes.openName(member) ? [UNKNOWN] : [];
+  }
+  const value = shapes.memberValue(member);
+  return [value ? patternTargets(dispatch, value, path.slice(1), seen, site) : UNKNOWN];
 }
 
 export function memberTargets(dispatch: Dispatch, expression: ts.Expression, kind: MemberKind, seen: ReadonlySet<Binding> = new Set()): Targets {

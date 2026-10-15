@@ -4308,7 +4308,8 @@
   "findings": [
    "2:ImplicitInput: method add(): The method add() reads count, an implicit input.",
    "2:ImplicitOutput: method add(): The method add() writes count, an implicit output.",
-   "5:UnknownEffect: function run(): The function run() calls unresolved callable, an unknown effect."
+   "5:ImplicitInput: function run(): The function run() reads count, an implicit input.",
+   "5:ImplicitOutput: function run(): The function run() writes count, an implicit output."
   ]
  },
  {

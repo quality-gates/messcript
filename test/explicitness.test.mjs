@@ -52,6 +52,59 @@ function messages(name, source, ruleset = "explicitness") {
   return JSON.parse(stdout.read()).findings.map((finding) => `${finding.line}:${finding.ruleName}: ${finding.message}`);
 }
 
+test("nested object destructuring retains same-file method effects", () => {
+  assert.deepEqual(messages("nested-method.ts", `const svc = {
+  inner: {
+    emit(m: string): number {
+      console.log(m);
+      return 1;
+    },
+  },
+};
+function outer() {
+  const { inner: { emit } } = svc;
+  return emit("x");
+}
+`), [
+    "4:ImplicitOutput: The method emit() uses console, an implicit output.",
+    "11:ImplicitOutput: The function outer() uses console, an implicit output.",
+  ]);
+  assert.deepEqual(messages("nested-pure-method.ts", `const svc = {
+  inner: { emit(m: string): number { return 1; } },
+};
+function outer() {
+  const { inner: { emit } } = svc;
+  return emit("x");
+}
+`), []);
+});
+
+test("nested method patterns follow renamed keys, aliases, and live properties", () => {
+  assert.deepEqual(messages("nested-renamed-method.ts", `const svc = {
+  inner: { emit() { console.log(1); } },
+  inner: { leaf: { emit() { return 1; } } },
+  other: { leaf: { emit() { console.log(2); } } },
+};
+const alias = svc;
+function outer() {
+  const { inner: { leaf: { emit: invoke } } } = alias;
+  return invoke();
+}
+`), [
+    "2:ImplicitOutput: The method emit() uses console, an implicit output.",
+    "4:ImplicitOutput: The method emit() uses console, an implicit output.",
+  ]);
+  assert.deepEqual(messages("nested-spread-method.ts", `const svc = { ...{ inner: { emit() { console.log(1); } } } };
+function outer() {
+  const { inner: { emit: invoke } } = svc;
+  return invoke();
+}
+`), [
+    "1:ImplicitOutput: The method emit() uses console, an implicit output.",
+    "4:ImplicitOutput: The function outer() uses console, an implicit output.",
+  ]);
+});
+
 test("indirect writes make reads of the original shared storage implicit", () => {
   assert.deepEqual(messages("shared-alias-write.ts", `const shared: number[] = [];
 function write() { const alias = shared; alias.push(1); }
