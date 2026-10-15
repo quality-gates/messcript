@@ -211,14 +211,21 @@ class UnusedAnalyzer {
   }
 
   private markElementAccess(node: ts.ElementAccessExpression): void {
-    if (!isThis(node.expression)) {
+    const receiver = unwrapExpression(node.expression);
+    let classInfo: ClassInfo | undefined;
+    if (receiver.kind === ts.SyntaxKind.ThisKeyword) {
+      classInfo = this.currentClass(node);
+    } else if (ts.isIdentifier(receiver)) {
+      classInfo = this.classesByName.get(receiver.text);
+    }
+    if (!classInfo) {
       return;
     }
     const key = unwrapExpression(node.argumentExpression);
     if (ts.isStringLiteralLike(key)) {
-      this.markPrivate(key.text, node);
+      this.markPrivate(key.text, node, classInfo);
     } else {
-      this.markClassUncertain(this.currentClass(node));
+      this.markClassUncertain(classInfo);
     }
   }
 
