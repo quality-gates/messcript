@@ -656,6 +656,36 @@ export class C {
   assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), ["hidden"]);
 });
 
+test("literal Service[\"secret\"] counts as a use of the static field and does not suppress other unused privates", () => {
+  const file = sourceFile(`
+class Service {
+  private static secret = 1;
+  private static unused = 2;
+  private static hidden() { return 1; }
+  read() {
+    return Service["secret"];
+  }
+}
+`);
+  assert.deepEqual(findingNames(findUnusedPrivateField(file)), ["unused"]);
+  assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), ["hidden"]);
+});
+
+test("dynamic Service[expr] suppresses unused private members of the named class only", () => {
+  const file = sourceFile(`
+class Service {
+  private static secret = 1;
+  private static hidden() { return 1; }
+}
+class Other {
+  private leftover = 1;
+  read(key: string) { return Service[key]; }
+}
+`);
+  assert.deepEqual(findingNames(findUnusedPrivateField(file)), ["leftover"]);
+  assert.deepEqual(findingNames(findUnusedPrivateMethod(file)), []);
+});
+
 test("classes without dynamic this[expr] still report unused private fields and methods", () => {
   const file = sourceFile(`
 export class C {
