@@ -145,6 +145,7 @@ type InvocationState = {
 };
 
 type AnalysisState = {
+  readonly summarySubstitutions?: ReadonlySet<EffectOwner>;
   readonly invocation?: InvocationState;
   readonly callableRegistry: Map<StorageOrigin, CallableInstance>;
   readonly model: ScopeModel;
@@ -2750,8 +2751,47 @@ function instantiateCallableSummaryFromFacts(
     const slots = transferredPushSlots(state, fact, { node: write.node, repeated: true }, summary.owner, node, owner, write.path);
     return mutationEffectsFromFact(state, fact, write.path, node, owner, "mutates caller-owned callback argument", false, true, slots);
   });
-  const unresolved = summary.parameterCalls.length > 0 ? [unknownEffects(node, owner, "calls unresolved callable")] : [];
-  return combineEffects([...rebound, ...writes, ...unresolved]);
+  const callbacks = summary.parameterCalls.map((call) => instantiateSummaryParameterCall(state, summaries, summary.owner, {
+    callee: actualFact(call.parameterIndex),
+    facts: call.argumentFacts.map((fact) => instantiateStorageFact(fact, actualFact)),
+    point: node,
+    owner,
+  }));
+  return combineEffects([...rebound, ...writes, ...callbacks]);
+}
+
+function bareParameterFactIndex(fact: StorageFact): number | undefined {
+  if (fact.outer.length !== 1) { return undefined; }
+  const parameter = parameterProjection(fact.outer[0]);
+  return parameter?.path.length === 0 ? parameter.parameterIndex : undefined;
+}
+
+function instantiateSummaryParameterCall(
+  state: AnalysisState,
+  summaries: ReadonlyMap<EffectOwner, CallableSummary>,
+  summaryOwner: EffectOwner,
+  request: Pick<InvocationRequest, "callee" | "facts" | "point" | "owner">,
+): CallEffects {
+  const { callee, facts, point, owner } = request;
+  const parameterIndex = bareParameterFactIndex(callee);
+  if (parameterIndex !== undefined) {
+    return { flows: [], writes: [], parameterCalls: [{ parameterIndex, node: point, argumentFacts: facts }] };
+  }
+  if (state.summarySubstitutions?.has(summaryOwner)) {
+    escapeStorage(state, facts, point, owner);
+    return unknownEffects(point, owner, "calls unresolved callable");
+  }
+  const active = state.invocation;
+  if (!active || !registeredInvocationCallee(active, callee)) {
+    escapeStorage(state, facts, point, owner);
+  }
+  const evaluated = evaluateInvocation({ ...state, summarySubstitutions: new Set([...(state.summarySubstitutions ?? []), summaryOwner]) }, summaries, {
+    ...request,
+    actuals: [],
+    forceGenerator: false,
+    execution: "callback",
+  });
+  return evaluated?.effects ?? unknownEffects(point, owner, "calls unresolved callable");
 }
 
 function mutatingMethodEffects(
@@ -3393,6 +3433,13 @@ type InvocationRequest = {
 
 type InvocationResult = { readonly effects: CallEffects; readonly value: StorageFact };
 
+function registeredInvocationCallee(active: InvocationState, callee: StorageFact): boolean {
+  return callee.outer.length > 0 && callee.outer.every((origin) => {
+    const instance = active.registry.get(origin);
+    return instance !== undefined && instance.kind !== "iterator";
+  });
+}
+
 function evaluateInvocation(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, request: InvocationRequest): InvocationResult | undefined {
   const { callee, point, owner } = request;
   const active = state.invocation;
@@ -3404,10 +3451,7 @@ function evaluateInvocation(state: AnalysisState, summaries: ReadonlyMap<EffectO
   if (!instances.length) {
     return undefined;
   }
-  const complete = callee.outer.every((origin) => {
-    const instance = active.registry.get(origin);
-    return instance !== undefined && instance.kind !== "iterator";
-  });
+  const complete = registeredInvocationCallee(active, callee);
   const member = ts.isExpression(point) ? unwrapExpression(point) : point;
   const unresolved = isAccessExpression(member) ? "calls overridable method" : "calls unresolved callable";
   const groups: CallEffects[] = complete ? [] : [unknownEffects(point, owner, unresolved)];

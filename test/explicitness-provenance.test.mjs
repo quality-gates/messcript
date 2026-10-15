@@ -1046,3 +1046,91 @@ function outer(flag: boolean, key: "items" | "other") {
     assert.deepEqual(ownerMessages("outer", "rest-shared-twin.ts", source).map((message) => message.split(":")[1]), ["ImplicitOutput"], replacement);
   }
 });
+
+test("known callbacks stay known through direct and mutual recursion", () => {
+  for (const recur of ["walk(n - 1, visit);", "back(n - 1, visit);"]) {
+    const source = `function walk(n: number, visit: (k: number) => void): void {
+  if (n === 0) return;
+  visit(n);
+  ${recur}
+}
+function back(n: number, visit: (k: number) => void): void { walk(n, visit); }
+function outer() {
+  const seen: number[] = [];
+  walk(2, (k) => { seen.push(k); });
+  return seen.length;
+}
+`;
+    assert.deepEqual(ownerMessages("outer", "recursive-known-callback.ts", source), [], recur);
+  }
+});
+
+test("recursive callback substitution retains effects and unresolved alternatives", () => {
+  const helper = `function walk(n: number, visit: (k: number) => void): void {
+  if (n === 0) return;
+  visit(n);
+  walk(n - 1, visit);
+}
+`;
+  const action = helper + `let count = 0;
+function outer() { walk(2, () => { count++; }); }
+`;
+  assert.deepEqual(ownerMessages("outer", "recursive-action-callback.ts", action).map((message) => message.split(":")[1]), ["ImplicitInput", "ImplicitOutput"]);
+  const unknown = helper + `function outer(visit: (n: number) => void) { walk(2, visit); }
+`;
+  assert.deepEqual(ownerMessages("outer", "recursive-unknown-callback.ts", unknown).map((message) => message.split(":")[1]), ["UnknownEffect"]);
+  const mixed = helper + `function outer(flag: boolean, visit: (n: number) => void) {
+  walk(2, flag ? (() => 1) : visit);
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "recursive-mixed-callback.ts", mixed).map((message) => message.split(":")[1]), ["UnknownEffect"]);
+});
+
+test("higher order callback cycles terminate with an unresolved effect", () => {
+  const source = `function walk(n: number, visit: (k: number) => void): void {
+  if (n === 0) return;
+  visit(n);
+  walk(n - 1, visit);
+}
+function outer() {
+  const visit = (n: number) => { walk(n - 1, visit); };
+  walk(2, visit);
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "recursive-callback-cycle.ts", source).map((message) => message.split(":")[1]), ["UnknownEffect"]);
+});
+
+test("recursive callback substitution keeps closure instances and bound receivers", () => {
+  const helper = `function walk(n: number, visit: (k: number) => void): void {
+  if (n === 0) return;
+  visit(n);
+  walk(n - 1, visit);
+}
+`;
+  const captures = helper + `const shared: number[] = [];
+function visitor(items: number[]) { return (k: number) => { items.push(k); }; }
+function outer() {
+  const seen: number[] = [];
+  const unused = visitor(shared);
+  walk(2, visitor(seen));
+  return seen.length;
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "recursive-callback-instances.ts", captures), []);
+  const rebound = helper + `function outer() {
+  let seen: number[] = [];
+  const visit = (k: number) => { seen.push(k); };
+  seen = [];
+  walk(2, visit);
+  return seen.length;
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "recursive-callback-rebind.ts", rebound), []);
+  const bound = helper + `function outer() {
+  const api = { items: [] as number[], put(k: number) { this.items.push(k); } };
+  walk(2, api.put.bind(api));
+  return api.items.length;
+}
+`;
+  assert.deepEqual(ownerMessages("outer", "recursive-bound-callback.ts", bound), []);
+});
