@@ -6,6 +6,8 @@ import { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { after, before, test } from "node:test";
 import { runCli as runCliInProcess } from "../dist/cli.js";
+import ts from "typescript";
+import { locate } from "../dist/location.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const fixturesRoot = join(repoRoot, "test", "fixtures");
@@ -888,6 +890,61 @@ function runCli(args) {
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+for (const [prefix, line, column] of [
+  ["", 1, 1],
+  ["  ", 1, 3],
+  ["\n  ", 2, 3],
+  ["\r\n  ", 2, 3],
+  ["\r  ", 2, 3],
+  [" \ufeff", 1, 3],
+]) {
+  test(`a leading UTF-8 BOM does not shift finding columns after ${JSON.stringify(prefix)}`, () => {
+    const source = `${prefix}export function bad_name() { return 1; }`;
+    for (const bom of ["", "\ufeff"]) {
+      const file = join(workspaceRoot, "bom.ts");
+      writeFileSync(file, bom + source, "utf8");
+      const args = [file, "json", "controversial", "--only", "CamelCaseMethodName"];
+      const result = runCli(args);
+      assert.equal(result.status, 2);
+      assert.equal(result.stderr, "");
+      const report = JSON.parse(result.stdout);
+      assert.deepEqual(report.errors, []);
+      assert.equal(report.findings.length, 1);
+      assert.equal(report.findings[0].ruleName, "CamelCaseMethodName");
+      assert.equal(report.findings[0].line, line);
+      assert.equal(report.findings[0].column, column);
+
+      args[1] = "github";
+      const github = runCli(args);
+      assert.equal(github.status, 2);
+      assert.equal(github.stderr, "");
+      assert.match(github.stdout, new RegExp(`,line=${line},col=${column},title=CamelCaseMethodName`));
+    }
+  });
+}
+
+test("a leading UTF-8 BOM and the first visible character both locate at column zero", () => {
+  const sourceFile = ts.createSourceFile("bom.ts", "\ufeffexport const value = 1;", ts.ScriptTarget.Latest, true);
+  assert.deepEqual(locate(sourceFile, 0), { line: 0, character: 0 });
+  assert.deepEqual(locate(sourceFile, 1), { line: 0, character: 0 });
+});
+
+test("a leading UTF-8 BOM does not shift parse error columns", () => {
+  const file = join(workspaceRoot, "bom-error.ts");
+  const reports = [];
+  for (const bom of ["", "\ufeff"]) {
+    writeFileSync(file, `${bom}const = ;`, "utf8");
+    const result = runCli([file, "json", "controversial"]);
+    assert.equal(result.status, 1);
+    assert.equal(result.stderr, "");
+    const report = JSON.parse(result.stdout);
+    assert.deepEqual(report.findings, []);
+    assert.ok(report.errors.length > 0);
+    reports.push(report.errors);
+  }
+  assert.deepEqual(reports[1], reports[0]);
+});
 
 test("a missing command shape is an operational error", () => {
   const result = runCli([]);
