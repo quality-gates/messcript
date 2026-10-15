@@ -200,6 +200,9 @@ function isOwner(node: ts.Node): node is EffectOwner {
 
 /** Tells if the node runs on every path through the owner, with no branch, loop, handler, or nested function around it. */
 export function unconditional(node: ts.Node, owner: EffectOwner): boolean {
+  if (labelledExitBefore(node, owner)) {
+    return false;
+  }
   for (let current: ts.Node | undefined = node.parent; current && current !== owner; current = current.parent) {
     if (isBranch(current) && !knownBranch(current)) {
       return false;
@@ -209,6 +212,9 @@ export function unconditional(node: ts.Node, owner: EffectOwner): boolean {
 }
 
 function dominates(node: ts.Node, owner: EffectOwner, site: ts.Node): boolean {
+  if (labelledExitBefore(node, owner, site)) {
+    return false;
+  }
   for (let current: ts.Node | undefined = node.parent; current && current !== owner; current = current.parent) {
     if ((isBranch(current) && !knownBranch(current)) || (ts.isCaseOrDefaultClause(current) && !inside(site, current))) {
       return false;
@@ -218,6 +224,28 @@ function dominates(node: ts.Node, owner: EffectOwner, site: ts.Node): boolean {
     }
   }
   return true;
+}
+
+function labelledExitBefore(node: ts.Node, owner: EffectOwner, site?: ts.Node): boolean {
+  for (let current: ts.Node | undefined = node.parent; current && current !== owner; current = current.parent) {
+    if (!ts.isLabeledStatement(current) || (site && inside(site, current))) {
+      continue;
+    }
+    const label = current;
+    const visit = (child: ts.Node): boolean => {
+      if (child.pos >= node.getStart() || isFunctionLike(child) || !isReachable(child, label)) {
+        return false;
+      }
+      if (ts.isBreakStatement(child) && child.label?.text === label.label.text) {
+        return true;
+      }
+      return ts.forEachChild(child, visit) ?? false;
+    };
+    if (visit(label.statement)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function isBranch(node: ts.Node): boolean {

@@ -431,6 +431,43 @@ export function pure(values: number[], key: "a"): number {
 `), []);
 });
 
+test("a labelled break preserves an argument alias after the block", () => {
+  assert.deepEqual(messages("labelled-break.ts", `export function g(k: number, a: number[]) {
+  let y: number[] = a;
+  label: {
+    if (k) break label;
+    y = [];
+  }
+  y.push(1);
+  return 0;
+}
+`), [
+    "7:ImplicitOutput: The function g() mutates caller-owned value y, an implicit output.",
+  ]);
+});
+
+test("a labelled break preserves an argument alias in a minimal block", () => {
+  assert.deepEqual(messages("minimal-labelled-break.js", `function g(k, a) { let y = a; label: { if (k) break label; y = []; } y.push(1); }`), [
+    "1:ImplicitOutput: The function g() mutates caller-owned value y, an implicit output.",
+  ]);
+});
+
+test("labelled break controls distinguish skipped and completed reassignments", () => {
+  for (const [name, body, expected] of [
+    ["unconditional", "label: { break label; y = []; }", true],
+    ["no-break", "label: { y = []; }", false],
+    ["unreachable-break", "label: { if (false) break label; y = []; }", false],
+    ["break-after", "label: { y = []; break label; }", false],
+    ["inner-label", "outer: { inner: { if (k) break inner; } y = []; }", false],
+    ["outer-label", "outer: { inner: { if (k) break outer; } y = []; }", true],
+    ["loop", "label: do { if (k) break label; y = []; } while (false);", true],
+  ]) {
+    assert.deepEqual(messages(`labelled-${name}.js`, `function g(k, a) { let y = a; ${body} y.push(1); }`), expected ? [
+      "1:ImplicitOutput: The function g() mutates caller-owned value y, an implicit output.",
+    ] : [], name);
+  }
+});
+
 test("mutating an argument is an output, but reassigning the argument is not", () => {
   assert.deepEqual(messages("argument.js", `function addItem(cart, item) {
   cart.push(item);
