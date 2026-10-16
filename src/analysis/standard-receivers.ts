@@ -131,7 +131,8 @@ function bindingReceivers(model: ScopeModel, value: ts.Identifier, seen: Readonl
   }
   const next = new Set(seen).add(binding);
   const parameters = binding.declarations.filter((declaration) => declaration.kind === "parameter");
-  const declared = parameters.map((declaration) => declarationReceivers(model, declaration.node, path));
+  const declared = [...parameters, ...binding.declarations.filter((declaration) => ts.isClassDeclaration(declaration.node))]
+    .map((declaration) => declarationReceivers(model, declaration.node, path));
   const assigned = bindingAssignments(binding).map((assignment) => assignment.value && !assignment.element
     ? standardReceivers(model, assignment.value, next, path) : []);
   const values = [...declared, ...assigned];
@@ -149,7 +150,29 @@ function declarationReceivers(model: ScopeModel, node: ts.Node, path: readonly s
     const value = expressions.unwrapExpression(node.initializer);
     return path.length > 0 ? literalMemberReceivers(model, value, new Set(), path) : literalReceivers(value);
   }
+  if (ts.isClassDeclaration(node)) {
+    return staticMemberReceivers(model, node, path);
+  }
   return (ts.isParameter(node) || ts.isFunctionDeclaration(node)) && node.type ? typeReceivers(model, node.type, new Set(), path) : [];
+}
+
+/** Gives the receivers of a static field a class declares, when no decorator may replace the class or the field. */
+function staticMemberReceivers(model: ScopeModel, node: ts.ClassDeclaration, path: readonly string[]): StandardReceiver[] {
+  const [name, ...rest] = path;
+  const members = node.members.filter((member) => member.name && memberKey(member.name) === name &&
+    ts.canHaveModifiers(member) && ts.getModifiers(member)?.some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword));
+  const [member] = members;
+  if (name === undefined || members.length !== 1 || !ts.isPropertyDeclaration(member) || ts.getDecorators(node) || ts.getDecorators(member)) {
+    return [];
+  }
+  if (member.type) {
+    return typeReceivers(model, member.type, new Set(), rest);
+  }
+  if (!member.initializer) {
+    return [];
+  }
+  const value = expressions.unwrapExpression(member.initializer);
+  return rest.length > 0 ? literalMemberReceivers(model, value, new Set(), rest) : literalReceivers(value);
 }
 
 function typeReceivers(model: ScopeModel, type: ts.TypeNode, seen: ReadonlySet<ts.TypeNode> = new Set(), path: readonly string[] = []): StandardReceiver[] {

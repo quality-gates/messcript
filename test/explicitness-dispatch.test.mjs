@@ -371,6 +371,29 @@ function outer(cfg: { tags: Bag }, more: { tags: string[]; extra: string[] }) {
 `), ["4:UnknownEffect: The function outer() uses unresolved iterate protocol, an unknown effect."]);
 });
 
+test("a static class field resolves its standard methods until an accessor or a write may replace it", () => {
+  assert.deepEqual(messages("static-field.ts", `class Cfg {
+  static readonly ITEMS: number[] = [1];
+  static add(n: number) {
+    const copy = Cfg.ITEMS.slice();
+    copy.push(n);
+  }
+}
+function outer() { return Cfg.ITEMS.length; }
+`), []);
+  assert.deepEqual(messages("static-accessor.ts", `class Cfg {
+  static get ITEMS(): number[] { return [1]; }
+}
+function add() { return Cfg.ITEMS.slice(); }
+`), ["4:UnknownEffect: The function add() calls unresolved callable, an unknown effect."]);
+  assert.deepEqual(messages("static-replaced.ts", `class Cfg {
+  static ITEMS: any = [1];
+  static { this.ITEMS = { slice() { return []; } }; }
+}
+function add() { return Cfg.ITEMS.slice(); }
+`).filter((message) => message.includes("add()")), ["5:UnknownEffect: The function add() calls overridable method, an unknown effect."]);
+});
+
 test("a module array literal iterates without code until a write may give it its own iterator", () => {
   assert.deepEqual(messages("module-row-spread.ts", `const grid: number[][] = [[0, 0], [1, 1]];
 const registry = { rows: [1, 2] };
