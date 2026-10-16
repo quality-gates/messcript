@@ -2913,8 +2913,9 @@ function instantiateCallableSummaryFromFacts(
   const actualFact = (index: number) => actualFacts[index] ?? unknownFact;
   const writes = summary.parameterWrites.map((write) => {
     const fact = actualFact(write.parameterIndex);
-    const slots = transferredPushSlots(state, fact, { node: write.node, repeated: true }, summary.owner, node, owner, write.path);
-    return mutationEffectsFromFact(state, fact, write.path, node, owner, "mutates caller-owned callback argument", false, true, slots);
+    const slots = transferredPushSlots(state, fact, { ...write, repeated: true }, summary.owner, node, owner, write.path);
+    const effects = mutationEffectsFromFact(state, fact, write.path, node, owner, "mutates caller-owned callback argument", false, true, slots);
+    return { ...effects, writes: effects.writes.map((forwarded) => ({ ...forwarded, writeNode: write.writeNode ?? write.node })) };
   });
   const callbacks = instantiateDeferredCalls(state, summaries, summary.deferredCalls, actualFact, node, owner, summary.owner);
   return combineEffects([...rebound, ...writes, callbacks]);

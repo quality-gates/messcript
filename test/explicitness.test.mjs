@@ -1835,6 +1835,106 @@ test("helper pushes preserve appended slots across calls and loops", () => {
   }
 });
 
+test("a recursive helper's push lands after the caller's elements, unless the helper also shifts, resets or indexes them", () => {
+  const cases = [
+    ["recursive-push-existing.ts", `function fill(list: number[], n: number) {
+  if (n <= 0) {
+    return;
+  }
+  list.push(n);
+  fill(list, n - 1);
+}
+function run() {
+  const values = [0];
+  function read() { return values[0]; }
+  read();
+  fill(values, 3);
+  return read();
+}
+`, []],
+    ["mutual-push-existing.ts", `function fill(list: number[], n: number) {
+  if (n <= 0) {
+    return;
+  }
+  list.push(n);
+  more(list, n - 1);
+}
+function more(list: number[], n: number) { fill(list, n); }
+function run() {
+  const values = [0];
+  function read() { return values[0]; }
+  read();
+  fill(values, 3);
+  return read();
+}
+`, []],
+    ["recursive-push-appended.ts", `function fill(list: number[], n: number) {
+  if (n <= 0) {
+    return;
+  }
+  list.push(n);
+  fill(list, n - 1);
+}
+function run() {
+  const values = [0];
+  function read() { return values[1]; }
+  read();
+  fill(values, 3);
+  return read();
+}
+`, [[10, "ImplicitInput"]]],
+    ["recursive-push-reset.ts", `function fill(list: number[], n: number) {
+  if (n <= 0) {
+    list.length = 0;
+    return;
+  }
+  list.push(n);
+  fill(list, n - 1);
+}
+function run() {
+  const values = [0];
+  function read() { return values[0]; }
+  read();
+  fill(values, 3);
+  return read();
+}
+`, [[11, "ImplicitInput"]]],
+    ["recursive-shift.ts", `function fill(list: number[], n: number) {
+  if (n <= 0) {
+    return;
+  }
+  list.shift();
+  fill(list, n - 1);
+}
+function run() {
+  const values = [0];
+  function read() { return values[0]; }
+  read();
+  fill(values, 3);
+  return read();
+}
+`, [[10, "ImplicitInput"]]],
+    ["recursive-index-write.ts", `function fill(list: number[], n: number) {
+  if (n <= 0) {
+    return;
+  }
+  list[0] = n;
+  fill(list, n - 1);
+}
+function run() {
+  const values = [0];
+  function read() { return values[0]; }
+  read();
+  fill(values, 3);
+  return read();
+}
+`, [[10, "ImplicitInput"]]],
+  ];
+  for (const [name, source, expected] of cases) {
+    assert.deepEqual(ownerRecords(name, source, "function read()"), expected, name);
+  }
+});
+
 test("helper appends retain caller element provenance without touching private siblings", () => {
   const append = "function append(values: number[][], item: number[]) { values.push(item); }\n";
   const cases = [
