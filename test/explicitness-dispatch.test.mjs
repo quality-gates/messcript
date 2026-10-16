@@ -371,6 +371,30 @@ function outer(cfg: { tags: Bag }, more: { tags: string[]; extra: string[] }) {
 `), ["4:UnknownEffect: The function outer() uses unresolved iterate protocol, an unknown effect."]);
 });
 
+test("a module array literal iterates without code until a write may give it its own iterator", () => {
+  assert.deepEqual(messages("module-row-spread.ts", `const grid: number[][] = [[0, 0], [1, 1]];
+const registry = { rows: [1, 2] };
+const { rows } = registry;
+function outer() {
+  const copy = [...grid];
+  return [...copy[1], ...rows];
+}
+`), []);
+  assert.deepEqual(messages("module-keyed-writes.ts", `const items = [1, 2];
+const seen = new Set<number>();
+function set(index: number, value: number) { items[index] = value; items.push(value); seen.add(value); }
+function all() { return [...items, ...seen]; }
+`).filter((message) => message.includes("UnknownEffect")), []);
+  assert.deepEqual(messages("module-iterator-write.ts", `const rows: any = [1, 2];
+function hack() { rows[Symbol.iterator] = function* () { console.log("y"); }; }
+function outer() { hack(); return [...rows]; }
+`).filter((message) => message.includes("outer()")), [
+    "3:ImplicitOutput: The function outer() writes rows, an implicit output.",
+    "3:UnknownEffect: The function outer() uses unresolved iterate protocol, an unknown effect.",
+    "3:ImplicitInput: The function outer() reads rows, an implicit input.",
+  ]);
+});
+
 test("a spread before a destructured position hides which element it receives", () => {
   assert.deepEqual(messages("swap-spread-before.ts", `function outer(xs: number[][]) {
   let a = [0];

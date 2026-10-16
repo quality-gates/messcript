@@ -179,6 +179,11 @@ type AnalysisState = {
   readonly includeThis: boolean;
   readonly sharedBindings: Map<Binding, Set<string>>;
   readonly sharedLocalBindings: Map<Binding, Map<string, SharedWrite>>;
+  /**
+   * Paths in module bindings where a write may set a member a computed key names, such as Symbol.iterator. A path
+   * ending in "**" covers every value beneath it, as when unknown code receives the storage.
+   */
+  readonly memberWrites: Map<Binding, Set<string>>;
   readonly bindingOrigins: ReadonlyMap<StorageOrigin, Binding>;
   readonly arrayLiterals: ReadonlyMap<number, ts.ArrayLiteralExpression>;
   readonly objectLiterals: ReadonlySet<number>;
@@ -975,7 +980,7 @@ function originFlows(
 ): ImplicitFlow[] {
   const flows: ImplicitFlow[] = [];
   if (hasExternalOrigin(origins)) {
-    shareOrigins(state, origins, slots?.map((slot) => slot ?? "*"));
+    shareOrigins(state, origins, slots?.map((slot) => slot ?? "*"), "exact");
     flows.push({ kind: "output", node, owner, description, origins: origins.filter((origin) => origin.startsWith("external:") || origin.startsWith("host:")) });
   }
   if (hasReceiverOrigin(origins) && !receiverReported) {
@@ -1001,7 +1006,7 @@ function collectCallables(sourceFile: ts.SourceFile, model: ScopeModel, includeT
   return {
     model, sourceFile, callables: collectOwners(sourceFile), summaries: new Map(), callableRegistry: new Map(),
     factCache: new Map(), insertionCache: new Map(), cycles: { count: 0 }, includeThis,
-    sharedBindings: new Map(), sharedLocalBindings: new Map(),
+    sharedBindings: new Map(), sharedLocalBindings: new Map(), memberWrites: new Map(),
     bindingOrigins: new Map(model.bindings.map((binding) => [externalBindingOrigin(binding), binding])),
     arrayLiterals, objectLiterals, exposedOwners: exposedOwners(model), ownerReferences: new Map(), assignments: new Map(), assignmentSites: {},
   };
@@ -1018,11 +1023,17 @@ function exposedOwners(model: ScopeModel): Set<ts.Node> {
   return owners;
 }
 
-function shareOrigins(state: AnalysisState, origins: readonly StorageOrigin[], slots: readonly string[] = ["*"]): boolean {
+function shareOrigins(
+  state: AnalysisState, origins: readonly StorageOrigin[], slots: readonly string[] = ["*"], member: "deep" | "exact" | false = "deep",
+): boolean {
   let changed = false;
   for (const origin of origins) {
     const external = originBinding(state, origin);
     if (external) {
+      if (member) {
+        const paths = state.memberWrites.get(external.binding) ?? new Set<string>();
+        state.memberWrites.set(external.binding, paths.add(JSON.stringify(member === "deep" ? [...external.path, "**"] : external.path)));
+      }
       const marks = state.sharedBindings.get(external.binding) ?? new Set<string>();
       for (const slot of slots) {
         const mark = JSON.stringify([...external.path, slot]);
@@ -1045,7 +1056,7 @@ function shareCapturedWrite(
   state: AnalysisState, binding: Binding, node: ts.Identifier, owner: EffectOwner, path: StoragePath, fact: StorageFact,
 ): void {
   for (const origin of originsForPath(fact, path)) {
-    shareOrigins(state, [origin], capturedWriteSlots(state, binding, node, owner, path, origin));
+    shareOrigins(state, [origin], capturedWriteSlots(state, binding, node, owner, path, origin), writesComputedMember(state, node) && "exact");
   }
 }
 
@@ -1064,6 +1075,58 @@ function capturedWriteSlots(
   const slots = write && !write.contents ? assignedSlots(state, node)
     : push ? pushSlots(push, owner, { lowerBound: length, exact: false }) : [undefined];
   return slots.map((slot) => slot ?? "*");
+}
+
+/**
+ * Tells if a write through a name may set a member a computed key names. Named members and number or string keys
+ * cannot name Symbol.iterator, and a library call that fills a collection sets no member.
+ */
+function writesComputedMember(state: AnalysisState, node: ts.Identifier): boolean {
+  const access = outermostAccess(node);
+  const name = outerExpression(node);
+  if (access === name) {
+    const parent = name.parent;
+    return !(ts.isBinaryExpression(parent) && parent.left === name) && !storesCollectionContents(state, name);
+  }
+  if (ts.isCallExpression(access.parent) && access.parent.expression === access) {
+    return !storesCollectionContents(state, access);
+  }
+  let current = name;
+  while (current !== access && isAccessExpression(current.parent)) {
+    const member = current.parent;
+    if (ts.isElementAccessExpression(member) && !nonSymbolKey(state.model, member.argumentExpression)) { return true; }
+    current = outerExpression(member);
+  }
+  return false;
+}
+
+/** Tells if a key's value is a number or a string, so it names no symbol member. */
+function nonSymbolKey(model: ScopeModel, key: ts.Expression, seen: ReadonlySet<Binding> = new Set()): boolean {
+  const value = unwrapExpression(key);
+  if (ts.isNumericLiteral(value) || ts.isStringLiteralLike(value) || ts.isTemplateExpression(value) ||
+    ts.isPrefixUnaryExpression(value) || ts.isPostfixUnaryExpression(value)) {
+    return true;
+  }
+  if (ts.isPropertyAccessExpression(value)) {
+    return value.name.text === "length";
+  }
+  if (ts.isBinaryExpression(value)) {
+    const operator = value.operatorToken.kind;
+    if (operator === ts.SyntaxKind.CommaToken || operator === ts.SyntaxKind.EqualsToken) { return nonSymbolKey(model, value.right, seen); }
+    return !isShortCircuit(operator) || nonSymbolKey(model, value.left, seen) && nonSymbolKey(model, value.right, seen);
+  }
+  const binding = ts.isIdentifier(value) ? model.resolve(value) : undefined;
+  if (!binding || seen.has(binding)) { return false; }
+  const next = new Set(seen).add(binding);
+  return binding.declarations.every((declaration) => ts.isParameter(declaration.node)
+    ? declaration.node.type !== undefined && nonSymbolType(declaration.node.type)
+    : ts.isVariableDeclaration(declaration.node) && (declaration.node.initializer !== undefined || ts.isForInStatement(declaration.node.parent.parent))) &&
+    bindingAssignments(binding).every((assignment) => assignment.value !== undefined && !assignment.element && nonSymbolKey(model, assignment.value, next));
+}
+
+function nonSymbolType(type: ts.TypeNode): boolean {
+  if (ts.isUnionTypeNode(type)) { return type.types.every(nonSymbolType); }
+  return type.kind === ts.SyntaxKind.NumberKeyword || type.kind === ts.SyntaxKind.StringKeyword || ts.isLiteralTypeNode(type);
 }
 
 function invocationsRecorded(state: AnalysisState, owner: EffectOwner, binding: Binding): boolean {
@@ -1851,7 +1914,8 @@ function sameStorage(state: AnalysisState, left: ts.Expression, right: ts.Expres
 }
 
 function sharedBindingCount(state: AnalysisState): number {
-  return [...state.sharedBindings.values()].reduce((count, slots) => count + slots.size, 0) + [...state.sharedLocalBindings.values()].reduce((count, writes) => count + writes.size, 0);
+  return [...state.sharedBindings.values()].reduce((count, slots) => count + slots.size, 0) + [...state.sharedLocalBindings.values()].reduce((count, writes) => count + writes.size, 0) +
+    [...state.memberWrites.values()].reduce((count, paths) => count + paths.size, 0);
 }
 
 function shareExposedReturns(state: AnalysisState, summary: CallableSummary): void {
@@ -4098,6 +4162,75 @@ function appendUnresolvedIteration(state: AnalysisState, active: InvocationState
   }
 }
 
+/** Tells if a write may have given a value its own Symbol.iterator, so iterating it may run code. */
+function iterationReplaced(
+  state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, expression: ts.Expression, point: ts.Node, owner: EffectOwner,
+): boolean {
+  const fact = storageFactForExpression(state, summaries, expression, owner, point);
+  const members = state.invocation?.heap.some((insertion) => insertion.target.outer.some((origin) => fact.outer.includes(origin)) &&
+    (insertion.slot === "property:Symbol.iterator" || insertion.slot === undefined && !storesCollectionContents(state, insertion.origin)));
+  return !!members || fact.outer.some((origin) => {
+    const external = originBinding(state, origin);
+    return !!external && [...state.memberWrites.get(external.binding) ?? []].some((mark) => memberWriteReaches(JSON.parse(mark) as string[], external.path));
+  });
+}
+
+/** Tells if a member write at a path may reach the value a read path names, where "*" stands for any slot. */
+function memberWriteReaches(written: readonly string[], read: readonly string[]): boolean {
+  const deep = written[written.length - 1] === "**";
+  const path = deep ? written.slice(0, -1) : written;
+  return (deep ? path.length <= read.length : path.length === read.length) &&
+    path.every((slot, index) => slot === read[index] || slot === "*" || read[index] === "*");
+}
+
+/** Tells if a heap write came from a library call that fills a collection, which cannot set a named member. */
+function storesCollectionContents(state: AnalysisState, origin: ts.Node): boolean {
+  const call = ts.isCallExpression(origin.parent) ? origin.parent
+    : ts.isCallExpression(origin.parent.parent) && origin.parent.parent.expression === origin.parent ? origin.parent.parent : undefined;
+  const known = call && libraryCall(call, state.model);
+  return !!known && known.kind !== "effect" && known.stores !== "sources";
+}
+
+/** Tells if a value is an array literal still held, unwritten, where a module constant's initializer put it. */
+function iteratesModuleArrayLiteral(
+  state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, expression: ts.Expression, point: ts.Node, owner: EffectOwner,
+): boolean {
+  const { outer } = storageFactForExpression(state, summaries, expression, owner, point);
+  return outer.length > 0 && outer.every((origin) => {
+    const external = originBinding(state, origin);
+    const [declaration] = external?.binding.declarations ?? [];
+    if (!external || external.binding.declarations.length !== 1 || !constantDeclaration(declaration.node) || isExportedBinding(external.binding) ||
+      external.binding.mutated || state.sharedBindings.has(external.binding) || state.sharedLocalBindings.has(external.binding)) {
+      return false;
+    }
+    const values = external.path.reduce<readonly ts.Expression[] | undefined>((held, slot) => held && literalMembers(held, slot),
+      declaration.node.initializer ? [declaration.node.initializer] : undefined);
+    return !!values && values.length > 0 && values.every((value) => plainArrayLiteral(unwrapExpression(value)) !== undefined);
+  });
+}
+
+function literalMembers(values: readonly ts.Expression[], slot: string): readonly ts.Expression[] | undefined {
+  const members = values.map((held) => {
+    const value = unwrapExpression(held);
+    const elements = plainArrayLiteral(value);
+    if (elements) {
+      const index = arrayIndexForSlot(slot);
+      return slot === "*" ? elements : index !== undefined && index < elements.length ? [elements[index]] : undefined;
+    }
+    const properties = ts.isObjectLiteralExpression(value) && slot.startsWith("property:") ? value.properties.map((property) =>
+      ts.isPropertyAssignment(property) && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name) || ts.isNumericLiteral(property.name))
+        ? { name: property.name.text, value: property.initializer } : undefined) : [undefined];
+    const named = properties.filter((property) => property?.name === slot.slice(9));
+    return properties.every(Boolean) && named.length === 1 ? named.map((property) => property?.value ?? value) : undefined;
+  });
+  return members.every(Boolean) ? members.flatMap((member) => member ?? []) : undefined;
+}
+
+function plainArrayLiteral(value: ts.Expression): readonly ts.Expression[] | undefined {
+  return ts.isArrayLiteralExpression(value) && value.elements.every((element) => !ts.isSpreadElement(element) && !ts.isOmittedExpression(element))
+    ? value.elements : undefined;
+}
+
 function joinArrayStates(state: AnalysisState, initial: ReadonlyMap<StorageOrigin, PushStart | undefined>, branches: readonly ReadonlyMap<StorageOrigin, PushStart | undefined>[]): Map<StorageOrigin, PushStart | undefined> {
   const joined = new Map(initial);
   for (const origin of new Set(branches.flatMap((branch) => [...branch.keys()]))) {
@@ -5179,7 +5312,9 @@ function evaluationEffects(
     if (protocol === "iterate") {
       const forced = forceIterator(state, summaries, expression, node, owner);
       if (forced) { return forced; }
+      if (iterationReplaced(state, summaries, expression, node, owner)) { return unknownEffects(node, owner, "uses unresolved iterate protocol"); }
       if (isKnownIterator(state, summaries, expression)) { return emptyCallEffects(); }
+      if (iteratesModuleArrayLiteral(state, summaries, expression, node, owner)) { return emptyCallEffects(); }
     }
     if (protocol === "await" && awaitHasNoEffects(state, summaries, expression, node, owner)) { return emptyCallEffects(); }
     return supportsProtocol(state.model, expression, protocol) ? emptyCallEffects()
