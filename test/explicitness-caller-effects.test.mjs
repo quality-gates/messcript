@@ -168,4 +168,10 @@ for (const { name, source, tagLine, outerLine } of decorated) {
       `${outerLine}:UnknownEffect: The function outer() uses unresolved decorator application, an unknown effect.`,
     ]);
   });
+
+  test(`${name} pure twin retains only the permitted unknown-effect fallback`, () => {
+    assert.deepEqual(messages(`${name}-pure.ts`, source("")), [
+      `${outerLine}:UnknownEffect: The function outer() uses unresolved decorator application, an unknown effect.`,
+    ]);
+  });
 }
