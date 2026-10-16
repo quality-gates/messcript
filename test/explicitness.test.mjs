@@ -1528,6 +1528,28 @@ function privateCall() { return new Base([]); }
   ]);
 });
 
+test("passing storage to a resolved constructor or base constructor reads it only through that constructor", () => {
+  assert.deepEqual(effectSites("constructor-arguments.ts", `const log: number[] = [];
+class Base {
+  constructor(xs: number[]) { xs.push(1); }
+}
+class Kid extends Base {
+  constructor() { super(log); }
+}
+function direct() { new Base(log); }
+function derived() { new Kid(); }
+declare const External: new (xs: number[]) => object;
+function unresolved() { new External(log); }
+`), [
+    [3, "ImplicitOutput", "constructor"],
+    [6, "ImplicitOutput", "constructor"],
+    [8, "ImplicitOutput", "function direct()"],
+    [9, "ImplicitOutput", "function derived()"],
+    [11, "ImplicitInput", "function unresolved()"],
+    [11, "UnknownEffect", "function unresolved()"],
+  ]);
+});
+
 test("static fields execute at definition while instance fields execute on construction", () => {
   assert.deepEqual(effectSites("field-lifecycle.ts", `function define() {
   class Clock {

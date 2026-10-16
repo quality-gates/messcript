@@ -6,7 +6,7 @@ export type ReadMode = "reference" | "keys" | "slots" | "deep";
 export type ReadSite = { readonly path: readonly string[]; readonly mode: ReadMode };
 
 export type ArgumentSites = (
-  site: ts.CallExpression | ts.AccessExpression, index: number | "this",
+  site: ts.CallExpression | ts.NewExpression | ts.AccessExpression, index: number | "this",
 ) => ReadSite[] | undefined;
 
 export function readSites(node: ts.Expression, argumentSites: ArgumentSites): ReadSite[] {
@@ -108,8 +108,8 @@ function consumerSites(expression: ts.Expression, argumentSites: ArgumentSites):
 
 function callSites(expression: ts.Expression, argumentSites: ArgumentSites): ReadSite[] | undefined {
   const parent = expression.parent;
-  if (ts.isCallExpression(parent) && parent.expression !== expression) {
-    return argumentSites(parent, parent.arguments.indexOf(expression));
+  if ((ts.isCallExpression(parent) || ts.isNewExpression(parent)) && parent.expression !== expression) {
+    return argumentSites(parent, parent.arguments?.indexOf(expression) ?? -1);
   }
   const call = receiverCall(expression);
   return call && argumentSites(call, "this");

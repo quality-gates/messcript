@@ -683,10 +683,15 @@ function libraryReadSites(
 }
 
 function argumentReadSites(
-  state: AnalysisState, site: ts.CallExpression | ts.AccessExpression, index: number | "this",
+  state: AnalysisState, site: ts.CallExpression | ts.NewExpression | ts.AccessExpression, index: number | "this",
 ): ReadSite[] | undefined {
-  if (!ts.isCallExpression(site) || index === "this") {
+  if (!(ts.isCallExpression(site) || ts.isNewExpression(site)) || index === "this") {
     return [{ path: [], mode: "reference" }];
+  }
+  const constructed = constructedClass(site);
+  if (constructed) {
+    const classes = classTargets(state.model, constructed);
+    return classes.complete && classes.targets.length > 0 ? [{ path: [], mode: "reference" }] : undefined;
   }
   const active = state.invocation;
   if (active) {
@@ -700,6 +705,15 @@ function argumentReadSites(
   }
   const resolved = resolveTargets(dispatchFor(state, state.summaries), site.expression);
   return resolved.complete && resolved.targets.length > 0 ? [{ path: [], mode: "reference" }] : undefined;
+}
+
+/** Gives the class a construction creates, the base class for a super call. */
+function constructedClass(site: ts.CallExpression | ts.NewExpression): ts.Expression | undefined {
+  if (ts.isNewExpression(site)) {
+    return site.expression;
+  }
+  const enclosing = unwrapExpression(site.expression).kind === ts.SyntaxKind.SuperKeyword ? enclosingClass(site) : undefined;
+  return enclosing && baseClassExpression(enclosing);
 }
 
 function sharedMarkAffectsRead(state: AnalysisState, binding: Binding, site: ReadSite): boolean {
