@@ -1875,7 +1875,6 @@
   "source": "function outer() {\n  const values = [0];\n  class Base { constructor() { values.push(1); } }\n  class Sub extends Base {}\n  function read() { return values[2] ?? -1; }\n  new Sub();\n  values.push(3);\n  return read();\n}\n",
   "findings": [
    "3:ImplicitOutput: constructor: The constructor writes values, an implicit output.",
-   "4:ImplicitOutput: constructor: The constructor writes values, an implicit output.",
    "5:ImplicitInput: function read(): The function read() reads values, an implicit input."
   ]
  },
@@ -1883,8 +1882,7 @@
   "name": "h-e-implicit-subclass-C",
   "source": "function outer() {\n  const values = [0];\n  class Base { constructor() { values.push(1); } }\n  class Sub extends Base {}\n  function read() { return values[0] ?? -1; }\n  new Sub();\n  values.push(3);\n  return read();\n}\n",
   "findings": [
-   "3:ImplicitOutput: constructor: The constructor writes values, an implicit output.",
-   "4:ImplicitOutput: constructor: The constructor writes values, an implicit output."
+   "3:ImplicitOutput: constructor: The constructor writes values, an implicit output."
   ]
  },
  {

@@ -5562,7 +5562,7 @@ function analyzeImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): 
     }
   }
   const flows: ImplicitFlow[] = [];
-  for (const summary of summaries.values()) {
+  for (const summary of reportedSummaries(summaries)) {
     if (!converged) {
       flows.push(...unknownEffects(summary.owner, summary.owner, "has effects this analysis did not resolve").flows);
     }
@@ -5582,6 +5582,20 @@ function analyzeImplicitFlows(sourceFile: ts.SourceFile, includeThis: boolean): 
     })));
   }
   return uniqueLines(uniqueFlows(firstStorageSites(withoutPassedReads(state, summaries, flows))));
+}
+
+/**
+ * Gives the summaries whose effects the report shows. An implicit constructor's call to a resolved base constructor
+ * has no source of its own, and the base constructor reports those effects, so only callers see them.
+ */
+function reportedSummaries(summaries: ReadonlyMap<EffectOwner, CallableSummary>): CallableSummary[] {
+  return [...summaries.values()].map((summary) => {
+    const base = ts.isClassLike(summary.owner) ? baseClassExpression(summary.owner) : undefined;
+    if (!base) { return summary; }
+    const own = (effect: { readonly node: ts.Node; readonly description?: string }) =>
+      effect.node !== base || effect.description === "constructs unresolved base class";
+    return { ...summary, flows: summary.flows.filter(own), parameterWrites: summary.parameterWrites.filter(own), deferredCalls: summary.deferredCalls.filter(own) };
+  });
 }
 
 function firstStorageSites(flows: readonly ImplicitFlow[]): ImplicitFlow[] {

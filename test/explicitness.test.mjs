@@ -1522,7 +1522,6 @@ function caller(values: number[]) { return new Derived(values); }
 function privateCall() { return new Base([]); }
 `), [
     [2, "ImplicitOutput", "constructor"],
-    [4, "ImplicitOutput", "constructor"],
     [5, "ImplicitInput", "constructor"],
     [7, "ImplicitInput", "function caller()"],
     [7, "ImplicitOutput", "function caller()"],
