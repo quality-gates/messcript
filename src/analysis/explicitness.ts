@@ -695,23 +695,33 @@ function argumentReadSites(
   if (!(ts.isCallExpression(site) || ts.isNewExpression(site)) || index === "this") {
     return [{ path: [], mode: "reference" }];
   }
+  return calleeKnown(state, site) ? [{ path: [], mode: "reference" }] : undefined;
+}
+
+/** Tells if every function a call or construction may run is known. */
+function calleeKnown(state: AnalysisState, site: ts.CallExpression | ts.NewExpression): boolean {
   const constructed = constructedClass(site);
   if (constructed) {
     const classes = classTargets(state.model, constructed);
-    return classes.complete && classes.targets.length > 0 ? [{ path: [], mode: "reference" }] : undefined;
+    return classes.complete && classes.targets.length > 0;
   }
-  const active = state.invocation;
-  if (active) {
-    const callee = storageFactForExpression(state, state.summaries, site.expression, active.frame.owner, site);
-    if (callee.outer.length > 0 && callee.outer.every((origin) => {
-      const instance = invocationInstance(active, origin);
-      return instance !== undefined && instance.kind !== "iterator";
-    })) {
-      return [{ path: [], mode: "reference" }];
-    }
+  if (invokesRegisteredInstances(state, site)) {
+    return true;
   }
   const resolved = resolveTargets(dispatchFor(state, state.summaries), site.expression);
-  return resolved.complete && resolved.targets.length > 0 ? [{ path: [], mode: "reference" }] : undefined;
+  return resolved.complete && resolved.targets.length > 0;
+}
+
+function invokesRegisteredInstances(state: AnalysisState, site: ts.CallExpression | ts.NewExpression): boolean {
+  const active = state.invocation;
+  if (!active) {
+    return false;
+  }
+  const callee = storageFactForExpression(state, state.summaries, site.expression, active.frame.owner, site);
+  return callee.outer.length > 0 && callee.outer.every((origin) => {
+    const instance = invocationInstance(active, origin);
+    return instance !== undefined && instance.kind !== "iterator";
+  });
 }
 
 /** Gives the class a construction creates, the base class for a super call. */
@@ -1112,10 +1122,14 @@ function writesComputedMember(state: AnalysisState, node: ts.Identifier): boolea
   if (ts.isCallExpression(access.parent) && access.parent.expression === access) {
     return !storesCollectionContents(state, access);
   }
+  return accessChainMaySetSymbol(state.model, name, access);
+}
+
+function accessChainMaySetSymbol(model: ScopeModel, name: ts.Expression, access: ts.Expression): boolean {
   let current = name;
   while (current !== access && isAccessExpression(current.parent)) {
     const member = current.parent;
-    if (ts.isElementAccessExpression(member) && !nonSymbolKey(state.model, member.argumentExpression)) { return true; }
+    if (ts.isElementAccessExpression(member) && !nonSymbolKey(model, member.argumentExpression)) { return true; }
     current = outerExpression(member);
   }
   return false;
@@ -1124,21 +1138,31 @@ function writesComputedMember(state: AnalysisState, node: ts.Identifier): boolea
 /** Tells if a key's value is a number or a string, so it names no symbol member. */
 function nonSymbolKey(model: ScopeModel, key: ts.Expression, seen: ReadonlySet<Binding> = new Set()): boolean {
   const value = unwrapExpression(key);
-  if (ts.isNumericLiteral(value) || ts.isStringLiteralLike(value) || ts.isTemplateExpression(value) ||
-    ts.isPrefixUnaryExpression(value) || ts.isPostfixUnaryExpression(value)) {
+  if (primitiveKey(value)) {
     return true;
   }
   if (ts.isPropertyAccessExpression(value)) {
     return value.name.text === "length";
   }
   if (ts.isBinaryExpression(value)) {
-    const operator = value.operatorToken.kind;
-    if (operator === ts.SyntaxKind.CommaToken || operator === ts.SyntaxKind.EqualsToken) { return nonSymbolKey(model, value.right, seen); }
-    return !isShortCircuit(operator) || nonSymbolKey(model, value.left, seen) && nonSymbolKey(model, value.right, seen);
+    return nonSymbolBinaryKey(model, value, seen);
   }
   const binding = ts.isIdentifier(value) ? model.resolve(value) : undefined;
-  if (!binding || seen.has(binding)) { return false; }
-  const next = new Set(seen).add(binding);
+  return !!binding && !seen.has(binding) && nonSymbolBinding(model, binding, new Set(seen).add(binding));
+}
+
+function primitiveKey(value: ts.Expression): boolean {
+  return ts.isNumericLiteral(value) || ts.isStringLiteralLike(value) || ts.isTemplateExpression(value) ||
+    ts.isPrefixUnaryExpression(value) || ts.isPostfixUnaryExpression(value);
+}
+
+function nonSymbolBinaryKey(model: ScopeModel, value: ts.BinaryExpression, seen: ReadonlySet<Binding>): boolean {
+  const operator = value.operatorToken.kind;
+  if (operator === ts.SyntaxKind.CommaToken || operator === ts.SyntaxKind.EqualsToken) { return nonSymbolKey(model, value.right, seen); }
+  return !isShortCircuit(operator) || nonSymbolKey(model, value.left, seen) && nonSymbolKey(model, value.right, seen);
+}
+
+function nonSymbolBinding(model: ScopeModel, binding: Binding, next: ReadonlySet<Binding>): boolean {
   return binding.declarations.every((declaration) => ts.isParameter(declaration.node)
     ? declaration.node.type !== undefined && nonSymbolType(declaration.node.type)
     : ts.isVariableDeclaration(declaration.node) && (declaration.node.initializer !== undefined || ts.isForInStatement(declaration.node.parent.parent))) &&
@@ -3668,13 +3692,16 @@ function invocationStateKey(active: InvocationState): string {
     [insertion.target, insertion.slot, insertion.value, insertion.replace]), [...active.arrays], registry ]);
 }
 
-const heapWriteKeys = new WeakMap<StorageInsertion, string>();
+const heapWriteKeySymbol = Symbol("explicitnessHeapWriteKey");
+type KeyedInsertion = StorageInsertion & { [heapWriteKeySymbol]?: string };
 
+// The key is not enumerable, so a spread copy that changes the write computes its own.
 function heapWriteKey(insertion: StorageInsertion): string {
-  const known = heapWriteKeys.get(insertion);
+  const keyed = insertion as KeyedInsertion;
+  const known = keyed[heapWriteKeySymbol];
   if (known !== undefined) { return known; }
   const key = JSON.stringify([insertion.target, insertion.slot, insertion.value]);
-  heapWriteKeys.set(insertion, key);
+  Object.defineProperty(keyed, heapWriteKeySymbol, { value: key });
   return key;
 }
 
@@ -4257,15 +4284,21 @@ function iteratesModuleArrayLiteral(
   const { outer } = storageFactForExpression(state, summaries, expression, owner, point);
   return outer.length > 0 && outer.every((origin) => {
     const external = originBinding(state, origin);
-    const [declaration] = external?.binding.declarations ?? [];
-    if (!external || external.binding.declarations.length !== 1 || !constantDeclaration(declaration.node) || isExportedBinding(external.binding) ||
-      external.binding.mutated || state.sharedBindings.has(external.binding) || state.sharedLocalBindings.has(external.binding)) {
+    const declaration = external && untouchedModuleConstant(state, external.binding);
+    if (!external || !declaration) {
       return false;
     }
     const values = external.path.reduce<readonly ts.Expression[] | undefined>((held, slot) => held && literalMembers(held, slot),
-      declaration.node.initializer ? [declaration.node.initializer] : undefined);
+      declaration.initializer ? [declaration.initializer] : undefined);
     return !!values && values.length > 0 && values.every((value) => plainArrayLiteral(unwrapExpression(value)) !== undefined);
   });
+}
+
+/** Gives the declaration of a binding that is one unexported constant nothing writes or shares. */
+function untouchedModuleConstant(state: AnalysisState, binding: Binding): ts.VariableDeclaration | undefined {
+  const [declaration] = binding.declarations;
+  return binding.declarations.length === 1 && constantDeclaration(declaration.node) && !isExportedBinding(binding) &&
+    !binding.mutated && !state.sharedBindings.has(binding) && !state.sharedLocalBindings.has(binding) ? declaration.node : undefined;
 }
 
 function literalMembers(values: readonly ts.Expression[], slot: string): readonly ts.Expression[] | undefined {
@@ -4851,11 +4884,15 @@ function jumpTarget(node: ts.BreakOrContinueStatement): ts.Node | undefined {
     if (node.label && ts.isLabeledStatement(current) && current.label.text === node.label.text) {
       return ts.isBreakStatement(node) ? current : current.statement;
     }
-    if (!node.label && (ts.isIterationStatement(current, false) || (ts.isBreakStatement(node) && ts.isSwitchStatement(current)))) {
+    if (!node.label && unlabeledJumpLands(node, current)) {
       return current;
     }
   }
   return undefined;
+}
+
+function unlabeledJumpLands(node: ts.BreakOrContinueStatement, current: ts.Node): boolean {
+  return ts.isIterationStatement(current, false) || (ts.isBreakStatement(node) && ts.isSwitchStatement(current));
 }
 
 function endsJumpSearch(node: ts.Node): boolean {
@@ -5532,6 +5569,7 @@ function deduplicateFlows(flows: readonly ImplicitFlow[], keyFor: (flow: Implici
 function uniqueSummaryFlows(flows: readonly ImplicitFlow[]): readonly ImplicitFlow[] {
   const seen = new Set<string>();
   const inputs = new Set<string>();
+  const ids = new Map<object, number>();
   return flows.filter((flow) => {
     const site = flow.access === "contents" || flow.kind === "input" ? `${flow.node.getStart()}:${flow.writeNode?.getStart()}` : "";
     const key = `${ownerKey(flow.owner)}:${flow.kind}:${flow.description}:${site}`;
@@ -5543,7 +5581,7 @@ function uniqueSummaryFlows(flows: readonly ImplicitFlow[]): readonly ImplicitFl
       return true;
     }
     // A read keeps the forwarded write only as provenance, so reads that differ in nothing else are one read.
-    const content = inputFlowContent(flow);
+    const content = inputFlowContent(flow, ids);
     if (inputs.has(content)) {
       return false;
     }
@@ -5552,21 +5590,17 @@ function uniqueSummaryFlows(flows: readonly ImplicitFlow[]): readonly ImplicitFl
   });
 }
 
-const flowObjectIds = new WeakMap<object, number>();
-let flowObjectCount = 0;
-
-function flowObjectId(item: object | undefined): number | undefined {
+function flowObjectId(ids: Map<object, number>, item: object | undefined): number | undefined {
   if (!item) { return undefined; }
-  const known = flowObjectIds.get(item);
+  const known = ids.get(item);
   if (known !== undefined) { return known; }
-  flowObjectCount += 1;
-  const id = flowObjectCount;
-  flowObjectIds.set(item, id);
+  const id = ids.size + 1;
+  ids.set(item, id);
   return id;
 }
 
-function inputFlowContent(flow: ImplicitFlow): string {
-  return JSON.stringify([flowObjectId(flow.owner), flow.kind, flow.description, flowObjectId(flow.node), flowObjectId(flow.binding),
+function inputFlowContent(flow: ImplicitFlow, ids: Map<object, number>): string {
+  return JSON.stringify([flowObjectId(ids, flow.owner), flow.kind, flow.description, flowObjectId(ids, flow.node), flowObjectId(ids, flow.binding),
     flow.access, flow.path, flow.receiver, flow.defaultParameterIndex, flow.parameterIndex, flow.origins, flow.argumentWrite,
     flow.readParameterIndex, flow.reads]);
 }

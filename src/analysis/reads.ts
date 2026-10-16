@@ -216,6 +216,6 @@ function nested(slot: string, sites: ReadSite[]): ReadSite[] {
   return sites.map((site) => ({ path: [slot, ...site.path], mode: site.mode }));
 }
 
-function keySlot(key: ts.PropertyName | ts.BindingName): string {
+function keySlot(key: ts.Node): string {
   return ts.isIdentifier(key) || ts.isStringLiteralLike(key) || ts.isNumericLiteral(key) ? `property:${key.text}` : "*";
 }

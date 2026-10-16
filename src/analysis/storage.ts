@@ -32,7 +32,7 @@ export function freshStorageFact(value: ts.Expression): StorageFact {
   return allocatedFact(value, []);
 }
 
-export function invokedStorageFact(fact: StorageFact, call: ts.CallExpression | ts.NewExpression): StorageFact {
+export function invokedStorageFact(fact: StorageFact, call: ts.Node): StorageFact {
   const rebase = (origins: readonly StorageOrigin[]) => joinOrigins(origins.map((origin) => invocationOrigin(origin, call.getStart())));
   return mapStorageFact(fact, rebase, rebase);
 }
@@ -362,7 +362,7 @@ class CellHeap {
     this.allocations.get(cell.allocation)?.delete(key);
   }
 
-  of(allocation: StorageOrigin): StorageCell[] {
+  cellsOf(allocation: StorageOrigin): StorageCell[] {
     return [...this.allocations.get(allocation)?.values() ?? []];
   }
 
@@ -554,7 +554,7 @@ export function withInsertions(fact: StorageFact, insertions: readonly HeapWrite
       continue;
     }
     visited.add(current);
-    const contents = heap.of(current);
+    const contents = heap.cellsOf(current);
     const origins = contents.length ? contents.flatMap((cell) => cell.cell.origins) : [current];
     for (const origin of origins) {
       reached.add(origin);
@@ -562,7 +562,7 @@ export function withInsertions(fact: StorageFact, insertions: readonly HeapWrite
     }
   }
   const reachableAllocations = new Set<StorageOrigin>([...fact.outer, ...joinOrigins([...reached])]);
-  const cells = [...reachableAllocations].flatMap((allocation) => heap.of(allocation))
+  const cells = [...reachableAllocations].flatMap((allocation) => heap.cellsOf(allocation))
     .sort(compareStampedCells).map((stamped) => stamped.cell);
   const reachable = fact.outer.flatMap((origin) => cells.some((cell) => cell.allocation === origin)
     ? reachableOrigins([origin], cells) : fact.reachable);
@@ -618,7 +618,7 @@ class ReplayedHeap {
     }));
   }
 
-  of(allocation: StorageOrigin): readonly StampedCell[] {
+  cellsOf(allocation: StorageOrigin): readonly StampedCell[] {
     const known = this.replayed.get(allocation);
     if (known) {
       return known;
@@ -678,14 +678,14 @@ function applyHeapWrite(heap: CellHeap, insertion: HeapWrite): void {
   for (const allocation of insertion.target.outer.filter(isCellAllocation)) {
     const cell = { allocation, slot: insertion.slot ?? "*", origins: insertion.value.outer };
     if (replacesCell(insertion)) { excludeReplacedProperty(heap, allocation, insertion.slot); }
-    const previous = replacesCell(insertion) ? [] : allocationMemberOrigins({ ...insertion.target, cells: heap.of(allocation) }, allocation, insertion.slot);
+    const previous = replacesCell(insertion) ? [] : allocationMemberOrigins({ ...insertion.target, cells: heap.cellsOf(allocation) }, allocation, insertion.slot);
     heap.set({ ...cell, origins: joinOrigins([...previous, ...cell.origins]) });
   }
 }
 
 function excludeReplacedProperty(heap: CellHeap, allocation: StorageOrigin, slot: string | undefined): void {
   if (!slot?.startsWith("property:")) { return; }
-  for (const cell of heap.of(allocation)) {
+  for (const cell of heap.cellsOf(allocation)) {
     if (cell.slot === "*" || cell.slot.startsWith(EXCEPT)) {
       heap.delete(cell);
       const excluded = { ...cell, slot: exceptSlot(cell.slot, [slot]) };
@@ -780,7 +780,7 @@ export function iteratedFact(value: StorageFact, node: ts.Node): StorageFact {
   return entryCells(value) ? entryPairFact(node, value) : elementFact(value);
 }
 
-export function pairsStorageFact(value: ts.CallExpression, pair: ts.Node, source: StorageFact): StorageFact {
+export function pairsStorageFact(value: ts.Node, pair: ts.Node, source: StorageFact): StorageFact {
   return allocatedFact(value, [{ slot: "*", fact: entryPairFact(pair, source) }]);
 }
 

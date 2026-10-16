@@ -6,7 +6,7 @@ import { bindingAssignments } from "./assignments";
 
 type StandardReceiver = "array" | "string" | "number" | "date" | "map" | "set" | "primitive";
 
-const SCALAR_RECEIVER_TYPES = new Map<ts.SyntaxKind, StandardReceiver>([
+const SCALAR_RECEIVER_TYPES = new Map<number, StandardReceiver>([
   [ts.SyntaxKind.StringKeyword, "string"], [ts.SyntaxKind.NumberKeyword, "number"],
 ]);
 
