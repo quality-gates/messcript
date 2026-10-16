@@ -2659,6 +2659,30 @@ export function negated() { return !gen(); }
   ]);
 });
 
+test("a generator runs where another function enumerates the object a module stored or a default parameter created", () => {
+  assert.deepEqual(messages("shared-generator-action.ts", `const log: number[] = [];
+function* gen() { log.push(1); yield 1; }
+const it = gen();
+export function looped() { for (const value of it) { return value; } return 0; }
+export function spread(items = gen()) { return [...items].length; }
+`), [
+    "2:ImplicitOutput: The function gen() writes log, an implicit output.",
+    "4:ImplicitOutput: The function looped() writes log, an implicit output.",
+    "4:ImplicitInput: The function looped() reads it, an implicit input.",
+    "5:ImplicitOutput: The function spread() writes log, an implicit output.",
+    "5:UnknownEffect: The function spread() uses unresolved iterate protocol, an unknown effect.",
+  ]);
+  assert.deepEqual(messages("shared-generator-calculation.ts", `const log: number[] = [];
+function* gen() { log.push(1); yield 1; }
+const it = gen();
+export function held() { return it; }
+export function kept(items = gen()) { return items; }
+export function listed(items = [1]) { return items.length; }
+`), [
+    "2:ImplicitOutput: The function gen() writes log, an implicit output.",
+  ]);
+});
+
 test("a boxed generator runs where its box is consumed, and a later explicit member overrides a spread member", () => {
   assert.deepEqual(messages("boxed-spread-action.ts", `const log: number[] = [];
 function* gen() { log.push(1); yield 1; }

@@ -3294,6 +3294,43 @@ function isKnownIterator(state: AnalysisState, summaries: ReadonlyMap<EffectOwne
     isKnownIterator(state, summaries, assignment.value, new Set(seen).add(binding)));
 }
 
+/** Runs a generator body where an owner enumerates a generator object that an enclosing owner created and stored. */
+function sharedGeneratorEffects(
+  state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, expression: ts.Expression, node: ts.Node, owner: EffectOwner,
+): CallEffects | undefined {
+  const groups = sharedGeneratorCalls(state, expression, owner)?.map((call) => generatorBodyEffects(state, summaries, call, node, owner));
+  return groups?.every((group) => group) ? combineEffects(groups.flatMap((group) => group ?? [])) : undefined;
+}
+
+/** Lists the calls an enclosing owner stored in the binding, when every value the binding holds comes from one. */
+function sharedGeneratorCalls(state: AnalysisState, expression: ts.Expression, owner: EffectOwner): readonly ts.CallExpression[] | undefined {
+  const value = unwrapExpression(expression);
+  const binding = ts.isIdentifier(value) ? state.model.resolve(value) : undefined;
+  const home = binding && declaringOwner(state, binding);
+  if (!binding || home === owner || (home && !inside(owner, home))) {
+    return undefined;
+  }
+  const values = bindingAssignments(binding).map((assignment) => assignment.value && unwrapExpression(assignment.value));
+  const calls = values.filter((call): call is ts.CallExpression => !!call && ts.isCallExpression(call));
+  return calls.length > 0 && calls.length === values.length ? calls : undefined;
+}
+
+function generatorBodyEffects(
+  state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, call: ts.CallExpression, node: ts.Node, owner: EffectOwner,
+): CallEffects[] | undefined {
+  const targets = callableTargets(state, summaries, call.expression);
+  if (!targets?.length || !targets.every(isGenerator)) {
+    return undefined;
+  }
+  const bodies = targets.flatMap((target) => summaries.get(target) ?? []);
+  const captures = capturesForExpression(state, summaries, call.expression, owner, new Set());
+  return bodies.length === targets.length ? bodies.map((summary) => {
+    const body = defaultEffects(summary, false);
+    return instantiateCallableSummary(state, summaries, { ...summary, flows: body.flows, parameterWrites: body.writes, deferredCalls: body.deferredCalls },
+      call.arguments, node, owner, undefined, captures);
+  }) : undefined;
+}
+
 function frameForBinding(state: AnalysisState, binding: Binding): LexicalFrame | undefined {
   let frame = state.invocation?.frame;
   const home = declaringOwner(state, binding);
@@ -4579,16 +4616,27 @@ function visitDeferredNode(context: SummaryContext, node: ts.Node): boolean {
     ownerParameters(owner).forEach(visit);
     return true;
   }
-  if (state.invocation.phase === "body" && ts.isParameter(node)) { return true; }
-  if (ts.isParameter(node) && state.invocation.actuals) {
-    visitSuppliedParameter(context, node, state.invocation.actuals);
-    return true;
-  }
+  if (ts.isParameter(node) && visitParameter(context, node)) { return true; }
   const deferred = deferredChildren(node, owner);
   if (deferred !== undefined) {
     deferred.forEach(visit);
     const returned = returnedExpression(node, owner);
     if (returned) { appendReturn(state, summaries, draft, returned, owner); }
+    return true;
+  }
+  return false;
+}
+
+/** Visits a parameter where the invocation decides whether its default runs, and tells if it did. */
+function visitParameter(context: SummaryContext, node: ts.ParameterDeclaration): boolean {
+  const { invocation } = context.state;
+  if (invocation.phase === "body") { return true; }
+  if (invocation.actuals) {
+    visitSuppliedParameter(context, node, invocation.actuals);
+    return true;
+  }
+  if (node.initializer && ts.isIdentifier(node.name)) {
+    visitDefaultParameter(context, node, node.initializer);
     return true;
   }
   return false;
@@ -4620,6 +4668,19 @@ function visitSuppliedParameter(context: SummaryContext, node: ts.ParameterDecla
     const value = storageFactForExpression(state, summaries, node.initializer, owner, node);
     const key = cellKey(state.invocation.frame, binding);
     state.invocation.store.set(key, missingArgument(actuals[index], state.model) ? value : joinStorageFacts([state.invocation.store.get(key) ?? unknownFact, value]));
+  }
+}
+
+/** Lets a parameter whose default creates a generator also hold that generator, so enumerating the parameter runs its body. */
+function visitDefaultParameter(context: SummaryContext, node: ts.ParameterDeclaration, initializer: ts.Expression): void {
+  const { state, summaries, owner, visit } = context;
+  visit(node.name);
+  visit(initializer);
+  const binding = parameterBinding(state, node);
+  const created = storageFactForExpression(state, summaries, initializer, owner, node);
+  if (binding && created.outer.length > 0 && created.outer.every((origin) => invocationInstance(state.invocation, origin)?.kind === "iterator")) {
+    const supplied = storageFactForExpression(state, summaries, node.name as ts.Identifier, owner, node);
+    state.invocation.store.set(cellKey(state.invocation.frame, binding), joinStorageFacts([supplied, created]));
   }
 }
 
@@ -5327,17 +5388,25 @@ function evaluationEffects(
   const hooked = convertedValues(node, state.model).some(({ expression, hooks }) => knownShapeHasMember(dispatch, expression, hooks));
   return combineEffects([hooked ? unknownEffects(node, owner, "uses unresolved convert protocol") : emptyCallEffects(),
     ...protocolExpressions(node, state.model).map(({ expression, protocol }) => {
-    if (protocol === "iterate") {
-      const forced = forceIterator(state, summaries, expression, node, owner);
-      if (forced) { return forced; }
-      if (iterationReplaced(state, summaries, expression, node, owner)) { return unknownEffects(node, owner, "uses unresolved iterate protocol"); }
-      if (isKnownIterator(state, summaries, expression)) { return emptyCallEffects(); }
-      if (iteratesModuleArrayLiteral(state, summaries, expression, node, owner)) { return emptyCallEffects(); }
-    }
+    const iterated = protocol === "iterate" ? knownIterationEffects(state, summaries, expression, node, owner) : undefined;
+    if (iterated) { return iterated; }
     if (protocol === "await" && awaitHasNoEffects(state, summaries, expression, node, owner)) { return emptyCallEffects(); }
     return supportsProtocol(state.model, expression, protocol) ? emptyCallEffects()
       : unknownEffects(node, owner, `uses unresolved ${protocol} protocol`);
   })]);
+}
+
+/** Gives the effects of enumerating a value whose iteration the analysis knows. */
+function knownIterationEffects(
+  state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, expression: ts.Expression, node: ts.Node, owner: EffectOwner,
+): CallEffects | undefined {
+  const forced = forceIterator(state, summaries, expression, node, owner);
+  if (forced) { return forced; }
+  if (iterationReplaced(state, summaries, expression, node, owner)) { return unknownEffects(node, owner, "uses unresolved iterate protocol"); }
+  const shared = sharedGeneratorEffects(state, summaries, expression, node, owner);
+  if (shared) { return shared; }
+  const known = isKnownIterator(state, summaries, expression) || iteratesModuleArrayLiteral(state, summaries, expression, node, owner);
+  return known ? emptyCallEffects() : undefined;
 }
 
 function awaitHasNoEffects(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, expression: ts.Expression, node: ts.Node, owner: EffectOwner): boolean {
