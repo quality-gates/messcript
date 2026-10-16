@@ -289,6 +289,31 @@ function outer() {
   assert.deepEqual(outer("define-properties-other.ts", source("{ other: { value: 1 } }")), []);
 });
 
+test("a computed prototype key or an aliased define call can replace the class member", () => {
+  const source = (patch) => `const log: number[] = [];
+class Counter {
+  tick() { return 0; }
+}
+${patch}
+function outer() {
+  return new Counter().tick();
+}
+`;
+  const outer = (name, text) => messages(name, text).filter(message => message.includes("outer()"));
+  const replaced = ["7:UnknownEffect: The function outer() calls overridable method, an unknown effect."];
+  const value = `{ value: () => { log.push(1); return 1; } }`;
+  assert.deepEqual(outer("patch-computed-key.ts", source(`(Counter.prototype as any)[["ti", "ck"].join("")] = () => { log.push(1); return 1; };`)), [
+    "7:UnknownEffect: The function outer() calls overridable method, an unknown effect.",
+    "7:ImplicitInput: The function outer() reads Counter, an implicit input.",
+  ]);
+  assert.deepEqual(outer("patch-alias.ts", source(`const define = Object.defineProperty; define(Counter.prototype, "tick", ${value});`)), replaced);
+  assert.deepEqual(outer("patch-destructured.ts", source(`const { defineProperty } = Object; defineProperty(Counter.prototype, "tick", ${value});`)), replaced);
+  assert.deepEqual(outer("patch-call.ts", source(`Object.defineProperty.call(null, Counter.prototype, "tick", ${value});`)), replaced);
+  assert.deepEqual(outer("patch-element.ts", source(`Object["defineProperty"](Counter.prototype, "tick", ${value});`)), replaced);
+  assert.deepEqual(outer("patch-cast-other.ts", source(`(Object.defineProperty as any)(Counter.prototype, "other", { value: 1 });`)), []);
+  assert.deepEqual(outer("patch-record-key.ts", source(`const rec: Record<string, number> = {}; rec[["ti", "ck"].join("")] = 1;`)), []);
+});
+
 test("creating a generator runs its default parameters at the call", () => {
   assert.deepEqual(messages("generator-default-create.ts", `const log: number[] = [];
 function* gen(

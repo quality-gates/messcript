@@ -412,6 +412,7 @@ class ScopeBuilder {
 type MemberWrites = { readonly targets: ReadonlySet<ts.Node>; readonly names: ReadonlySet<string>; readonly anyName: boolean };
 
 const definingCalls = new Set(["Object.defineProperty", "Reflect.defineProperty", "Reflect.set"]);
+const patchingCalls = new Set([...definingCalls, "Object.defineProperties", "Object.assign"]);
 
 function memberWrites(sourceFile: ts.SourceFile): MemberWrites {
   const targets = new Set<ts.Node>();
@@ -425,9 +426,10 @@ function memberWrites(sourceFile: ts.SourceFile): MemberWrites {
       if (name !== undefined) {
         names.add(name);
       }
+      anyName ||= writesPrototypeKey(value);
     }
     const defined = definedNames(node);
-    anyName ||= defined === undefined;
+    anyName ||= defined === undefined || aliasesPatchingCall(node);
     for (const name of defined ?? []) {
       names.add(name);
     }
@@ -437,12 +439,52 @@ function memberWrites(sourceFile: ts.SourceFile): MemberWrites {
   return { targets, names, anyName };
 }
 
+/** Tells if the write patches a prototype under a key no literal spells, as p in Api.prototype[p] = f. */
+function writesPrototypeKey(target: ts.Expression): boolean {
+  if (!ts.isElementAccessExpression(target) || methodName(target) !== undefined) {
+    return false;
+  }
+  const owner = unwrapExpression(target.expression);
+  return ts.isPropertyAccessExpression(owner) && owner.name.text === "prototype";
+}
+
+/** Tells if the node takes a patching call as a value, as const define = Object.defineProperty or { assign } = Object. */
+function aliasesPatchingCall(node: ts.Node): boolean {
+  if (ts.isBindingElement(node)) {
+    return destructuresPatchingCall(node);
+  }
+  return (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) && patchingCalls.has(libraryName(node)) && !isCallee(node);
+}
+
+function destructuresPatchingCall(element: ts.BindingElement): boolean {
+  const declaration = element.parent.parent;
+  const source = ts.isVariableDeclaration(declaration) && declaration.initializer && unwrapExpression(declaration.initializer);
+  const key = element.propertyName ?? element.name;
+  return !!source && ts.isIdentifier(source) && ts.isIdentifier(key) && patchingCalls.has(`${source.text}.${key.text}`);
+}
+
+/** Gives the spelled library member, as Object.assign for Object.assign and Object["assign"], or "" for other receivers. */
+function libraryName(member: ts.PropertyAccessExpression | ts.ElementAccessExpression): string {
+  const receiver = unwrapExpression(member.expression);
+  return ts.isIdentifier(receiver) ? `${receiver.text}.${methodName(member)}` : "";
+}
+
+/** Tells if the expression, through parentheses and type assertions, is the callee of a call. */
+function isCallee(expression: ts.Expression): boolean {
+  let top: ts.Node = expression;
+  while (ts.isParenthesizedExpression(top.parent) || ts.isAsExpression(top.parent) || ts.isNonNullExpression(top.parent) ||
+      ts.isTypeAssertionExpression(top.parent) || ts.isSatisfiesExpression(top.parent)) {
+    top = top.parent;
+  }
+  return ts.isCallExpression(top.parent) && top.parent.expression === top;
+}
+
 function definedNames(node: ts.Node): string[] | undefined {
   if (!ts.isCallExpression(node)) {
     return [];
   }
   const callee = unwrapExpression(node.expression);
-  const library = ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) ? `${callee.expression.text}.${callee.name.text}` : "";
+  const library = ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee) ? libraryName(callee) : "";
   const target = node.arguments[0] && unwrapExpression(node.arguments[0]);
   return target && !ts.isObjectLiteralExpression(target) ? libraryNames(library, node.arguments) : [];
 }
