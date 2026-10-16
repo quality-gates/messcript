@@ -202,6 +202,38 @@ function entryTargets(dispatch: Dispatch, member: ts.Node, name: string, kind: M
   return kind === "call" && value ? [callableTargets(dispatch, value, seen)] : [];
 }
 
+/** Tells if a known shape the value can hold has, or may have, one of the named members, such as a conversion hook. */
+export function knownShapeHasMember(dispatch: Dispatch, value: ts.Expression, names: readonly string[]): boolean {
+  const target = expressions.unwrapExpression(value);
+  const binding = ts.isIdentifier(target) ? dispatch.model.resolve(target) : undefined;
+  // A name other code can reach still holds the shapes assigned to it, even when its members are no longer sealed.
+  const held = binding ? dispatch.assignments(binding).flatMap((assignment) => assignment.value && !assignment.element ? [assignment.value] : []) : [];
+  const selected = resolution.join([target, ...held].map((expression) => shapes.receiverShapes(dispatch.model, expression,
+    new Set(binding ? [binding] : []), value, (call, visited) => callableTargets(dispatch, call.expression, visited))));
+  return selected.targets.some((shape) => names.some((name) => {
+    const found = name === "Symbol.toPrimitive" ? symbolMember(dispatch, shape, new Set())
+      : ts.isClassLike(shape) ? classMembers(dispatch, shape, name, "call", new Set())
+        : membersTargets(dispatch, shapes.liveProperties(shape, name), name, "call", new Set());
+    return found.targets.length > 0 || !found.complete || dispatch.model.writesMemberName(name);
+  }));
+}
+
+/** Finds a Symbol.toPrimitive member on the shape or a class it extends. */
+function symbolMember(dispatch: Dispatch, shape: shapes.Shape, seen: ReadonlySet<ts.Node>): Targets {
+  const members: readonly ts.Node[] = ts.isClassLike(shape) ? shape.members : shape.properties;
+  const own = members.filter((member) => {
+    const name = (member as { name?: ts.Node }).name;
+    const key = name && ts.isComputedPropertyName(name) ? expressions.unwrapExpression(name.expression) : undefined;
+    return !!key && ts.isPropertyAccessExpression(key) && key.name.text === "toPrimitive";
+  });
+  if (own.length > 0 || ts.isObjectLiteralExpression(shape) || seen.has(shape)) {
+    return own.length > 0 ? UNKNOWN : EMPTY;
+  }
+  const base = owners.baseClassExpression(shape);
+  const parents = base ? shapes.classTargets(dispatch.model, base) : EMPTY;
+  return resolution.inherit(parents, joinTargets(parents.targets.map((parent) => symbolMember(dispatch, parent as shapes.Shape, new Set(seen).add(shape)))));
+}
+
 function derivedMember(owner: owners.EffectOwner): boolean {
   return ts.isClassLike(owner.parent) && owners.baseClassExpression(owner.parent) !== undefined;
 }

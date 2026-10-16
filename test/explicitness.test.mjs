@@ -2398,6 +2398,55 @@ function a() { return new Map<string, number>().set("a", 1).get("a"); }
   ]);
 });
 
+test("converting a same-file value with a conversion hook is unknown, while plain values convert quietly", () => {
+  assert.deepEqual(messages("conversion-hooks.ts", `const log: number[] = [];
+const hook = { toString() { log.push(1); return "a"; } };
+class Money { valueOf() { log.push(1); return 1; } }
+class Cents extends Money {}
+class Tagged { [Symbol.toPrimitive]() { log.push(1); return 1; } }
+const json = { toJSON() { log.push(1); return 1; } };
+const key = { toString() { log.push(1); return "k"; } } as unknown as string;
+function a() { return String(hook); }
+function b() { return "x" + hook; }
+function c() { return Number(new Money()); }
+function d() { return new Cents() * 2; }
+function e() { return +new Tagged(); }
+function f(rec: Record<string, number>) { return rec[key]; }
+function g() { return JSON.stringify(json); }
+function h() { return JSON.stringify({ inner: [json] }); }
+function i() { return ({ [key]: 1 }); }
+function j() { return key in {}; }
+`).filter((message) => message.includes("UnknownEffect")), [
+    "8:UnknownEffect: The function a() uses unresolved convert protocol, an unknown effect.",
+    "9:UnknownEffect: The function b() uses unresolved convert protocol, an unknown effect.",
+    "10:UnknownEffect: The function c() uses unresolved convert protocol, an unknown effect.",
+    "11:UnknownEffect: The function d() uses unresolved convert protocol, an unknown effect.",
+    "12:UnknownEffect: The function e() uses unresolved convert protocol, an unknown effect.",
+    "13:UnknownEffect: The function f() uses unresolved convert protocol, an unknown effect.",
+    "14:UnknownEffect: The function g() uses unresolved convert protocol, an unknown effect.",
+    "15:UnknownEffect: The function h() uses unresolved convert protocol, an unknown effect.",
+    "16:UnknownEffect: The function i() uses unresolved convert protocol, an unknown effect.",
+    "17:UnknownEffect: The function j() uses unresolved convert protocol, an unknown effect.",
+  ]);
+  assert.deepEqual(messages("conversion-plain.ts", `const plain = { n: 1, name: "a" };
+class Point { x = 1; }
+function a(x: number) { return String(x) + x * 2; }
+function b() { return "x" + plain.name + plain.n; }
+function c() { return JSON.stringify({ other: { n: 1 }, list: [new Point()] }); }
+function d(rec: Record<string, number>) { return rec[plain.name] + rec["k"]; }
+function e() { return Number(new Point().x) + -plain.n; }
+function f(rec: number[]) { return rec[plain.n] + ({ [plain.name]: 1 })[plain.name]; }
+`), []);
+  assert.deepEqual(messages("conversion-patched.ts", `const box = { n: 1 };
+(box as any).toString = () => "a";
+function a() { return "x" + box; }
+`), [
+    "2:ImplicitOutput: The module writes box, an implicit output.",
+    "3:UnknownEffect: The function a() uses unresolved convert protocol, an unknown effect.",
+    "3:ImplicitInput: The function a() reads box, an implicit input.",
+  ]);
+});
+
 test("writes through computed objects reach the storage the object expression selects", () => {
   assert.deepEqual(messages("computed-writes.ts", `const shared = { n: 0, list: [0] };
 function pushLit() { [shared][0].list.push(1); }

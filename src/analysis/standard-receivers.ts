@@ -230,16 +230,21 @@ function callReceivers(model: ScopeModel, expression: ts.Expression, seen: Reado
   }
   const callee = expressions.unwrapExpression(expression);
   if (ts.isIdentifier(callee)) {
-    const binding = model.resolve(callee);
-    const inferred = binding && !seen.has(binding) && bindingAssignments(binding).length === 0;
-    const declared = binding?.declarations.map((declaration) => {
-      const typed = declarationReceivers(model, declaration.node);
-      return typed.length > 0 || !inferred ? typed : returnedReceivers(model, declaration.node, new Set(seen).add(binding));
-    }) ?? [];
-    return declared.length > 0 && declared.every((part) => part.length > 0) ? [...new Set(declared.flat())] : [];
+    return namedCallReceivers(model, callee, seen);
   }
   return ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)
     ? memberReceivers(model, callee.expression, expressions.methodName(callee), seen) : [];
+}
+
+/** Gives the receivers a named function gives, from its declared return type or, for a function never reassigned, its returns. */
+function namedCallReceivers(model: ScopeModel, callee: ts.Identifier, seen: ReadonlySet<Binding>): StandardReceiver[] {
+  const binding = model.resolve(callee);
+  const inferred = binding && !seen.has(binding) && bindingAssignments(binding).length === 0;
+  const declared = binding?.declarations.map((declaration) => {
+    const typed = declarationReceivers(model, declaration.node);
+    return typed.length > 0 || !inferred ? typed : returnedReceivers(model, declaration.node, new Set(seen).add(binding));
+  }) ?? [];
+  return declared.length > 0 && declared.every((part) => part.length > 0) ? [...new Set(declared.flat())] : [];
 }
 
 /** Gives the receivers every return of a plain function declaration gives, when it declares no return type. */
@@ -261,6 +266,12 @@ function returnedReceivers(model: ScopeModel, node: ts.Node, seen: ReadonlySet<B
   return parts.length > 0 && parts.every((part) => part.length > 0) ? [...new Set(parts.flat())] : [];
 }
 
+/** Tells if every receiver runs its own standard method of the name, which no code in the file replaces. */
+function knownStandardMethod(model: ScopeModel, receivers: readonly StandardReceiver[], method: string): boolean {
+  return receivers.length > 0 && !model.writesMemberName(method) &&
+    receivers.every((receiver) => receiverMethod(receiver, method) || returnsReceiver(receiver, method));
+}
+
 /** Tells if the method returns its receiver, as Map's set and Set's add do. */
 function returnsReceiver(receiver: StandardReceiver, method: string): boolean {
   return (receiver === "map" && method === "set") || (receiver === "set" && method === "add");
@@ -278,8 +289,7 @@ function globalCallReceiver(name: string | undefined): StandardReceiver | undefi
 
 function memberReceivers(model: ScopeModel, receiver: ts.Expression, method: string | undefined, seen: ReadonlySet<Binding>): StandardReceiver[] {
   const receivers = standardReceivers(model, receiver, seen);
-  if (!method || receivers.length === 0 || model.writesMemberName(method) ||
-      !receivers.every((receiver) => receiverMethod(receiver, method) || returnsReceiver(receiver, method))) {
+  if (!method || !knownStandardMethod(model, receivers, method)) {
     return [];
   }
   if (["map", "flatMap", "filter", "flat", "toReversed", "toSorted", "split"].includes(method)) {

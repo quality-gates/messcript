@@ -4,48 +4,16 @@ import * as expressions from "../ast/expressions";
 import type { Binding, ScopeModel } from "../ast/scopes";
 import * as assignments from "./assignments";
 import * as library from "./library";
+import * as shapes from "./shapes";
 
-type Protocol = "iterate" | "convert" | "await";
+/** A language protocol an operation can run on a value: iteration, conversion to a primitive, or awaiting. */
+export type Protocol = "iterate" | "convert" | "await";
 
 const SCALAR_TYPES = new Set([
   ts.SyntaxKind.NumberKeyword, ts.SyntaxKind.StringKeyword, ts.SyntaxKind.BooleanKeyword,
   ts.SyntaxKind.BigIntKeyword, ts.SyntaxKind.UndefinedKeyword, ts.SyntaxKind.NullKeyword,
 ]);
 const ITERABLE_TYPES = new Set(["Array", "ReadonlyArray", "Map", "ReadonlyMap", "Set", "ReadonlySet", "String"]);
-
-export function protocolExpressions(node: ts.Node, model: ScopeModel): readonly { expression: ts.Expression; protocol: Protocol }[] {
-  if (ts.isForOfStatement(node) || ts.isSpreadElement(node)) {
-    return [{ expression: node.expression, protocol: "iterate" }];
-  }
-  if (ts.isYieldExpression(node) && node.asteriskToken && node.expression) {
-    return [{ expression: node.expression, protocol: "iterate" }];
-  }
-  if (ts.isAwaitExpression(node)) {
-    return [{ expression: node.expression, protocol: "await" }];
-  }
-  return [...conversionExpressions(node), ...constructorProtocols(node, model)];
-}
-
-function constructorProtocols(node: ts.Node, model: ScopeModel): readonly { expression: ts.Expression; protocol: Protocol }[] {
-  if (ts.isCallExpression(node)) {
-    const expression = library.iteratedArgument(node, model);
-    return expression ? [{ expression, protocol: "iterate" }] : [];
-  }
-  if (ts.isNewExpression(node) && ["Map", "Set", "WeakMap", "WeakSet"].includes(globalName(node.expression, model) ?? "") && node.arguments?.[0]) {
-    return [{ expression: node.arguments[0], protocol: "iterate" }];
-  }
-  return [];
-}
-
-function conversionExpressions(node: ts.Node): readonly { expression: ts.Expression; protocol: Protocol }[] {
-  if (ts.isTemplateExpression(node) && !ts.isTaggedTemplateExpression(node.parent)) {
-    return node.templateSpans.map((span) => ({ expression: span.expression, protocol: "convert" }));
-  }
-  if (ts.isVariableDeclaration(node) && !ts.isIdentifier(node.name) && node.initializer && ts.isArrayBindingPattern(node.name)) {
-    return [{ expression: node.initializer, protocol: "iterate" }];
-  }
-  return [];
-}
 
 export function supportsProtocol(
   model: ScopeModel,
@@ -68,7 +36,7 @@ export function supportsProtocol(
     return protocol !== "convert";
   }
   if (ts.isPropertyAccessExpression(value)) {
-    return memberSupports(model, value.expression, value.name.text, protocol);
+    return memberSupports(model, value.expression, value.name.text, protocol, seen);
   }
   if (ts.isNewExpression(value)) {
     return protocol === "iterate" && ITERABLE_TYPES.has(globalName(value.expression, model) ?? "");
@@ -107,9 +75,9 @@ function bindingSupports(model: ScopeModel, value: ts.Identifier, protocol: Prot
   }
   const parameters = binding.declarations.filter((declaration) => declaration.kind === "parameter");
   if (seen.has(binding)) {
-    return parameters.length > 0 && parameters.every((declaration) => declarationSupports(model, declaration.node, protocol));
+    return parameters.length > 0 && parameters.every((declaration) => declarationSupports(model, declaration, protocol));
   }
-  if (parameters.some((declaration) => !declarationSupports(model, declaration.node, protocol))) {
+  if (parameters.some((declaration) => !declarationSupports(model, declaration, protocol))) {
     return false;
   }
   const next = new Set(seen).add(binding);
@@ -118,12 +86,31 @@ function bindingSupports(model: ScopeModel, value: ts.Identifier, protocol: Prot
     supportsProtocol(model, assignment.value, protocol, next)) : parameters.length > 0;
 }
 
-function memberSupports(model: ScopeModel, owner: ts.Expression, name: string, protocol: Protocol): boolean {
+function memberSupports(model: ScopeModel, owner: ts.Expression, name: string, protocol: Protocol, seen: ReadonlySet<Binding>): boolean {
   const value = expressions.unwrapExpression(owner);
   const binding = ts.isIdentifier(value) ? model.resolve(value) : undefined;
-  return !!binding && assignments.bindingAssignments(binding).length === 0 && binding.declarations.every((declaration) =>
+  if (!binding) {
+    return false;
+  }
+  return assignments.bindingAssignments(binding).length === 0 ? binding.declarations.every((declaration) =>
     ts.isParameter(declaration.node) && declaration.node.type !== undefined &&
-    memberTypeSupports(model, declaration.node.type, name, protocol, new Set()));
+    memberTypeSupports(model, declaration.node.type, name, protocol, new Set()))
+    : heldMemberSupports(model, value, binding, name, protocol, seen);
+}
+
+/** Tells if every object literal a sealed name holds sets the member, with nothing after it, to a value that supports the protocol. */
+function heldMemberSupports(model: ScopeModel, value: ts.Expression, binding: Binding, name: string, protocol: Protocol, seen: ReadonlySet<Binding>): boolean {
+  if (seen.has(binding) || model.writesMemberName(name)) {
+    return false;
+  }
+  const selected = shapes.receiverShapes(model, value, new Set(), value);
+  const next = new Set(seen).add(binding);
+  return selected.complete && selected.targets.length > 0 && selected.targets.every((shape) => {
+    const [own, ...later] = ts.isObjectLiteralExpression(shape) ? shapes.liveProperties(shape, name) : [];
+    return !!own && ts.isPropertyAssignment(own) && expressions.declarationName(own) === name &&
+      later.every((property) => ![undefined, name].includes(expressions.declarationName(property))) &&
+      supportsProtocol(model, own.initializer, protocol, next);
+  });
 }
 
 function memberTypeSupports(model: ScopeModel, type: ts.TypeNode, name: string, protocol: Protocol, seen: ReadonlySet<ts.TypeNode>): boolean {
@@ -154,7 +141,8 @@ function literalMemberSupports(model: ScopeModel, type: ts.TypeNode, name: strin
     typeSupports(model, member.type, protocol);
 }
 
-function declarationSupports(model: ScopeModel, node: ts.Node, protocol: Protocol): boolean {
+function declarationSupports(model: ScopeModel, declaration: Binding["declarations"][number], protocol: Protocol): boolean {
+  const node = declaration.node;
   return ts.isParameter(node) && node.type !== undefined && typeSupports(model, node.type, protocol);
 }
 

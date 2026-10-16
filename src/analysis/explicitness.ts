@@ -7,11 +7,12 @@ import { analyzeScopes, isAmbient, writeTargets } from "../ast/scopes";
 import type { Binding, ScopeModel, Write } from "../ast/scopes";
 import { reachableChildren } from "./control-flow";
 import { ambientContents, bindingAssignments, canReachSite, inside, referenceAssignment, unconditional, isShortCircuit, type Assignment } from "./assignments";
-import { callableTargets as resolveTargets, memberTargets, type Dispatch, type Targets } from "./dispatch";
+import { callableTargets as resolveTargets, knownShapeHasMember, memberTargets, type Dispatch, type Targets } from "./dispatch";
 import { classTargets, receiverShapes } from "./shapes";
 import * as resolution from "./resolution";
 import { ambientFlow, isLibraryMethodName, isPureConstructor, iteratedArgument, libraryCall, libraryCallbackNamed, hostReference, isHostRoot, movesElements, storesArguments, type LibraryCall, type LibraryCallback, type LibraryStorage } from "./library";
-import { protocolExpressions, supportsProtocol } from "./protocols";
+import { convertedValues, protocolExpressions } from "./protocol-sites";
+import { supportsProtocol } from "./protocols";
 import { standardReceiver } from "./standard-receivers";
 import { readSites, receiverCall, selectedRead, storageSlot, writeAffectsRead, type ReadSite, type ReadMode } from "./reads";
 import {
@@ -5322,7 +5323,10 @@ function evaluationEffects(
   owner: EffectOwner,
 ): CallEffects {
   if (ts.isDecorator(node)) { return unknownEffects(node, owner, "uses unresolved decorator application"); }
-  return combineEffects(protocolExpressions(node, state.model).map(({ expression, protocol }) => {
+  const dispatch = dispatchFor(state, summaries);
+  const hooked = convertedValues(node, state.model).some(({ expression, hooks }) => knownShapeHasMember(dispatch, expression, hooks));
+  return combineEffects([hooked ? unknownEffects(node, owner, "uses unresolved convert protocol") : emptyCallEffects(),
+    ...protocolExpressions(node, state.model).map(({ expression, protocol }) => {
     if (protocol === "iterate") {
       const forced = forceIterator(state, summaries, expression, node, owner);
       if (forced) { return forced; }
@@ -5333,7 +5337,7 @@ function evaluationEffects(
     if (protocol === "await" && awaitHasNoEffects(state, summaries, expression, node, owner)) { return emptyCallEffects(); }
     return supportsProtocol(state.model, expression, protocol) ? emptyCallEffects()
       : unknownEffects(node, owner, `uses unresolved ${protocol} protocol`);
-  }));
+  })]);
 }
 
 function awaitHasNoEffects(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, expression: ts.Expression, node: ts.Node, owner: EffectOwner): boolean {
