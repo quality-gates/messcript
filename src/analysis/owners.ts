@@ -21,9 +21,9 @@ export function ownerContext(owner: EffectOwner, sourceFile: ts.SourceFile): str
     return MODULE_CONTEXT;
   }
   const context = isFunctionLike(owner) ? getFunctionContext(owner, sourceFile) : "constructor";
-  const enclosing = enclosingClass(owner);
-  return enclosing?.name && (ts.isMethodDeclaration(owner) || ts.isGetAccessorDeclaration(owner) || ts.isSetAccessorDeclaration(owner))
-    ? context.replace(" ", ` ${enclosing.name.text}.`) : context;
+  const member = ts.isMethodDeclaration(owner) || ts.isGetAccessorDeclaration(owner) || ts.isSetAccessorDeclaration(owner);
+  return member && ts.isClassLike(owner.parent) && owner.parent.name
+    ? context.replace(" ", ` ${owner.parent.name.text}.`) : context;
 }
 
 /** Gives the subject that a finding message starts with. */

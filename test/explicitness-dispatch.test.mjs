@@ -57,6 +57,25 @@ function outer(xs: number[]) {
   ]);
 });
 
+test("only class members take their class name, not methods of objects built inside them", () => {
+  assert.deepEqual(messages("member-names.ts", `const log: number[] = [];
+class A {
+  get size() { log.push(0); return log.length; }
+  run() {
+    const helper = { f() { log.push(1); } };
+    helper.f();
+  }
+  static { ({ g() { log.push(2); } }).g(); }
+}
+`).filter((message) => message.includes("ImplicitOutput")), [
+    "3:ImplicitOutput: The accessor A.size() writes log, an implicit output.",
+    "5:ImplicitOutput: The method f() writes log, an implicit output.",
+    "6:ImplicitOutput: The method A.run() writes log, an implicit output.",
+    "8:ImplicitOutput: The module writes log, an implicit output.",
+    "8:ImplicitOutput: The method g() writes log, an implicit output.",
+  ]);
+});
+
 test("an object literal with a __proto__ entry stays open to inherited members", () => {
   assert.deepEqual(messages("proto-literal-push.ts", `const log: number[] = [];
 const proto = { push(x: number) { log.push(x); return 1; } };
