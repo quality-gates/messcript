@@ -2350,6 +2350,54 @@ function q(k: boolean) {
   ]);
 });
 
+test("set and add return their receiver, and untyped local helpers give the receivers they return", () => {
+  assert.deepEqual(messages("returned-receivers.ts", `function make(pairs: [string, number][]) { return new Map(pairs); }
+function either(k: boolean) { if (k) { return new Set<number>(); } return new Set([1]); }
+function a() { return new Map<string, number>().set("a", 1).get("a"); }
+function b() { return new Set<number>().add(1).add(2).has(1); }
+function c(pairs: [string, number][]) { return make(pairs).get("a"); }
+function d(pairs: [string, number][]) { return [...make(pairs).values()][0]; }
+function e(k: boolean) { return either(k).has(1); }
+`), []);
+  assert.deepEqual(messages("returned-receivers-unknown.ts", `function swap() { return new Map(); }
+swap = () => new Map();
+function rec(n: number) { return n > 0 ? rec(n - 1) : new Map(); }
+function partial(k: boolean, x: any) { if (k) { return new Map(); } return x; }
+function* gen() { return new Map(); }
+async function later() { return new Map(); }
+function typed(): any { return new Map(); }
+function a() { return swap().get("a"); }
+function b() { return rec(1).get("a"); }
+function c(x: any) { return partial(true, x).get("a"); }
+function d() { return gen().get("a"); }
+function e() { return later().get("a"); }
+function f() { return typed().get("a"); }
+function g() { return new Set().add(1).get(1); }
+function h(m: { set(): number }) { return m.set().toFixed(); }
+function over(flag: boolean): string;
+function over(flag: any) { return flag; }
+function i() { return over(true).trim(); }
+`), [
+    "2:ImplicitOutput: The module writes swap, an implicit output.",
+    "8:ImplicitInput: The function a() reads swap, an implicit input.",
+    "8:UnknownEffect: The function a() calls unresolved callable, an unknown effect.",
+    "9:UnknownEffect: The function b() calls unresolved callable, an unknown effect.",
+    "10:UnknownEffect: The function c() calls unresolved callable, an unknown effect.",
+    "11:UnknownEffect: The function d() calls unresolved callable, an unknown effect.",
+    "12:UnknownEffect: The function e() calls unresolved callable, an unknown effect.",
+    "13:UnknownEffect: The function f() calls unresolved callable, an unknown effect.",
+    "14:UnknownEffect: The function g() calls unresolved callable, an unknown effect.",
+    "15:ImplicitOutput: The function h() mutates argument m, an implicit output.",
+    "15:UnknownEffect: The function h() calls unresolved callable, an unknown effect.",    "18:UnknownEffect: The function i() calls unresolved callable, an unknown effect.",
+  ]);
+  assert.deepEqual(messages("returned-receivers-patched.ts", `const m = new Map<string, number>();
+(m as any).set = () => ({ get() { return 1; } });
+function a() { return new Map<string, number>().set("a", 1).get("a"); }
+`).filter((message) => message.startsWith("3:")), [
+    "3:UnknownEffect: The function a() calls overridable method, an unknown effect.",
+  ]);
+});
+
 test("writes through computed objects reach the storage the object expression selects", () => {
   assert.deepEqual(messages("computed-writes.ts", `const shared = { n: 0, list: [0] };
 function pushLit() { [shared][0].list.push(1); }

@@ -4252,9 +4252,7 @@
  {
   "name": "mut-s1-overload-result",
   "source": "function make(flag: boolean): string;\nfunction make(flag: boolean) {\n  return flag ? \"a\" : \"b\";\n}\nexport function change(): string {\n  return make(true).toLowerCase();\n}\n",
-  "findings": [
-   "6:UnknownEffect: function change(): The function change() calls unresolved callable, an unknown effect."
-  ]
+  "findings": []
  },
  {
   "name": "mut-s1-split-join",
