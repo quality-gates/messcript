@@ -2606,14 +2606,52 @@ function caller() { writeSlice(shared); }
 function fresh() { const local = [{ n: 0 }]; local.slice()[0].n = 2; return local; }
 function freshCall() { return [{ n: 0 }].slice()[0].n = 3; }
 `), [
-    "3:ImplicitInput: The function poke() reads local, an implicit input.",
     "3:ImplicitOutput: The function poke() mutates caller-owned value, an implicit output.",
-    "9:ImplicitInput: The function poke() reads local, an implicit input.",
     "9:ImplicitOutput: The function poke() mutates receiver of push, an implicit output.",
     "15:ImplicitOutput: The function poke() mutates caller-owned value inner, an implicit output.",
     "20:ImplicitOutput: The function writeSlice() mutates argument v, an implicit output.",
     "21:ImplicitOutput: The function caller() mutates caller-owned value shared, an implicit output.",
-    "21:ImplicitInput: The function caller() reads shared, an implicit input.",
+  ]);
+});
+
+test("a slice copy reads only the receiver's top-level slots, as a spread does", () => {
+  assert.deepEqual(messages("slice-copy-element.ts", `const rows: number[][] = [[1], [0]];
+function bump() {
+  rows[0][0] = 2;
+}
+function outer() {
+  const copy = rows.slice();
+  const inner = () => copy[0][0];
+  return inner();
+}
+function count() {
+  const copy = rows.slice();
+  const inner = () => copy.length;
+  return inner();
+}
+function direct() {
+  return rows.slice()[0][0];
+}
+function joined() {
+  return rows.slice().join();
+}
+`), [
+    "3:ImplicitOutput: The function bump() writes rows, an implicit output.",
+    "7:ImplicitInput: The arrow function inner() reads rows, an implicit input.",
+    "8:ImplicitInput: The function outer() reads rows, an implicit input.",
+    "16:ImplicitInput: The function direct() reads rows, an implicit input.",
+    "19:ImplicitInput: The function joined() reads rows, an implicit input.",
+  ]);
+  assert.deepEqual(messages("slice-copy-grown.ts", `const rows: number[][] = [[1], [0]];
+function grow() {
+  rows.push([3]);
+}
+function count() {
+  return rows.slice().length;
+}
+`), [
+    "3:ImplicitOutput: The function grow() writes rows, an implicit output.",
+    "6:ImplicitInput: The function count() reads rows, an implicit input.",
   ]);
 });
 

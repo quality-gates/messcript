@@ -677,10 +677,16 @@ function libraryReadSites(
     return [{ path: [], mode: "slots" }, ...storageReadSites(state, site, seen)];
   }
   if (known && known.kind !== "effect") {
-    const mode = index === "this" ? known.reads.receiver : known.reads.arguments[index] ?? known.reads.rest;
-    return [{ path: [], mode }];
+    return [index === "this" ? receiverReadSite(site, known) : { path: [], mode: known.reads.arguments[index] ?? known.reads.rest }];
   }
   return undefined;
+}
+
+// A copy such as slice reads the receiver's slots but only holds its elements, as a spread does.
+function receiverReadSite(site: ts.CallExpression, known: Exclude<LibraryCall, { kind: "effect" }>): ReadSite {
+  const mode = known.reads.receiver;
+  return mode === "slots" && known.callbacks.length === 0 && membersAlign(site, known) &&
+    methodName(unwrapExpression(site.expression)) !== "toSorted" ? { path: ["*"], mode: "reference" } : { path: [], mode };
 }
 
 function argumentReadSites(
