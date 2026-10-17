@@ -1,0 +1,243 @@
+// messcript-disable CouplingBetweenObjects
+import ts from "typescript";
+import * as expressions from "../ast/expressions";
+import type { Binding, ScopeModel } from "../ast/scopes";
+import * as assignments from "./assignments";
+import * as owners from "./owners";
+import * as shapes from "./shapes";
+import * as resolution from "./resolution";
+import type { Resolution } from "./resolution";
+
+export type Targets = Resolution<owners.EffectOwner>;
+export type Dispatch = {
+  readonly model: ScopeModel;
+  readonly owners: readonly owners.EffectOwner[];
+  readonly returns: (call: ts.CallExpression, seen: ReadonlySet<Binding>) => Targets;
+  readonly assignments: typeof assignments.bindingAssignments;
+  readonly libraryMethod: (receiver: ts.Expression, name: string) => boolean;
+};
+
+type MemberKind = "call" | "get" | "set";
+
+const EMPTY: Targets = { targets: [], complete: true };
+const UNKNOWN: Targets = resolution.unresolved();
+
+const MEMBER_KINDS = { call: ts.isMethodDeclaration, get: ts.isGetAccessorDeclaration, set: ts.isSetAccessorDeclaration };
+
+export function joinTargets(groups: readonly Targets[]): Targets {
+  return resolution.join(groups);
+}
+
+export function callableTargets(dispatch: Dispatch, expression: ts.Expression, seen: ReadonlySet<Binding> = new Set()): Targets {
+  const value = expressions.unwrapExpression(expression);
+  if (ts.isFunctionExpression(value) || ts.isArrowFunction(value)) {
+    return { targets: [value], complete: true };
+  }
+  if (ts.isIdentifier(value)) {
+    const binding = dispatch.model.resolve(value);
+    return binding ? bindingTargets(dispatch, binding, seen) : UNKNOWN;
+  }
+  if (ts.isCallExpression(value)) {
+    return dispatch.returns(value, seen);
+  }
+  if (ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)) {
+    return memberTargets(dispatch, value, "call", seen);
+  }
+  return compoundTargets(dispatch, value, seen);
+}
+
+function compoundTargets(dispatch: Dispatch, value: ts.Expression, seen: ReadonlySet<Binding>): Targets {
+  if (ts.isConditionalExpression(value)) {
+    return joinTargets([callableTargets(dispatch, value.whenTrue, seen), callableTargets(dispatch, value.whenFalse, seen)]);
+  }
+  if (ts.isBinaryExpression(value)) {
+    if (assignments.isShortCircuit(value.operatorToken.kind)) {
+      return joinTargets([callableTargets(dispatch, value.left, seen), callableTargets(dispatch, value.right, seen)]);
+    }
+    return value.operatorToken.kind === ts.SyntaxKind.CommaToken || value.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      ? callableTargets(dispatch, value.right, seen) : EMPTY;
+  }
+  if (isNonCallable(value)) {
+    return EMPTY;
+  }
+  return UNKNOWN;
+}
+
+function isNonCallable(value: ts.Expression): boolean {
+  return ts.isLiteralExpression(value) || ts.isObjectLiteralExpression(value) || ts.isArrayLiteralExpression(value) ||
+    value.kind === ts.SyntaxKind.NullKeyword || value.kind === ts.SyntaxKind.TrueKeyword || value.kind === ts.SyntaxKind.FalseKeyword;
+}
+
+function bindingTargets(dispatch: Dispatch, binding: Binding, seen: ReadonlySet<Binding>): Targets {
+  if (seen.has(binding)) {
+    return EMPTY;
+  }
+  const next = new Set(seen).add(binding);
+  const functions = binding.declarations.flatMap((declaration) =>
+    ts.isFunctionDeclaration(declaration.node) && declaration.node.body ? [declaration.node] : [],
+  );
+  const assigned = dispatch.assignments(binding);
+  const groups = assigned.map((assignment) => !assignment.value ? UNKNOWN
+    : assignment.element ? elementTargets(dispatch, binding, assignment.node, assignment.value, next)
+      : callableTargets(dispatch, assignment.value, next));
+  if (functions.length > 0) {
+    groups.push({ targets: functions, complete: true });
+  }
+  if (binding.declarations.some((declaration) => declaration.kind === "parameter" || declaration.kind === "import")) {
+    groups.push(UNKNOWN);
+  }
+  return groups.length > 0 ? joinTargets(groups) : UNKNOWN;
+}
+
+function elementTargets(dispatch: Dispatch, binding: Binding, node: ts.Node, value: ts.Expression, seen: ReadonlySet<Binding>): Targets {
+  const name = patternName(binding.declarations.find((declaration) => declaration.node === node)?.identifier.parent, node);
+  return name === undefined ? UNKNOWN : namedTargets(dispatch, value, name, "call", seen, node);
+}
+
+function patternName(element: ts.Node | undefined, declaration: ts.Node): string | undefined {
+  if (!element || !ts.isBindingElement(element) || !ts.isObjectBindingPattern(element.parent) || element.parent.parent !== declaration ||
+      element.dotDotDotToken || element.initializer) {
+    return undefined;
+  }
+  return expressions.keyName(element.propertyName ?? element.name);
+}
+
+export function memberTargets(dispatch: Dispatch, expression: ts.Expression, kind: MemberKind, seen: ReadonlySet<Binding> = new Set()): Targets {
+  if (!ts.isPropertyAccessExpression(expression) && !ts.isElementAccessExpression(expression)) {
+    return UNKNOWN;
+  }
+  const name = expressions.methodName(expression);
+  if (name === undefined) {
+    return UNKNOWN;
+  }
+  const receiver = expressions.unwrapExpression(expression.expression);
+  if (receiver.kind === ts.SyntaxKind.ThisKeyword || receiver.kind === ts.SyntaxKind.SuperKeyword) {
+    return receiverTargets(dispatch, expression, name, kind, receiver.kind === ts.SyntaxKind.SuperKeyword);
+  }
+  return namedTargets(dispatch, receiver, name, kind, seen, expression);
+}
+
+function namedTargets(dispatch: Dispatch, receiver: ts.Expression, name: string, kind: MemberKind, seen: ReadonlySet<Binding>, site: ts.Node): Targets {
+  const selected = shapes.receiverShapes(dispatch.model, receiver, seen, site,
+    (call, visited) => callableTargets(dispatch, call.expression, new Set([...seen, ...visited])));
+  if (!(selected.complete && selected.targets.length > 0) && !resolution.isDecorated(selected)) {
+    return unselectedTargets(dispatch, receiver, name, kind);
+  }
+  const known = resolution.inherit(selected, joinTargets([...selected.targets.map((shape) => ts.isClassLike(shape) ? classMembers(dispatch, shape, name, kind, new Set())
+    : membersTargets(dispatch, shapes.liveProperties(shape, name), name, kind, seen)), patchedTargets(dispatch, name, kind)]));
+  return resolution.isUnresolved(selected) ? joinTargets([known, unselectedTargets(dispatch, receiver, name, kind)]) : known;
+}
+
+/** Gives every known member with the name, marked incomplete, for a receiver whose shapes are not all known. */
+function unselectedTargets(dispatch: Dispatch, receiver: ts.Expression, name: string, kind: MemberKind): Targets {
+  if (ts.isIdentifier(receiver) && !dispatch.model.resolve(receiver)) {
+    return UNKNOWN;
+  }
+  const candidates = dispatch.owners.filter((owner) => memberMatches(owner, name, kind));
+  return resolution.unresolved(dispatch.libraryMethod(receiver, name) ? candidates.filter(derivedMember) : candidates);
+}
+
+function patchedTargets(dispatch: Dispatch, name: string, kind: MemberKind): Targets {
+  return kind === "call" && dispatch.model.writesMemberName(name) ? UNKNOWN : EMPTY;
+}
+
+function receiverTargets(dispatch: Dispatch, node: ts.Node, name: string, kind: MemberKind, baseOnly: boolean): Targets {
+  const owner = owners.enclosingClass(node);
+  if (!owner) {
+    return UNKNOWN;
+  }
+  const base = owners.baseClassExpression(owner);
+  if (baseOnly) {
+    const classes = base && shapes.classTargets(dispatch.model, base);
+    return classes ? resolution.inherit(classes, joinTargets(classes.targets.map((shape) => classMembers(dispatch, shape, name, kind, new Set())))) : UNKNOWN;
+  }
+  const classes = [...new Set(dispatch.owners.flatMap((candidate) => {
+    const enclosing = owners.enclosingClass(candidate);
+    return ts.isClassLike(candidate) ? [candidate] : enclosing ? [enclosing] : [];
+  }))];
+  const subtypes = classes.filter((candidate) => shapes.descendsFrom(dispatch.model, candidate, owner, new Set()));
+  const groups = [owner, ...subtypes].map((candidate) => classMembers(dispatch, candidate, name, kind, new Set()));
+  groups.push(patchedTargets(dispatch, name, kind));
+  if (shapes.isOpenMember(owner, name) || !shapes.closedShapes(dispatch.model, resolution.complete([owner, ...subtypes])).complete) {
+    groups.push(UNKNOWN);
+  }
+  return joinTargets(groups);
+}
+
+function classMembers(dispatch: Dispatch, shape: ts.ClassLikeDeclaration, name: string, kind: MemberKind, seen: ReadonlySet<ts.Node>): Targets {
+  return resolution.inherit(shapes.classShape(dispatch.model, shape), originalClassMembers(dispatch, shape, name, kind, seen));
+}
+
+function originalClassMembers(dispatch: Dispatch, shape: ts.ClassLikeDeclaration, name: string, kind: MemberKind, seen: ReadonlySet<ts.Node>): Targets {
+  if (seen.has(shape)) {
+    return UNKNOWN;
+  }
+  const own = membersTargets(dispatch, shape.members, name, kind, new Set());
+  if (own.targets.length > 0 || !own.complete) {
+    return own;
+  }
+  const base = owners.baseClassExpression(shape);
+  if (!base) {
+    return own;
+  }
+  const parents = shapes.classTargets(dispatch.model, base);
+  return resolution.inherit(parents, joinTargets(parents.targets.map((parent) => classMembers(dispatch, parent, name, kind, new Set(seen).add(shape)))));
+}
+
+function membersTargets(dispatch: Dispatch, members: readonly ts.Node[], name: string, kind: MemberKind, seen: ReadonlySet<Binding>): Targets {
+  return joinTargets(members.flatMap((member) => entryTargets(dispatch, member, name, kind, seen)));
+}
+
+function entryTargets(dispatch: Dispatch, member: ts.Node, name: string, kind: MemberKind, seen: ReadonlySet<Binding>): Targets[] {
+  if (ts.isSpreadAssignment(member)) {
+    return [namedTargets(dispatch, member.expression, name, kind, seen, member)];
+  }
+  if (expressions.declarationName(member) !== name) {
+    return shapes.openName(member) ? [UNKNOWN] : [];
+  }
+  if (memberMatches(member, name, kind)) {
+    return [{ targets: [member], complete: true }];
+  }
+  const value = shapes.memberValue(member);
+  return kind === "call" && value ? [callableTargets(dispatch, value, seen)] : [];
+}
+
+/** Tells if a known shape the value can hold has, or may have, one of the named members, such as a conversion hook. */
+export function knownShapeHasMember(dispatch: Dispatch, value: ts.Expression, names: readonly string[]): boolean {
+  const target = expressions.unwrapExpression(value);
+  const binding = ts.isIdentifier(target) ? dispatch.model.resolve(target) : undefined;
+  // A name other code can reach still holds the shapes assigned to it, even when its members are no longer sealed.
+  const held = binding ? dispatch.assignments(binding).flatMap((assignment) => assignment.value && !assignment.element ? [assignment.value] : []) : [];
+  const selected = resolution.join([target, ...held].map((expression) => shapes.receiverShapes(dispatch.model, expression,
+    new Set(binding ? [binding] : []), value, (call, visited) => callableTargets(dispatch, call.expression, visited))));
+  return selected.targets.some((shape) => names.some((name) => {
+    const found = name === "Symbol.toPrimitive" ? symbolMember(dispatch, shape, new Set())
+      : ts.isClassLike(shape) ? classMembers(dispatch, shape, name, "call", new Set())
+        : membersTargets(dispatch, shapes.liveProperties(shape, name), name, "call", new Set());
+    return found.targets.length > 0 || !found.complete || dispatch.model.writesMemberName(name);
+  }));
+}
+
+/** Finds a Symbol.toPrimitive member on the shape or a class it extends. */
+function symbolMember(dispatch: Dispatch, shape: shapes.Shape, seen: ReadonlySet<ts.Node>): Targets {
+  const members: readonly ts.Node[] = ts.isClassLike(shape) ? shape.members : shape.properties;
+  const own = members.filter((member) => {
+    const name = (member as { name?: ts.Node }).name;
+    const key = name && ts.isComputedPropertyName(name) ? expressions.unwrapExpression(name.expression) : undefined;
+    return !!key && ts.isPropertyAccessExpression(key) && key.name.text === "toPrimitive";
+  });
+  if (own.length > 0 || ts.isObjectLiteralExpression(shape) || seen.has(shape)) {
+    return own.length > 0 ? UNKNOWN : EMPTY;
+  }
+  const base = owners.baseClassExpression(shape);
+  const parents = base ? shapes.classTargets(dispatch.model, base) : EMPTY;
+  return resolution.inherit(parents, joinTargets(parents.targets.map((parent) => symbolMember(dispatch, parent as shapes.Shape, new Set(seen).add(shape)))));
+}
+
+function derivedMember(owner: owners.EffectOwner): boolean {
+  return ts.isClassLike(owner.parent) && owners.baseClassExpression(owner.parent) !== undefined;
+}
+
+function memberMatches(node: ts.Node, name: string, kind: MemberKind): node is owners.EffectOwner {
+  return MEMBER_KINDS[kind](node) && node.body !== undefined && expressions.declarationName(node) === name;
+}

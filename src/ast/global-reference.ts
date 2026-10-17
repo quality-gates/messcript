@@ -1,6 +1,7 @@
 // messcript-disable ConstantNamingConventions
 import ts from "typescript";
 import { isLocallyBound } from "./local-bindings";
+import type { Binding, ScopeModel } from "./scopes";
 
 // Names of the global object. A global is also reached through them, as in globalThis.process.
 const globalObjectNames = new Set(["globalThis", "self", "window"]);
@@ -40,9 +41,8 @@ function dottedName(node: ts.Expression, resolvesRoot: boolean): string | undefi
     return undefined;
   }
   const key = memberKey(expression);
-  if (key === undefined || isGlobalObject(expression.expression)) {
-    return key;
-  }
+  if (!key || key.includes(".")) { return undefined; }
+  if (isGlobalObject(expression.expression)) { return key; }
   const receiver = dottedName(expression.expression, resolvesRoot);
   return receiver === undefined ? undefined : `${receiver}.${key}`;
 }
@@ -71,4 +71,38 @@ export function globalReference(node: ts.Expression): string | undefined {
  */
 export function memberChainName(node: ts.Expression): string | undefined {
   return dottedName(node, false);
+}
+
+/**
+ * Gives the name of the unbound identifier that the identifier reaches through constant aliases, as console for out in const out = console.
+ * Gives undefined when a binding on the way is not a constant initialized with an identifier.
+ */
+export function aliasedGlobal(identifier: ts.Identifier, model: ScopeModel, seen: ReadonlySet<Binding> = new Set()): string | undefined {
+  const binding = model.resolve(identifier);
+  if (!binding) {
+    return identifier.text;
+  }
+  const value = seen.has(binding) ? undefined : constantInitializer(binding);
+  return value && ts.isIdentifier(value) ? aliasedGlobal(value, model, new Set(seen).add(binding)) : undefined;
+}
+
+function constantInitializer(binding: Binding): ts.Expression | undefined {
+  const declaration = binding.declarations.length === 1 ? binding.declarations[0].node : undefined;
+  const constant = !!declaration && ts.isVariableDeclaration(declaration) && ts.isIdentifier(declaration.name) &&
+    (ts.getCombinedNodeFlags(declaration) & ts.NodeFlags.Const) !== 0;
+  return constant && declaration.initializer ? unwrapExpression(declaration.initializer) : undefined;
+}
+
+/** Gives the dotted global name of the callee, or undefined when its root is bound in the file to anything but a constant alias of a global. */
+export function globalName(callee: ts.Expression, model: ScopeModel): string | undefined {
+  let root = unwrapExpression(callee);
+  while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root)) {
+    root = unwrapExpression(root.expression);
+  }
+  if (!ts.isIdentifier(root) || !model.resolve(root)) {
+    return globalReference(callee);
+  }
+  const global = aliasedGlobal(root, model);
+  const chain = global === undefined ? undefined : memberChainName(callee);
+  return chain === undefined ? undefined : global + chain.slice(root.text.length);
 }

@@ -2046,8 +2046,13 @@ export function stopReal(): void {
   assert.deepEqual(
     report.findings.map((finding) => ({ line: finding.line, context: finding.context, ruleName: finding.ruleName })),
     [
+      { line: 4, context: "function stopFake()", ruleName: "UnknownEffect" },
+      { line: 7, context: "function stopLocal()", ruleName: "UnknownEffect" },
+      { line: 10, context: "function stopViaWindow()", ruleName: "UnknownEffect" },
+      { line: 13, context: "function report()", ruleName: "UnknownEffect" },
       { line: 16, context: "function stopReal()", ruleName: "ExitExpression" },
       { line: 16, context: "function stopReal()", ruleName: "ImplicitInput" },
+      { line: 16, context: "function stopReal()", ruleName: "UnknownEffect" },
     ],
   );
 });

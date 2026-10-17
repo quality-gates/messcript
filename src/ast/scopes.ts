@@ -1,6 +1,6 @@
 // messcript-disable ConstantNamingConventions CouplingBetweenObjects
 import ts from "typescript";
-import { methodName, unwrapExpression } from "./expressions";
+import { declarationName, methodName, unwrapExpression } from "./expressions";
 import { isFunctionLike } from "./functions";
 
 export type ScopeKind = "file" | "namespace" | "function" | "class" | "block";
@@ -30,6 +30,8 @@ export type Binding = {
 };
 
 export type Write = {
+  /** The write mutates the value's contents instead of replacing the root binding. */
+  readonly contents: boolean;
   /** The write goes through a call result, as in f().x = 1. */
   readonly viaCall: boolean;
   /** The write replaces the value of the binding, as in x = 1. */
@@ -44,8 +46,14 @@ export type ScopeModel = {
   /** Tells if the identifier refers to a value or a type, and is not a declaration name, property name, or label. */
   isReference(identifier: ts.Identifier): boolean;
   resolve(identifier: ts.Identifier): Binding | undefined;
+  /** Resolves a local type alias or a declaration that shadows a host type name. */
+  resolveType(identifier: ts.Identifier): LocalType | undefined;
   /** Gives the write to the root identifier or "this" of a write target, as "a" in a.b = 1 or a.push(1). */
   writeOf(node: ts.Node): Write | undefined;
+  /** Tells if the file assigns, updates, or deletes the member access, as a.b in a.b = 1. */
+  writesMember(access: ts.Node): boolean;
+  /** Tells if the file writes or defines a member of the name, as add in o.add = f, Object.defineProperty(o, "add", d), or Object.defineProperties(o, { add: d }). */
+  writesMemberName(name: string): boolean;
 };
 
 type MutableBinding = {
@@ -77,7 +85,7 @@ function scopeKindOf(node: ts.Node): ScopeKind | undefined {
   if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
     return "class";
   }
-  if (ts.isModuleBlock(node)) {
+  if (ts.isModuleBlock(node) && (node.parent.flags & ts.NodeFlags.GlobalAugmentation) === 0) {
     return "namespace";
   }
   const block = ts.isBlock(node) || ts.isCaseBlock(node) || ts.isCatchClause(node) || ts.isForStatement(node) ||
@@ -105,6 +113,16 @@ function isReference(identifier: ts.Identifier): boolean {
   const propertyName = "propertyName" in parent && parent.propertyName === identifier;
   const label = "label" in parent && parent.label === identifier;
   return !named && !propertyName && !label;
+}
+
+/** Tells if a declare modifier or a declaration file leaves the node to code outside the file. */
+export function isAmbient(node: ts.Node): boolean {
+  for (let current: ts.Node | undefined = node; current; current = current.parent) {
+    if (ts.canHaveModifiers(current) && ts.getModifiers(current)?.some((modifier) => modifier.kind === ts.SyntaxKind.DeclareKeyword)) {
+      return true;
+    }
+  }
+  return node.getSourceFile().isDeclarationFile;
 }
 
 function isInside(node: ts.Node, ancestor: ts.Node): boolean {
@@ -147,7 +165,8 @@ function isUpdateExpression(node: ts.Node): node is ts.PrefixUnaryExpression | t
     (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken);
 }
 
-function writeTargets(node: ts.Node): ts.Expression[] {
+/** Gives the expressions the node assigns, updates, or deletes. */
+export function writeTargets(node: ts.Node): ts.Expression[] {
   if (ts.isBinaryExpression(node) && isAssignmentOperator(node.operatorToken.kind)) {
     return assignmentTargets(node.left);
   }
@@ -236,6 +255,51 @@ function isOuterChild(node: ts.Node, child: ts.Node): boolean {
   return (ts.isForInStatement(node) || ts.isForOfStatement(node)) && node.expression === child;
 }
 
+function literalBooleanValue(expression: ts.Expression): boolean | undefined {
+  const value = unwrapExpression(expression);
+  if (value.kind === ts.SyntaxKind.TrueKeyword) {
+    return true;
+  }
+  if (value.kind === ts.SyntaxKind.FalseKeyword) {
+    return false;
+  }
+  return undefined;
+}
+
+function visitReachableChildren(node: ts.Node, scope: Scope, visit: (node: ts.Node, scope: Scope) => void): boolean {
+  if (ts.isIfStatement(node)) {
+    visit(node.expression, scope);
+    const condition = literalBooleanValue(node.expression);
+    if (condition === true) {
+      visit(node.thenStatement, scope);
+    } else if (condition === false) {
+      if (node.elseStatement) {
+        visit(node.elseStatement, scope);
+      }
+    } else {
+      visit(node.thenStatement, scope);
+      if (node.elseStatement) {
+        visit(node.elseStatement, scope);
+      }
+    }
+    return true;
+  }
+  if (ts.isConditionalExpression(node)) {
+    visit(node.condition, scope);
+    const condition = literalBooleanValue(node.condition);
+    if (condition === true) {
+      visit(node.whenTrue, scope);
+    } else if (condition === false) {
+      visit(node.whenFalse, scope);
+    } else {
+      visit(node.whenTrue, scope);
+      visit(node.whenFalse, scope);
+    }
+    return true;
+  }
+  return false;
+}
+
 class ScopeBuilder {
   readonly bindings: MutableBinding[] = [];
   readonly resolved = new Map<ts.Identifier, MutableBinding | undefined>();
@@ -307,6 +371,9 @@ class ScopeBuilder {
     const kind = scopeKindOf(node);
     const inner = kind ? { kind, node, parent: scope } : scope;
     this.declareNames(node, scope, inner);
+    if (visitReachableChildren(node, inner, (child, childScope) => this.visit(child, childScope))) {
+      return;
+    }
     ts.forEachChild(node, (child) => this.visit(child, isOuterChild(node, child) ? scope : inner));
   }
 
@@ -328,7 +395,7 @@ class ScopeBuilder {
       current = unwrapExpression(current.expression);
     }
     if (ts.isIdentifier(current) || current.kind === ts.SyntaxKind.ThisKeyword) {
-      this.writes.set(current, { viaCall, reassign, compound });
+      this.writes.set(current, { contents: contentsOnly, viaCall, reassign, compound });
     }
   }
 
@@ -342,17 +409,126 @@ class ScopeBuilder {
   }
 }
 
+type MemberWrites = { readonly targets: ReadonlySet<ts.Node>; readonly names: ReadonlySet<string>; readonly anyName: boolean };
+
+const definingCalls = new Set(["Object.defineProperty", "Reflect.defineProperty", "Reflect.set"]);
+const patchingCalls = new Set([...definingCalls, "Object.defineProperties", "Object.assign"]);
+
+function memberWrites(sourceFile: ts.SourceFile): MemberWrites {
+  const targets = new Set<ts.Node>();
+  const names = new Set<string>();
+  let anyName = false;
+  const visit = (node: ts.Node): void => {
+    for (const target of writeTargets(node)) {
+      const value = unwrapExpression(target);
+      targets.add(value);
+      const name = methodName(value);
+      if (name !== undefined) {
+        names.add(name);
+      }
+      anyName ||= writesPrototypeKey(value);
+    }
+    const defined = definedNames(node);
+    anyName ||= defined === undefined || aliasesPatchingCall(node);
+    for (const name of defined ?? []) {
+      names.add(name);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return { targets, names, anyName };
+}
+
+/** Tells if the write patches a prototype under a key no literal spells, as p in Api.prototype[p] = f. */
+function writesPrototypeKey(target: ts.Expression): boolean {
+  if (!ts.isElementAccessExpression(target) || methodName(target) !== undefined) {
+    return false;
+  }
+  const owner = unwrapExpression(target.expression);
+  return ts.isPropertyAccessExpression(owner) && owner.name.text === "prototype";
+}
+
+/** Tells if the node takes a patching call as a value, as const define = Object.defineProperty or { assign } = Object. */
+function aliasesPatchingCall(node: ts.Node): boolean {
+  if (ts.isBindingElement(node)) {
+    return destructuresPatchingCall(node);
+  }
+  return (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) && patchingCalls.has(libraryName(node)) && !isCallee(node);
+}
+
+function destructuresPatchingCall(element: ts.BindingElement): boolean {
+  const declaration = element.parent.parent;
+  const source = ts.isVariableDeclaration(declaration) && declaration.initializer && unwrapExpression(declaration.initializer);
+  const key = element.propertyName ?? element.name;
+  return !!source && ts.isIdentifier(source) && ts.isIdentifier(key) && patchingCalls.has(`${source.text}.${key.text}`);
+}
+
+/** Gives the spelled library member, as Object.assign for Object.assign and Object["assign"], or "" for other receivers. */
+function libraryName(member: ts.PropertyAccessExpression | ts.ElementAccessExpression): string {
+  const receiver = unwrapExpression(member.expression);
+  return ts.isIdentifier(receiver) ? `${receiver.text}.${methodName(member)}` : "";
+}
+
+/** Tells if the expression, through parentheses and type assertions, is the callee of a call. */
+function isCallee(expression: ts.Expression): boolean {
+  let top: ts.Node = expression;
+  while (ts.isParenthesizedExpression(top.parent) || ts.isAsExpression(top.parent) || ts.isNonNullExpression(top.parent) ||
+      ts.isTypeAssertionExpression(top.parent) || ts.isSatisfiesExpression(top.parent)) {
+    top = top.parent;
+  }
+  return ts.isCallExpression(top.parent) && top.parent.expression === top;
+}
+
+function definedNames(node: ts.Node): string[] | undefined {
+  if (!ts.isCallExpression(node)) {
+    return [];
+  }
+  const callee = unwrapExpression(node.expression);
+  const library = ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee) ? libraryName(callee) : "";
+  const target = node.arguments[0] && unwrapExpression(node.arguments[0]);
+  return target && !ts.isObjectLiteralExpression(target) ? libraryNames(library, node.arguments) : [];
+}
+
+function libraryNames(library: string, args: readonly ts.Expression[]): string[] | undefined {
+  if (definingCalls.has(library)) {
+    const key = args[1] && unwrapExpression(args[1]);
+    return key && ts.isStringLiteralLike(key) ? [key.text] : undefined;
+  }
+  if (library === "Object.defineProperties") {
+    return sourceNames(args.slice(1, 2));
+  }
+  return library === "Object.assign" ? sourceNames(args.slice(1)) : [];
+}
+
+function sourceNames(sources: readonly ts.Expression[]): string[] | undefined {
+  const names: string[] = [];
+  for (const source of sources) {
+    const value = unwrapExpression(source);
+    const properties = ts.isObjectLiteralExpression(value) ? value.properties.map(declarationName) : [undefined];
+    if (properties.some((name) => name === undefined)) {
+      return undefined;
+    }
+    names.push(...properties as string[]);
+  }
+  return names;
+}
+
 // messcript-disable-next-line GlobalVariable
 const modelCache = new WeakMap<ts.SourceFile, ScopeModel>();
 
 function buildModel(sourceFile: ts.SourceFile): ScopeModel {
   const builder = new ScopeBuilder();
   builder.build(sourceFile);
+  let members: MemberWrites | undefined;
+  const writes = (): MemberWrites => (members ??= memberWrites(sourceFile));
   return {
     bindings: builder.bindings,
     isReference: (identifier) => builder.resolved.has(identifier),
     resolve: (identifier) => builder.resolved.get(identifier),
+    resolveType: resolveLocalType,
     writeOf: (node) => builder.writes.get(node),
+    writesMember: (access) => writes().targets.has(access),
+    writesMemberName: (name) => writes().anyName || writes().names.has(name),
   };
 }
 
@@ -369,4 +545,31 @@ export function analyzeScopes(sourceFile: ts.SourceFile): ScopeModel {
     modelCache.set(sourceFile, model);
   }
   return model;
+}
+
+type LocalType = { readonly kind: "alias"; readonly type: ts.TypeNode } | { readonly kind: "shadowed" };
+
+function resolveLocalType(name: ts.Identifier): LocalType | undefined {
+  for (let current: ts.Node | undefined = name.parent; current; current = current.parent) {
+    const parameter = typeParameters(current)?.find((item) => item.name.text === name.text);
+    const declaration = blockTypeDeclaration(current, name.text);
+    if (parameter || declaration) {
+      return declaration && ts.isTypeAliasDeclaration(declaration)
+        ? { kind: "alias", type: declaration.type } : { kind: "shadowed" };
+    }
+  }
+  return undefined;
+}
+
+function typeParameters(node: ts.Node): readonly ts.TypeParameterDeclaration[] | undefined {
+  return ts.isFunctionLike(node) || ts.isClassLike(node) || ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)
+    ? node.typeParameters : undefined;
+}
+
+function blockTypeDeclaration(node: ts.Node, name: string): ts.TypeAliasDeclaration | ts.InterfaceDeclaration | undefined {
+  if (!ts.isBlock(node) && !ts.isSourceFile(node) && !ts.isModuleBlock(node)) {
+    return undefined;
+  }
+  return node.statements.find((statement): statement is ts.TypeAliasDeclaration | ts.InterfaceDeclaration =>
+    (ts.isTypeAliasDeclaration(statement) || ts.isInterfaceDeclaration(statement)) && statement.name.text === name);
 }

@@ -1,0 +1,356 @@
+import ts from "typescript";
+import { methodName, outerExpression, unwrapExpression } from "../ast/expressions";
+import { globalName, globalObjectMember } from "../ast/global-reference";
+import type { ScopeModel } from "../ast/scopes";
+import type { ReadMode } from "./reads";
+import { standardMethod } from "./standard-receivers";
+
+/**
+ * What a standard library call returns.
+ * Fresh storage holds nothing the caller can reach. A shallow copy holds what the receiver holds. An element is
+ * storage the receiver holds. A holding result holds the arguments. A mapped result holds callback results.
+ * The receiver result is the receiver itself, or the first argument for Object.assign.
+ */
+export type LibraryResult = "fresh" | "shallow" | "element" | "holding" | "mapped" | "pairs" | "receiver" | "promise" | "promise-elements";
+
+export type LibraryStorage = "none" | "arguments" | "sources" | "splice" | "entry";
+
+/**
+ * A standard library call this analysis models.
+ * A mutating call writes its receiver, or its first argument for Object.assign.
+ * Callbacks are the argument indexes the call invokes before it returns.
+ */
+export type LibraryCall =
+  | { readonly kind: "effect" }
+  | { readonly kind: "pure" | "mutating"; readonly result: LibraryResult; readonly target: "receiver" | "argument"; readonly callbacks: readonly number[]; readonly stores: LibraryStorage; readonly reads: LibraryReads };
+
+type LibraryReads = { readonly receiver: ReadMode; readonly arguments: readonly ReadMode[]; readonly rest: ReadMode };
+
+function inputs(receiver: ReadMode, args: readonly ReadMode[] = [], rest: ReadMode = "reference"): LibraryReads {
+  return { receiver, arguments: args, rest };
+}
+
+export type AmbientFlow = readonly ["input" | "output", string];
+
+export type LibraryCallback =
+  | { readonly kind: "pure"; readonly call: Exclude<LibraryCall, { kind: "effect" }> }
+  | { readonly kind: "effect"; readonly flow: AmbientFlow };
+
+const HOST_OBJECTS = new Set([
+  "document", "globalThis", "localStorage", "location", "navigator", "process", "self", "sessionStorage", "window",
+]);
+
+const OUTPUT_SINKS = new Set([
+  "alert", "console", "fetch", "queueMicrotask", "requestAnimationFrame", "setInterval", "setTimeout",
+]);
+
+const NONDETERMINISTIC_CALLS = new Set([
+  "Date.now", "Math.random", "crypto.getRandomValues", "crypto.randomUUID", "performance.now",
+]);
+
+const FRESH_GLOBAL_CALLS = new Set([
+  "Array.isArray", "Boolean", "Number", "Number.isFinite", "Number.isInteger",
+  "Number.isNaN", "Number.parseFloat", "Number.parseInt", "Object.keys", "String", "parseFloat", "parseInt",
+  "Promise.resolve", "Promise.reject", "Promise.all", "Promise.allSettled", "Promise.race", "structuredClone", "Math.abs", "Math.ceil", "Math.floor", "Math.max", "Math.min", "Math.pow", "Math.round",
+  "Math.sign", "Math.sqrt", "Math.trunc",
+]);
+
+const CALLBACK_GLOBAL_CALLS = new Set(["JSON.parse", "JSON.stringify"]);
+
+const ITERATING_GLOBAL_CALLS = new Set([
+  "Array.from", "Object.fromEntries", "Promise.all", "Promise.allSettled", "Promise.race",
+]);
+
+const STORING_METHODS = new Map<string, LibraryStorage>([
+  ["add", "arguments"], ["fill", "arguments"], ["push", "arguments"], ["set", "entry"],
+  ["splice", "splice"], ["unshift", "arguments"],
+]);
+
+const MOVING_METHODS = new Set(["copyWithin", "reverse", "shift", "sort", "splice", "unshift"]);
+
+const HOLDING_GLOBAL_CALLS = new Map<string, readonly number[]>([
+  ["Array.from", [1]], ["Array.of", []], ["Object.entries", []], ["Object.fromEntries", []], ["Object.values", []],
+]);
+
+const PURE_METHODS = new Map<string, LibraryResult>([
+  ...methods("fresh", [
+    "charAt", "charCodeAt", "codePointAt", "endsWith", "every", "findIndex", "findLastIndex", "forEach", "getTime",
+    "has", "includes", "indexOf", "join", "lastIndexOf", "localeCompare", "normalize", "padEnd", "padStart", "repeat",
+    "replace", "replaceAll", "some", "split", "startsWith", "substring", "toFixed", "toLocaleLowerCase",
+    "toLocaleUpperCase", "toLowerCase", "toString", "toUpperCase", "trim", "trimEnd", "trimStart",
+  ]),
+  ...methods("shallow", ["filter", "flat", "keys", "slice", "toReversed", "toSorted", "values"]),
+  ...methods("pairs", ["entries"]),
+  ...methods("element", ["at", "find", "findLast", "get"]),
+  ...methods("holding", ["concat"]),
+  ...methods("mapped", ["flatMap", "map", "reduce", "reduceRight"]),
+]);
+
+const MUTATING_METHODS = new Map<string, LibraryResult>([
+  ...methods("receiver", [
+    "add", "append", "appendChild", "clear", "copyWithin", "delete", "fill", "insertBefore", "prepend",
+    "remove", "removeAttribute", "removeChild", "removeItem", "replaceChildren", "reverse", "set", "setAttribute",
+    "setItem", "sort", "write", "writeln",
+  ]),
+  ...methods("fresh", ["push", "unshift"]),
+  ...methods("element", ["pop", "shift"]),
+  ...methods("shallow", ["splice"]),
+]);
+
+const CALLBACK_METHODS = new Set([
+  "every", "filter", "find", "findIndex", "findLast", "findLastIndex", "flatMap", "forEach", "map", "reduce",
+  "reduceRight", "some", "sort", "toSorted",
+]);
+
+const OPTIONAL_CALLBACK_CALLS = new Set(["JSON.parse", "JSON.stringify", "replace", "replaceAll"]);
+
+const PURE_CONSTRUCTORS = new Set([
+  "Array", "Date", "Error", "Map", "Object", "RangeError", "RegExp", "Set", "TypeError", "URL", "URLSearchParams",
+  "WeakMap", "WeakSet",
+]);
+
+function methods(result: LibraryResult, names: readonly string[]): [string, LibraryResult][] {
+  return names.map((name) => [name, result]);
+}
+
+/** Tells if the name is a standard constructor that builds fresh storage. */
+export function isPureConstructor(name: string | undefined): boolean {
+  return name !== undefined && PURE_CONSTRUCTORS.has(name);
+}
+
+function isOutputCallable(name: string): boolean {
+  return name.startsWith("console.") || name !== "console" && OUTPUT_SINKS.has(name);
+}
+
+export function libraryCallbackNamed(name: string | undefined): LibraryCallback | undefined {
+  if (!name) {
+    return undefined;
+  }
+  if (NONDETERMINISTIC_CALLS.has(name)) {
+    return { kind: "effect", flow: ["input", `calls ${name}`] };
+  }
+  if (isOutputCallable(name)) {
+    return { kind: "effect", flow: ["output", `uses ${name.startsWith("console.") ? "console" : name}`] };
+  }
+  const call = FRESH_GLOBAL_CALLS.has(name) ? globalCall(name) : undefined;
+  return call && call.kind !== "effect" ? { kind: "pure", call } : undefined;
+}
+
+/** Tells if the method name is one this analysis models for standard library receivers. */
+export function isLibraryMethodName(name: string): boolean {
+  return PURE_METHODS.has(name) || MUTATING_METHODS.has(name);
+}
+
+/** Classifies a known standard call or a conservative receiver write. */
+export function libraryCall(call: ts.CallExpression, model: ScopeModel): LibraryCall | undefined {
+  const callee = unwrapExpression(call.expression);
+  const name = globalName(callee, model);
+  if (name !== undefined) {
+    const known = globalCall(name, callee);
+    if (known) {
+      return optionalCallbacks(call, model, name, known);
+    }
+  }
+  if (!ts.isPropertyAccessExpression(callee) && !ts.isElementAccessExpression(callee)) {
+    return undefined;
+  }
+  const method = methodName(callee);
+  const known = memberCall(method);
+  if (known?.kind === "pure" && !standardMethod(model, callee.expression, method)) {
+    return undefined;
+  }
+  return known ? optionalCallbacks(call, model, method, known) : undefined;
+}
+
+function optionalCallbacks(call: ts.CallExpression, model: ScopeModel, name: string | undefined, known: LibraryCall): LibraryCall {
+  if (known.kind === "effect" || !OPTIONAL_CALLBACK_CALLS.has(name ?? "")) {
+    return known;
+  }
+  const callbacks = known.callbacks.filter((index) => {
+    const argument = call.arguments[index];
+    return argument && !nonCallableArgument(argument, model);
+  });
+  return { ...known, callbacks };
+}
+
+function nonCallableArgument(argument: ts.Expression, model: ScopeModel): boolean {
+  const value = unwrapExpression(argument);
+  return [ts.SyntaxKind.NullKeyword, ts.SyntaxKind.VoidExpression, ts.SyntaxKind.ObjectLiteralExpression].includes(value.kind) ||
+    globalName(value, model) === "undefined" || standardMethod(model, value, "toString");
+}
+
+function isEffectCall(name: string, callee: ts.Expression | undefined): boolean {
+  const roots = [name.split(".")[0], callee ? globalObjectMember(callee) ?? "" : ""];
+  return roots.some((root) => OUTPUT_SINKS.has(root)) || NONDETERMINISTIC_CALLS.has(name) || name === "Date";
+}
+
+function globalCall(name: string, callee?: ts.Expression): LibraryCall | undefined {
+  if (isEffectCall(name, callee)) {
+    return { kind: "effect" };
+  }
+  if (name === "Object.assign") {
+    return { kind: "mutating", result: "receiver", target: "argument", callbacks: [], stores: "sources", reads: inputs("reference", ["reference"], "slots") };
+  }
+  const promise = promiseGlobalCall(name);
+  if (promise) { return promise; }
+  if (CALLBACK_GLOBAL_CALLS.has(name)) {
+    return { kind: "pure", result: "fresh", target: "argument", callbacks: [1], stores: "none", reads: inputs("reference", [name === "JSON.stringify" ? "deep" : "slots"]) };
+  }
+  return allocatingGlobalCall(name);
+}
+
+function promiseGlobalCall(name: string): LibraryCall | undefined {
+  if (name === "Promise.resolve" || name === "Promise.all") {
+    return { kind: "pure", result: name === "Promise.all" ? "promise-elements" : "promise", target: "argument", callbacks: [], stores: "none", reads: inputs("reference", [name === "Promise.all" ? "slots" : "reference"]) };
+  }
+  return undefined;
+}
+
+function allocatingGlobalCall(name: string): LibraryCall | undefined {
+  if (FRESH_GLOBAL_CALLS.has(name)) {
+    return { kind: "pure", result: "fresh", target: "receiver", callbacks: [], stores: "none", reads: inputs("reference", [freshGlobalReadMode(name)]) };
+  }
+  const callbacks = HOLDING_GLOBAL_CALLS.get(name);
+  return callbacks ? { kind: "pure", result: "holding", target: "argument", callbacks, stores: "none", reads: inputs("reference", [name === "Array.of" ? "reference" : "slots"]) } : undefined;
+}
+
+function freshGlobalReadMode(name: string): ReadMode {
+  if (name === "Object.keys") { return "keys"; }
+  if (["Array.isArray", "Boolean"].includes(name)) { return "reference"; }
+  return ["structuredClone", "String", "Number"].includes(name) ? "deep" : "slots";
+}
+
+function memberCallbacks(name: string): number[] {
+  if (name === "replace" || name === "replaceAll") { return [1]; }
+  return CALLBACK_METHODS.has(name) ? [0] : [];
+}
+
+function memberReadMode(name: string): ReadMode {
+  if (name === "join" || name === "toString") { return "deep"; }
+  return name === "keys" ? "keys" : "slots";
+}
+
+function memberCall(name: string | undefined): LibraryCall | undefined {
+  if (name === undefined) {
+    return undefined;
+  }
+  const callbacks = memberCallbacks(name);
+  const mutating = MUTATING_METHODS.get(name);
+  if (mutating) {
+    return { kind: "mutating", result: mutating, target: "receiver", callbacks, stores: STORING_METHODS.get(name) ?? "none", reads: inputs(MOVING_METHODS.has(name) || name === "pop" ? "slots" : "reference", name === "setItem" || name === "setAttribute" ? ["deep", "deep"] : []) };
+  }
+  const pure = PURE_METHODS.get(name);
+  return pure ? { kind: "pure", result: pure, target: "receiver", callbacks, stores: "none", reads: inputs(memberReadMode(name)) } : undefined;
+}
+
+/** Tells if a standard library call keeps its arguments as references without reading their contents. */
+export function storesArguments(call: ts.CallExpression, model: ScopeModel): boolean {
+  const known = libraryCall(call, model);
+  return known?.kind === "mutating" && known.stores !== "none" && known.stores !== "sources";
+}
+
+/** Tells if the method can move what one index of its receiver holds to another index. */
+export function movesElements(call: LibraryCall, name: string | undefined): boolean {
+  return call.kind === "mutating" && call.target === "receiver" && MOVING_METHODS.has(name ?? "");
+}
+
+export function iteratedArgument(call: ts.CallExpression, model: ScopeModel): ts.Expression | undefined {
+  return ITERATING_GLOBAL_CALLS.has(globalName(call.expression, model) ?? "") ? call.arguments[0] : undefined;
+}
+
+function dateCallDescription(expression: ts.Expression): string | undefined {
+  const parent = expression.parent;
+  if ((!ts.isNewExpression(parent) && !ts.isCallExpression(parent)) || parent.expression !== expression) {
+    return undefined;
+  }
+  if (ts.isNewExpression(parent) && (parent.arguments?.length ?? 0) !== 0) {
+    return undefined;
+  }
+  return `calls ${ts.isNewExpression(parent) ? "new " : ""}Date()`;
+}
+
+function ambientMethodCallName(expression: ts.Expression, name: string): string | undefined {
+  const access = outerExpression(expression).parent;
+  if (!ts.isPropertyAccessExpression(access) && !ts.isElementAccessExpression(access)) {
+    return undefined;
+  }
+  const callee = outerExpression(access);
+  const call = callee.parent;
+  if (!ts.isCallExpression(call) || call.expression !== callee) {
+    return undefined;
+  }
+  const method = methodName(access);
+  const receiver = unwrapExpression(access.expression);
+  if (!method || !ts.isIdentifier(receiver)) {
+    return undefined;
+  }
+  return `${name}.${method}`;
+}
+
+function ambientCallDescription(node: ts.Identifier, name: string): string | undefined {
+  const expression = outerExpression(node);
+  if (name === "Date") {
+    const dateCall = dateCallDescription(expression);
+    if (dateCall) {
+      return dateCall;
+    }
+  }
+  const call = ambientMethodCallName(expression, name);
+  return call && NONDETERMINISTIC_CALLS.has(call) ? `calls ${call}()` : undefined;
+}
+
+function sinkName(node: ts.Identifier, name: string): string {
+  const expression = outerExpression(node);
+  const parent = expression.parent;
+  const access = (ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) && parent.expression === expression
+    ? parent
+    : undefined;
+  return (access && globalObjectMember(access)) ?? name;
+}
+
+const HOST_ROOTS = new Set([
+  ...HOST_OBJECTS, ...OUTPUT_SINKS, ...PURE_CONSTRUCTORS,
+  ...[...NONDETERMINISTIC_CALLS, ...FRESH_GLOBAL_CALLS, ...CALLBACK_GLOBAL_CALLS,
+    ...ITERATING_GLOBAL_CALLS, ...HOLDING_GLOBAL_CALLS.keys()].map((name) => name.split(".")[0] ?? name),
+]);
+
+export function isHostRoot(name: string | undefined): boolean {
+  return name !== undefined && HOST_ROOTS.has(name);
+}
+
+export function hostReference(node: ts.Expression, model: ScopeModel): string | undefined {
+  return ts.isIdentifier(node) && !model.resolve(node) && isHostRoot(node.text)
+    ? ["globalThis", "window", "self"].includes(node.text) ? "" : node.text : undefined;
+}
+
+function referencedHost(node: ts.Identifier, name: string): string | undefined {
+  const slots: string[] = [];
+  let current: ts.Expression = outerExpression(node);
+  while ((ts.isPropertyAccessExpression(current.parent) || ts.isElementAccessExpression(current.parent)) &&
+      current.parent.expression === current) {
+    const member = methodName(current.parent);
+    if (member === undefined || member === "" || member.includes(".")) { return undefined; }
+    slots.push(member);
+    current = outerExpression(current.parent);
+  }
+  return [name, ...slots].join(".").replace(/^(globalThis|window|self)\./, "");
+}
+
+function capturesHostGlobal(node: ts.Identifier, name: string): boolean {
+  if (!["globalThis", "window", "self"].includes(name)) { return false; }
+  const full = referencedHost(node, name);
+  return full === name || full !== undefined && (HOST_ROOTS.has(full) || libraryCallbackNamed(full) !== undefined);
+}
+
+export function ambientFlow(node: ts.Identifier, written: boolean, name = node.text): AmbientFlow | undefined {
+  const sink = sinkName(node, name);
+  if (written && OUTPUT_SINKS.has(sink)) {
+    return ["output", `uses ${sink}`];
+  }
+  const capturedGlobal = capturesHostGlobal(node, name);
+  if (HOST_OBJECTS.has(name) && (written || !capturedGlobal)) {
+    return written ? ["output", `writes ${name}`] : ["input", `reads ${name}`];
+  }
+  const call = ambientCallDescription(node, name);
+  return call && name === "Date" ? ["input", call] : undefined;
+}

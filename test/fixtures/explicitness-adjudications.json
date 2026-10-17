@@ -1,0 +1,39 @@
+[
+  {
+    "name": "mut-s2-two-class-base",
+    "sourceSha256": "def064d9c5850050120f4d23197c4d46691e5f6848d7c87e5c6792c579beba7d",
+    "findings": [
+      {
+        "finding": "6:ImplicitInput: <module>: The module reads Base, an implicit input.",
+        "reason": "Class heritage reads the mutable module binding during class definition. The original corpus omitted that read. Runtime inheritance capture and independent source adjudication confirm this required addition."
+      }
+    ]
+  },
+  {
+    "name": "mut-e3-computed-method-name",
+    "sourceSha256": "a25b74c3564c57d6309918ecb0fd2d95b48458d697ce8f98827b3b5ff4b54fc6",
+    "findings": [],
+    "rejectedFindings": [
+      {
+        "finding": "8:ImplicitOutput: method A.[key()](): The method A.[key()]() writes log, an implicit output.",
+        "reason": "The computed name runs during class definition in run, not when the method body executes."
+      }
+    ]
+  },
+  {
+    "name": "mut-e3-dec-factory",
+    "sourceSha256": "a07d3bcba878e9f71eca51d5708cc6c0c68c8caf3c9843d602941f121b8c6cbb",
+    "findings": [
+      {
+        "finding": "8:UnknownEffect: function run(): The function run() uses unresolved decorator application, an unknown effect.",
+        "reason": "Implicit decorator application is outside the modeled protocol subset. This conservative unknown belongs to definition in run, alongside known factory evaluation output. Frozen audit decorator twins admit unknown application; this does not claim the pure returned decorator has an actual runtime effect."
+      }
+    ],
+    "rejectedFindings": [
+      {
+        "finding": "8:ImplicitOutput: method A.go(): The method A.go() writes log, an implicit output.",
+        "reason": "The decorator factory runs during class definition in run, not when go executes. The decorator returned by this factory has no effect."
+      }
+    ]
+  }
+]

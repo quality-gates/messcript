@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- The `explicitness` ruleset adds `ImplicitInput`, `ImplicitOutput`, and `UnknownEffect`, reported per function, method, constructor, and module. Storage identity, aliasing, append bounds, and read depth decide which reads and writes count, and a call or mutation the analysis cannot resolve is reported as `UnknownEffect` rather than left quiet. It is opt-in: combine as `typescript,explicitness`. Returned and bound callbacks keep their captured storage, iterator effects transfer when consumed, and known method replacements preserve the replacement effects. JSON replacer key/value correlation remains unresolved.
+
 ### Fixed
 
 - SARIF `artifactLocation.uri` now percent-encodes each path segment, so a path such as `my files/note.ts` becomes `my%20files/note.ts` ([#323](https://github.com/quality-gates/messcript/issues/323)). Characters such as `%`, `#`, and `?` are encoded too. Other formats still print the plain path.

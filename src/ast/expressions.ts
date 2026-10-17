@@ -34,3 +34,23 @@ export function methodName(callee: ts.Expression): string | undefined {
   const argument = ts.isElementAccessExpression(callee) ? unwrapExpression(callee.argumentExpression) : undefined;
   return argument && ts.isStringLiteralLike(argument) ? argument.text : undefined;
 }
+
+/** Gives the member name a method, accessor, or property declares, when a plain or literal key spells it. */
+export function declarationName(node: ts.Node): string | undefined {
+  if (!ts.isMethodDeclaration(node) && !ts.isGetAccessorDeclaration(node) && !ts.isSetAccessorDeclaration(node) &&
+      !ts.isPropertyDeclaration(node) && !ts.isPropertyAssignment(node) && !ts.isShorthandPropertyAssignment(node)) {
+    return undefined;
+  }
+  const name = node.name;
+  return ts.isComputedPropertyName(name) ? literalName(unwrapExpression(name.expression)) : keyName(name);
+}
+
+/** Gives the member name a plain or literal key spells, as add for add, "add", and { add: x }. */
+export function keyName(key: ts.Node): string | undefined {
+  return ts.isIdentifier(key) ? key.text : literalName(key);
+}
+
+/** Gives the member name a string or numeric literal spells. */
+export function literalName(name: ts.Node): string | undefined {
+  return ts.isStringLiteralLike(name) || ts.isNumericLiteral(name) ? name.text : undefined;
+}
