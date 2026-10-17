@@ -1594,9 +1594,15 @@ function knownPushStartFromFact(state: AnalysisState, fact: StorageFact, owner: 
 }
 
 function literalAllocationLength(state: AnalysisState, origin: StorageOrigin): number | undefined {
-  const position = /^private:(\d+)(?::frame=.*)?$/.exec(origin)?.[1];
-  const allocation = position === undefined ? undefined : state.arrayLiterals.get(Number(position));
-  return allocation && !allocation.elements.some(ts.isSpreadElement) ? allocation.elements.length : undefined;
+  const match = /^private:(\d+)(?::(\d+))?(?:[:,]frame=.*)?$/.exec(origin);
+  const allocation = match ? state.arrayLiterals.get(Number(match[1])) : undefined;
+  if (!match || !allocation || allocation.elements.some(ts.isSpreadElement)) {
+    return undefined;
+  }
+  // A direct return keeps the literal length. Another return path can change that length.
+  const returned = outerExpression(allocation);
+  const directReturn = ts.isReturnStatement(returned.parent) || ts.isArrowFunction(returned.parent);
+  return match[2] === undefined || directReturn ? allocation.elements.length : undefined;
 }
 
 function calleeOf(point: ts.Node): ts.Node | undefined {
