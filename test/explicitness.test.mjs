@@ -55,6 +55,88 @@ function messages(name, source, ruleset = "explicitness") {
   return JSON.parse(stdout.read()).findings.map((finding) => `${finding.line}:${finding.ruleName}: ${finding.message}`);
 }
 
+test("returned storage makes sibling closure reads implicit", () => {
+  const cases = [
+    ["e1", `export function outer() {
+  const values = [0, 1];
+  const head = () => values[0];
+  return { values, head };
+}
+`, "3:ImplicitInput: The arrow function head() reads values, an implicit input.", "{ values, head }", "head"],
+    ["projection", `export function outer() {
+  const state = { a: { b: 2 } };
+  const expose = () => state.a;
+  const read = () => state.a.b;
+  return { expose, read };
+}
+`, "4:ImplicitInput: The arrow function read() reads state, an implicit input.", "{ expose, read }", "read"],
+    ["e5", `export function outer() {
+  const inner = { n: 0 };
+  const values = [inner];
+  const expose = () => [...values];
+  const read = () => inner.n;
+  return { expose, read };
+}
+`, "5:ImplicitInput: The arrow function read() reads inner, an implicit input.", "{ expose, read }", "read"],
+  ];
+  for (const [name, source, expected, exposed, reader] of cases) {
+    assert.deepEqual(messages(`${name}.ts`, source), [expected], name);
+    assert.deepEqual(messages(`${name}-private.ts`, source.replace(`return ${exposed}`, `return ${reader}`)), [], `${name} private`);
+  }
+});
+
+test("a returned projection does not expose storage before local calls finish", () => {
+  assert.deepEqual(messages("returned-projection-after-local-call.ts", `export function outer() {
+  const state = { items: [[0]] };
+  function poke() { const inner = state.items[0]; inner.push(1); }
+  poke();
+  const expose = () => state.items;
+  return expose;
+}
+`), ["3:ImplicitOutput: The function poke() mutates caller-owned value inner, an implicit output."]);
+});
+
+test("a returned parameter member exposes that member's alias, not an independent member", () => {
+  assert.deepEqual(messages("returned-parameter-member.ts", `export function outer(state: { a: { b: number } }) {
+  const alias = state.a;
+  const expose = () => state.a;
+  const read = () => alias.b;
+  return { expose, read };
+}
+`), ["4:ImplicitInput: The arrow function read() reads alias, an implicit input."]);
+  assert.deepEqual(messages("returned-parameter-other-member.ts", `export function outer(state: { a: { b: number }, c: number }) {
+  const expose = () => state.a;
+  const read = () => state.c;
+  return { expose, read };
+}
+`), []);
+});
+
+test("returned copies expose nested storage but not independent slots", () => {
+  assert.deepEqual(messages("returned-scalar-copy.ts", `export function outer() {
+  const values = [0, 1];
+  const expose = () => [...values];
+  const head = () => values[0];
+  return { expose, head };
+}
+`), []);
+  assert.deepEqual(messages("returned-nested-copy.ts", `export function outer() {
+  const inner = { n: 0 };
+  const values = [inner];
+  const expose = () => [...values];
+  const read = () => values.length;
+  return { expose, read };
+}
+`), []);
+  assert.deepEqual(messages("returned-independent-member.ts", `export function outer() {
+  const state = { a: { n: 0 }, b: { n: 0 } };
+  const expose = () => state.a;
+  const read = () => state.b.n;
+  return { expose, read };
+}
+`), []);
+});
+
 test("indirect writes make reads of the original shared storage implicit", () => {
   assert.deepEqual(messages("shared-alias-write.ts", `const shared: number[] = [];
 function write() { const alias = shared; alias.push(1); }
