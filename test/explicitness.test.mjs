@@ -2991,6 +2991,55 @@ class Svc {
   ]);
 });
 
+test("a labelled break that skips a reassignment keeps the argument alias", () => {
+  assert.deepEqual(messages("labelled-break.ts", `export function g(k: number, a: number[]) {
+  let y: number[] = a;
+  label: {
+    if (k) break label;
+    y = [];
+  }
+  y.push(1);
+  return 0;
+}
+`), [
+    "7:ImplicitOutput: The function g() mutates caller-owned value y, an implicit output.",
+  ]);
+  assert.deepEqual(messages("labelled-break-control.ts", `export function g(k: number, a: number[]) {
+  let y: number[] = a;
+  label: {
+    y = [];
+  }
+  y.push(1);
+  return 0;
+}
+`), []);
+  assert.deepEqual(messages("labelled-loop-break.ts", `export function g(k: number, a: number[]) {
+  let y: number[] = a;
+  outer: for (let i = 0; i < 1; i++) {
+    if (k) break outer;
+    y = [];
+  }
+  y.push(1);
+  return 0;
+}
+`), [
+    "7:ImplicitOutput: The function g() mutates caller-owned value y, an implicit output.",
+  ]);
+  for (const [name, body, expected] of [
+    ["unconditional", "label: { break label; y = []; }", true],
+    ["no-break", "label: { y = []; }", false],
+    ["unreachable-break", "label: { if (false) break label; y = []; }", false],
+    ["break-after", "label: { y = []; break label; }", false],
+    ["inner-label", "outer: { inner: { if (k) break inner; } y = []; }", false],
+    ["outer-label", "outer: { inner: { if (k) break outer; } y = []; }", true],
+    ["loop", "label: do { if (k) break label; y = []; } while (false);", true],
+  ]) {
+    assert.deepEqual(messages(`labelled-${name}.js`, `function g(k, a) { let y = a; ${body} y.push(1); }`), expected ? [
+      "1:ImplicitOutput: The function g() mutates caller-owned value y, an implicit output.",
+    ] : [], name);
+  }
+});
+
 test("a break, continue, or exception carries its state to where execution resumes", () => {
   assert.deepEqual(messages("break-label.ts", `const shared: number[] = [1];
 function bump(): void { shared[0] = 2; }
