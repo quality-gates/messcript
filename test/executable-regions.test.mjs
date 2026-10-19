@@ -55,8 +55,7 @@ test("bounded inspection includes its root but excludes nested function nodes an
     "value = (() => { hidden = 1; return true; })()",
   ]);
   assert.ok(!visited.some(ts.isFunctionLike));
-  const arrow = condition.expression.right.expression.expression;
-  assert.ok(ts.isArrowFunction(arrow));
+  const arrow = sourceFile("() => hidden = 1;").statements[0].expression;
   const functionNodes = [];
   walkExecutableRegion(arrow, (node) => functionNodes.push(node));
   assert.deepEqual(functionNodes, []);

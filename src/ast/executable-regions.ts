@@ -1,4 +1,4 @@
-import ts from "typescript";
+import type ts from "typescript";
 import { forEachFunction, isFunctionLike } from "./functions";
 import type { FunctionLike } from "./functions";
 import { walkAst } from "./walk";
