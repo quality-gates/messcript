@@ -1,6 +1,6 @@
 // messcript-disable ConstantNamingConventions
 import ts from "typescript";
-import { forEachFunction, isFunctionLike } from "../ast/functions";
+import { visitExecutableRegions } from "../ast/executable-regions";
 import type { Finding } from "../finding";
 import { createCleanCodeFinding, functionContext, functionName } from "./clean-code-finding";
 import type { RuleDefinition } from "./catalog";
@@ -9,17 +9,14 @@ export const ruleName = "ElseExpression";
 export const priority = 1;
 export const properties = {} as const;
 
-function visitExecutableStatements(
-  node: ts.Node,
-  sourceFile: ts.SourceFile,
-  context: string,
-  methodName: string,
-  findings: Finding[],
-): void {
-  if (isFunctionLike(node)) {
-    return;
-  }
-  if (ts.isIfStatement(node) && node.elseStatement && !ts.isIfStatement(node.elseStatement)) {
+export function findElseExpression(sourceFile: ts.SourceFile): Finding[] {
+  const findings: Finding[] = [];
+  visitExecutableRegions(sourceFile, (node, owner) => {
+    if (!ts.isIfStatement(node) || !node.elseStatement || ts.isIfStatement(node.elseStatement)) {
+      return;
+    }
+    const context = ts.isSourceFile(owner) ? "module" : functionContext(owner, sourceFile);
+    const methodName = ts.isSourceFile(owner) ? "module" : functionName(owner, sourceFile);
     findings.push(
       createCleanCodeFinding(
         node.elseStatement,
@@ -30,20 +27,6 @@ function visitExecutableStatements(
         `The method ${methodName} uses an else expression. Else clauses are basically not necessary and you can simplify the code by not using them.`,
       ),
     );
-  }
-  ts.forEachChild(node, (child) => visitExecutableStatements(child, sourceFile, context, methodName, findings));
-}
-
-export function findElseExpression(sourceFile: ts.SourceFile): Finding[] {
-  const findings: Finding[] = [];
-  visitExecutableStatements(sourceFile, sourceFile, "module", "module", findings);
-  forEachFunction(sourceFile, (node) => {
-    if (!node.body) {
-      return;
-    }
-    const context = functionContext(node, sourceFile);
-    const name = functionName(node, sourceFile);
-    visitExecutableStatements(node.body, sourceFile, context, name, findings);
   });
   return findings;
 }
