@@ -27,6 +27,7 @@
       "test/explicitness.test.mjs",
       "test/explicitness-provenance.test.mjs",
       "test/explicitness-dispatch.test.mjs",
+      "test/explicitness-owned-callbacks.test.mjs",
       "test/rule-registry.test.mjs"
     ]
   },
