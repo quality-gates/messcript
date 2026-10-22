@@ -133,7 +133,7 @@ type CallEffects = {
   readonly deferredCalls: DeferredCall[];
 };
 
-type SharedWrite = { readonly fact: StorageFact; readonly origin: StorageOrigin; readonly site: ts.Node; readonly slot?: string };
+type SharedWrite = { readonly fact: StorageFact; readonly origin: StorageOrigin; readonly site: ts.Node; readonly slot?: string; readonly returned?: boolean };
 
 type LexicalFrame = { readonly id: string; readonly context: readonly number[]; readonly owner: EffectOwner; readonly parent?: LexicalFrame };
 type CallableInstance =
@@ -746,7 +746,8 @@ function capturedReadSharesMutation(state: AnalysisState, binding: Binding, site
   if (!writes || inside(binding.scope.node, owner)) {
     return false;
   }
-  return [...writes.values()].some(({ fact, origin, slot }) =>
+  return [...writes.values()].some(({ fact, origin, slot, returned }) =>
+    (!returned || !invocationsRecorded(state, owner, binding)) &&
     Array.from({ length: site.path.length + 1 }, (_, length) => site.path.slice(0, length))
       .some((prefix) => originsForPath(fact, prefix.length ? prefix : "outer").includes(origin) && writeAffectsRead(site, prefix, slot)));
 }
@@ -1305,6 +1306,7 @@ function shareAliasedLocalBindings(
   site: ts.Node,
   owner: EffectOwner,
   slots = mutatedSlots(state, site, owner),
+  returned = false,
 ): boolean {
   const localOrigins = origins.filter((origin) => origin.startsWith("private:") || origin.startsWith("param:"));
   if (localOrigins.length === 0) {
@@ -1318,9 +1320,9 @@ function shareAliasedLocalBindings(
       if ([...fact.outer, ...fact.reachable].includes(origin)) {
         const writes = state.sharedLocalBindings.get(binding) ?? new Map();
         for (const slot of slots) {
-          const key = `${site.getStart()}/${origin}/${slot ?? "*"}`;
+          const key = `${site.getStart()}/${origin}/${slot ?? "*"}/${returned}`;
           changed ||= !sameSharedWrite(writes.get(key), site, fact);
-          writes.set(key, { fact, origin, site, slot });
+          writes.set(key, { fact, origin, site, slot, returned });
         }
         state.sharedLocalBindings.set(binding, writes);
       }
@@ -2384,18 +2386,33 @@ function escapeStorage(state: AnalysisState, facts: readonly StorageFact[], site
   }
 }
 
-/**
- * Exposes captured storage a closure returns to the closures beside it. Returning an owned local hands it over,
- * the exported-storage rule covers module storage, and a returned member may be a primitive, so only whole
- * captured bindings escape.
- */
+/** Exposes returned allocations and captured members to closures that can outlive their owner. */
 function escapeReturnedStorage(state: AnalysisState, facts: readonly StorageFact[], site: ts.Node, owner: EffectOwner): void {
-  const origins = joinStorageOrigins(facts.flatMap((fact) => [...fact.outer, ...fact.reachable])).filter((origin) => {
+  const origins: StorageOrigin[] = [];
+  for (const origin of joinStorageOrigins(facts.flatMap((fact) => [...fact.outer, ...fact.reachable]))) {
     const external = originBinding(state, origin);
-    return !!external && !isModuleScope(external.binding) && external.path.length === 0;
-  });
+    if (!external) {
+      if (origin.startsWith("private:")) { origins.push(origin); }
+      continue;
+    }
+    if (isModuleScope(external.binding) || invocationsRecorded(state, owner, external.binding)) { continue; }
+    if (external.path.length === 0) {
+      origins.push(origin);
+      continue;
+    }
+    shareReturnedMember(state, external, site);
+  }
   shareOrigins(state, origins);
-  shareAliasedLocalBindings(state, origins, site, owner, [undefined]);
+  shareAliasedLocalBindings(state, origins, site, owner, [undefined], true);
+}
+
+/** Resolves a returned member to the storage it holds and exposes that storage to closures beside the return. */
+function shareReturnedMember(state: AnalysisState, external: { binding: Binding; path: readonly string[] }, site: ts.Node): void {
+  const home = declaringOwner(state, external.binding);
+  if (!home || ts.isSourceFile(home)) { return; }
+  const fact = storageFactForBinding(state, state.summaries, external.binding, home, site);
+  const selected = external.path.reduce((value, slot) => memberStorageFact(value, slot), fact);
+  shareAliasedLocalBindings(state, [...selected.outer, ...selected.reachable], site, home, [undefined], true);
 }
 
 function isIteratorAdvance(state: AnalysisState, summaries: ReadonlyMap<EffectOwner, CallableSummary>, callee: ts.Expression): boolean {
