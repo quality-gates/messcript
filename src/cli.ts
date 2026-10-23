@@ -6,15 +6,8 @@ import { writeFileSync } from "node:fs";
 import type { Writable } from "node:stream";
 import packageMetadata from "../package.json";
 import { analyze } from "./analyzer";
-import {
-  formatAnsi,
-  formatGithub,
-  formatGitlab,
-  formatHtml,
-  type ColorMode,
-} from "./reporters/human";
-import { formatStructured } from "./reporters/structured";
-import { formatText } from "./reporters/text";
+import { formatReport, reportFormats } from "./reporters";
+import type { ColorMode } from "./reporters/human";
 import { applyRuleFilters, loadRulesets } from "./rulesets";
 
 const usage = "Usage: messcript <paths> <format> <ruleset[,ruleset...]> [options]";
@@ -308,7 +301,7 @@ export function runCli(argv: readonly string[], io: CliIo): number {
     }
 
     const format = parsedArguments.format?.toLowerCase();
-    if (!format || !["text", "json", "xml", "checkstyle", "sarif", "html", "ansi", "github", "gitlab"].includes(format)) {
+    if (!format || !reportFormats.includes(format)) {
       throw new CliError(`Unknown format: ${parsedArguments.format}`);
     }
 
@@ -336,23 +329,10 @@ export function runCli(argv: readonly string[], io: CliIo): number {
     });
     const useColor = parsedArguments.color === "always" ||
       (!parsedArguments.reportFile && parsedArguments.color === "auto" && Boolean((io.stdout as Writable & { isTTY?: boolean }).isTTY));
-    let report: string;
-    if (format === "text") {
-      report = useColor ? formatAnsi(result.findings, result.errors) : formatText(result.findings, result.errors);
-    } else if (format === "ansi") {
-      report = formatAnsi(result.findings, result.errors);
-    } else if (format === "html") {
-      report = formatHtml(result.findings, result.errors);
-    } else if (format === "github") {
-      report = formatGithub(result.findings, result.errors);
-    } else if (format === "gitlab") {
-      report = formatGitlab(result.findings, result.errors);
-    } else {
-      report = formatStructured(format, result.findings, result.errors, {
-        name: "messcript",
-        version: packageMetadata.version,
-      });
-    }
+    const report = formatReport(format, result, {
+      color: useColor,
+      tool: { name: "messcript", version: packageMetadata.version },
+    });
     if (parsedArguments.reportFile) {
       writeFileSync(parsedArguments.reportFile, report, "utf8");
     } else {

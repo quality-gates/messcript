@@ -5,6 +5,13 @@ import { test } from "node:test";
 import { formatAnsi, formatGithub, formatGitlab, formatHtml } from "../dist/reporters/human.js";
 import { formatCheckstyle, formatJson, formatSarif, formatStructured, formatXml } from "../dist/reporters/structured.js";
 import { formatText } from "../dist/reporters/text.js";
+import { formatReport, reportFormats } from "../dist/reporters/index.js";
+
+test("shared reports expose all formats and reject unknown names", () => {
+  assert.deepEqual([...reportFormats].sort(), ["ansi", "checkstyle", "github", "gitlab", "html", "json", "sarif", "text", "xml"]);
+  assert.throws(() => formatReport("unknown", { findings: [], errors: [] }, { color: false, tool }), /Unknown format: unknown/);
+  assert.throws(() => formatReport("toString", { findings: [], errors: [] }, { color: false, tool }), /Unknown format: toString/);
+});
 
 const root = process.cwd();
 const tool = { name: "messcript", version: "9.8.7" };
@@ -19,6 +26,43 @@ function error(path, line, column, message) {
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+for (const [format, render] of [
+  ["text", formatText],
+  ["ansi", formatAnsi],
+  ["html", formatHtml],
+  ["github", formatGithub],
+  ["gitlab", formatGitlab],
+  ["json", formatJson],
+  ["xml", formatXml],
+  ["checkstyle", formatCheckstyle],
+  ["sarif", formatSarif],
+]) {
+  test(`shared ${format} reports preserve the existing output contract`, () => {
+    const findings = [finding("a.ts", 2, 3, "Rule", "message", "context", 2, true)];
+    const errors = [error("broken.ts", 4, 5, "bad")];
+    const result = { findings, errors };
+    const expected = render(findings, errors, tool);
+    for (const color of [false, true]) {
+      const report = formatReport(format.toUpperCase(), result, { color, tool });
+      assert.equal(report, format === "text" && color ? formatAnsi(findings, errors) : expected);
+    }
+    assert.equal(formatReport(format, { findings: [], errors: [] }, { color: false, tool }), render([], [], tool));
+  });
+}
+
+for (const format of ["json", "xml", "checkstyle", "sarif"]) {
+  test(`structured ${format} compatibility preserves case handling and output`, () => {
+    const result = { findings: [finding("a.ts", 1, 2, "Rule", "message", "context")], errors: [error("bad.ts", 3, 4, "bad")] };
+    assert.equal(formatStructured(format.toUpperCase(), result.findings, result.errors, tool), formatReport(format, result, { color: false, tool }));
+  });
+}
+
+for (const format of ["text", "ansi", "html", "github", "gitlab", "constructor"]) {
+  test(`structured compatibility rejects ${format}`, () => {
+    assert.throws(() => formatStructured(format, [], [], tool), { message: `Unknown format: ${format}` });
+  });
 }
 
 test("text reports sort findings and errors and preserve empty output", () => {
