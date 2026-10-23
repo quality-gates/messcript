@@ -1084,6 +1084,23 @@ test("a clean mixed-source directory exits successfully", () => {
   assert.equal(result.stderr, "");
 });
 
+test("all report formats accept mixed case and preserve report-file output", () => {
+  const source = join(scanRoot, "src", "main.ts");
+  for (const format of ["text", "json", "xml", "checkstyle", "sarif", "html", "ansi", "github", "gitlab"]) {
+    const args = [source, format, "codesize", "--only", "CyclomaticComplexity"];
+    const printed = runCli(args);
+    const reportFile = join(workspaceRoot, `format-${format}.report`);
+    const filed = runCli([source, format.toUpperCase(), "codesize", "--only", "CyclomaticComplexity", "--report-file", reportFile]);
+    assert.equal(printed.status, 2, format);
+    assert.match(printed.stdout, /CyclomaticComplexity/, format);
+    assert.equal(printed.stderr, "", format);
+    assert.equal(filed.status, 2, format);
+    assert.equal(filed.stdout, "", format);
+    assert.equal(filed.stderr, "", format);
+    assert.equal(readFileSync(reportFile, "utf8"), printed.stdout, format);
+  }
+});
+
 test("JSON reports include metadata, findings, and processing errors", () => {
   const result = runCli([
     join(scanRoot, "src", "main.ts") + "," + join(scanRoot, "src", "broken.ts"),
