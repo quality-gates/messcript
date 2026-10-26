@@ -3776,7 +3776,10 @@ function executeInvocation(state: AnalysisState, summaries: ReadonlyMap<EffectOw
   const expression = unwrapExpression(call.expression);
   const facts = call.arguments.map((argument) => storageFactForExpression(state, summaries, argument, owner, call));
   if (bindInvocation(state, summaries, call, owner, active, expression, facts)) { return; }
-  const callee = invocationCallee(state, summaries, call, owner, active, expression);
+  let callee = invocationCallee(state, summaries, call, owner, active, expression);
+  if (ts.isElementAccessExpression(expression) && literalStorageKey(expression.argumentExpression) === undefined) {
+    callee = joinStorageFacts([callee, unknownFact]);
+  }
   const result = evaluateInvocation(state, summaries, {
     callee,
     facts,
