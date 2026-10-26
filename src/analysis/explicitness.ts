@@ -814,6 +814,15 @@ function hostStorageFact(state: AnalysisState, value: ts.Expression, owner: Effe
   return memberStorageFact(withInsertions(global, heap), `property:${name}`);
 }
 
+function certainClass(model: ScopeModel): StorageResolver["certainClass"] {
+  return (callee) => classTargets(model, callee).complete;
+}
+
+/** Resolves nothing beyond class identity, for storage read before any summary exists. */
+function unsummarizedStorageResolver(model: ScopeModel): StorageResolver {
+  return { call: () => undefined, insertions: () => [], certainClass: certainClass(model) };
+}
+
 function returnStorageResolver(
   state: AnalysisState,
   summaries: ReadonlyMap<EffectOwner, CallableSummary>,
@@ -837,6 +846,7 @@ function returnStorageResolver(
     },
     cache: useCache ? state.factCache : undefined,
     cycles: state.cycles,
+    certainClass: certainClass(state.model),
     call: (call, owner, site, seen) =>
       ts.isCallExpression(call) ? joinedReturnFactForCall(state, summaries, call, owner, seen) : undefined,
     insertions: (owner, site) => {
@@ -4624,7 +4634,7 @@ function summarizeCallable(
     const frame = { id: ownerKey(owner), context: [], owner };
     const store = new Map<string, StorageFact>();
     for (const binding of state.model.bindings.filter((item) => isParameterOf(item, owner))) {
-      store.set(cellKey(frame, binding), storageFactAt(state.model, binding, owner, owner));
+      store.set(cellKey(frame, binding), storageFactAt(state.model, binding, owner, owner, new Set(), unsummarizedStorageResolver(state.model)));
     }
     const invocation: InvocationState = { frame, store, arrays: new Map(), heap: [], storageWrites: [], arrayResets: [], registry: state.callableRegistry, values: new Map(), calls: new Map(), stack: [owner] };
     const summary = summarizeCallable({ ...state, invocation, factCache: new Map(), insertionCache: new Map() }, summaries, owner, includeThis);

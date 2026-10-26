@@ -1,11 +1,9 @@
-// messcript-disable CouplingBetweenObjects
 import * as storage from "./storage";
 import { type StorageFact } from "./storage";
 import ts from "typescript";
 import { unwrapExpression } from "../ast/expressions";
 import type { Binding, ScopeModel } from "../ast/scopes";
 import * as assignments from "./assignments";
-import { classTargets } from "./shapes";
 import { ownerParameters, type EffectOwner } from "./owners";
 
 /** Gives the storage a call returns, or undefined when the call is not resolved. */
@@ -28,6 +26,8 @@ export type StorageInsertion = ({ readonly kind: "cell" } | { readonly kind: "bi
 
 export type StorageResolver = {
   readonly call: CallStorageResolver;
+  /** Tells whether the constructor expression certainly names its declared class, so no decorator or reassignment replaces it. */
+  readonly certainClass: (callee: ts.Expression) => boolean;
   readonly binding?: (binding: Binding, owner: EffectOwner, site: ts.Node) => StorageFact | undefined;
   readonly callable?: Parameters<typeof storage.objectLiteralFact>[2];
   readonly value?: (expression: ts.Expression, owner: EffectOwner, site: ts.Node) => StorageFact | undefined;
@@ -266,7 +266,7 @@ function newFact(value: ts.Expression, context: FactContext): StorageFact {
   }
   const callee = unwrapExpression(value.expression);
   const global = storage.constructorName(value, context.model);
-  if (global === undefined ? !localConstructor(context.model, callee) : !FRESH_CONSTRUCTORS.has(global)) {
+  if (global === undefined ? !localConstructor(callee, context) : !FRESH_CONSTRUCTORS.has(global)) {
     return UNKNOWN_FACT;
   }
   return storage.constructorStorageFact(value, global, (part) => expressionFact(part, context));
@@ -277,10 +277,14 @@ function insertedFact(fact: StorageFact, context: FactContext): StorageFact {
   return storage.withInsertions(fact, insertions);
 }
 
-function localConstructor(model: ScopeModel, callee: ts.Expression): boolean {
-  const binding = ts.isIdentifier(callee) ? model.resolve(callee) : undefined;
+function localConstructor(callee: ts.Expression, context: FactContext): boolean {
+  const binding = ts.isIdentifier(callee) ? context.model.resolve(callee) : undefined;
   const declaration = binding?.declarations.length === 1 ? binding.declarations[0] : undefined;
-  return declaration?.kind === "class" && classTargets(model, callee).complete && !extendsClass(declaration.node) && !returnsFromConstructor(declaration.node);
+  return declaration?.kind === "class" && certainClass(callee, context.resolver) && !extendsClass(declaration.node) && !returnsFromConstructor(declaration.node);
+}
+
+function certainClass(callee: ts.Expression, resolver?: StorageResolver): boolean {
+  return resolver ? resolver.certainClass(callee) : false;
 }
 
 function extendsClass(node: ts.Node): boolean {

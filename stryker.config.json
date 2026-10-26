@@ -27,7 +27,8 @@
       "test/explicitness.test.mjs",
       "test/explicitness-provenance.test.mjs",
       "test/explicitness-dispatch.test.mjs",
-      "test/rule-registry.test.mjs"
+      "test/rule-registry.test.mjs",
+      "test/ownership.test.mjs"
     ]
   },
   "coverageAnalysis": "perTest",
