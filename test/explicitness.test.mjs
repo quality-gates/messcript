@@ -55,6 +55,27 @@ function messages(name, source, ruleset = "explicitness") {
   return JSON.parse(stdout.read()).findings.map((finding) => `${finding.line}:${finding.ruleName}: ${finding.message}`);
 }
 
+test("host global aliases report effects at use, not declaration", () => {
+  for (const [name, body, expected] of [
+    ["single", '  const out = console;\n  out.log("a");', [3]],
+    ["double", '  const a = console;\n  const b = a;\n  b.log("a");', [4]],
+    ["element", '  const out = console;\n  out["log"]("a");', [3]],
+    ["unused", '  const out = console;', []],
+  ]) {
+    assert.deepEqual(messages(`host-alias-${name}.ts`, `function outer() {\n${body}\n  return 1;\n}`),
+      expected.map((line) => `${line}:ImplicitOutput: The function outer() uses console, an implicit output.`));
+  }
+  assert.deepEqual(messages("host-alias-arrow.ts", `function outer() {
+  const out = console;
+  const log = () => out.log("a");
+  log();
+  return 1;
+}`), [
+    "3:ImplicitOutput: The arrow function log() uses console, an implicit output.",
+    "4:ImplicitOutput: The function outer() uses console, an implicit output.",
+  ]);
+});
+
 test("returned storage makes sibling closure reads implicit", () => {
   const cases = [
     ["e1", `export function outer() {
