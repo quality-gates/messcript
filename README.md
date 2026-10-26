@@ -107,6 +107,11 @@ exit code `2`.
 Command reference and report formats: [docs/usage.md](docs/usage.md).
 Homebrew release path: [docs/homebrew-release.md](docs/homebrew-release.md).
 
+`npm test` runs every `test/*.test.mjs` file. Stryker uses the same pattern,
+except for `mutation-pr.test.mjs` and `package-smoke.test.mjs`. These suites
+cover mutation tooling and package installation. They remain part of `npm test`.
+The exclusions are explicit in `stryker.config.json`.
+
 Mutation measurement uses Stryker (`npm run mutation`). Pull-request CI mutates
 only production files changed against `origin/main`
 (`npm run mutation:pr -- --base origin/main`).
