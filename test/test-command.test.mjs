@@ -32,6 +32,7 @@ test("npm test discovers top-level suites without shell globbing and propagates 
       'throw new Error("nested fixture ran");\n');
 
     const env = { ...process.env };
+    delete env.NODE_TEST_CONTEXT;
     if (process.platform === "win32") {
       delete env.npm_config_script_shell;
       delete env.NPM_CONFIG_SCRIPT_SHELL;

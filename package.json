@@ -20,7 +20,7 @@
     "mutation": "stryker run && node scripts/covered-msi.mjs coverage/mutation/mutation.json",
     "mutation:pr": "node scripts/mutation-pr.mjs",
     "prepack": "npm run build",
-    "test": "npm run build && node --test test/*.test.mjs"
+    "test": "npm run build && node scripts/run-tests.mjs"
   },
   "dependencies": {
     "typescript": "^5.9.2"
