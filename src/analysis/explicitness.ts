@@ -837,6 +837,7 @@ function returnStorageResolver(
     },
     cache: useCache ? state.factCache : undefined,
     cycles: state.cycles,
+    certainClass: (callee) => classTargets(state.model, callee).complete,
     call: (call, owner, site, seen) =>
       ts.isCallExpression(call) ? joinedReturnFactForCall(state, summaries, call, owner, seen) : undefined,
     insertions: (owner, site) => {
