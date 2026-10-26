@@ -2,6 +2,55 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { messages } from "./explicitness-support.mjs";
 
+for (const [name, copy] of [["spread", "[...rows]"], ["slice", "rows.slice()"]]) {
+  test(`copied container ${name} reports closure reads at the read and transfer sites`, () => {
+    const source = [
+      "const rows: number[][] = [[1], [0]];",
+      "function bump() {",
+      "  rows[0][0] = 2;",
+      "}",
+      "function outer() {",
+      `  const copy = ${copy};`,
+      "  const inner = () => copy[0][0];",
+      "  return inner();",
+      "}",
+    ].join("\n");
+    assert.deepEqual(messages(`copied-container-${name}.ts`, source), [
+      "3:ImplicitOutput: The function bump() writes rows, an implicit output.",
+      "7:ImplicitInput: The arrow function inner() reads rows, an implicit input.",
+      "8:ImplicitInput: The function outer() reads rows, an implicit input.",
+    ]);
+  });
+}
+
+test("helper-filled containers report the contents read, not the store", () => {
+  assert.deepEqual(messages("helper-filled-container.ts", `const shared = [1];
+function bump() { shared[0] = 2; }
+function add(list: number[][], item: number[]) { list.push(item); }
+function outer() {
+  const xs: number[][] = [];
+  add(xs, shared);
+  return xs[0][0];
+}
+`), [
+    "2:ImplicitOutput: The function bump() writes shared, an implicit output.",
+    "3:ImplicitOutput: The function add() mutates argument list, an implicit output.",
+    "7:ImplicitInput: The function outer() reads shared, an implicit input.",
+  ]);
+});
+
+test("writing a helper-wrapped container does not read its contents", () => {
+  assert.deepEqual(messages("helper-wrapped-container.ts", `const shared = [1];
+function wrap(item: number[]) { return [item]; }
+function outer() {
+  const xs = wrap(shared);
+  xs[0][0] = 5;
+}
+`), [
+    "5:ImplicitOutput: The function outer() mutates caller-owned value xs, an implicit output.",
+  ]);
+});
+
 const ownerMessages = (owner, name, source) => messages(name, source).filter((message) => message.includes(`${owner}()`));
 
 test("a closure that returns a shallow copy keeps captured slots private", () => {
