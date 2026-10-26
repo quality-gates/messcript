@@ -12,21 +12,7 @@
   "tsconfigFile": "tsconfig.json",
   "tap": {
     "testFiles": [
-      "test/cli.test.mjs",
-      "test/metrics.test.mjs",
-      "test/ast-metrics.test.mjs",
-      "test/reporters.test.mjs",
-      "test/naming-boolean.test.mjs",
-      "test/ignore-pattern.test.mjs",
-      "test/unused.test.mjs",
-      "test/structural.test.mjs",
-      "test/source-comments.test.mjs",
-      "test/discovery.test.mjs",
-      "test/rulesets.test.mjs",
-      "test/overload-naming.test.mjs",
-      "test/explicitness.test.mjs",
-      "test/rule-registry.test.mjs",
-      "test/executable-regions.test.mjs"
+      "test/!(mutation-pr|package-smoke).test.mjs"
     ]
   },
   "coverageAnalysis": "perTest",
