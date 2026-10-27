@@ -1,6 +1,7 @@
 // messcript-disable ConstantNamingConventions
 // messcript-disable CouplingBetweenObjects
 import ts from "typescript";
+import { classMethodKey } from "./overloads";
 
 export type ClassLike = ts.ClassDeclaration | ts.ClassExpression;
 
@@ -61,12 +62,6 @@ export function isParameterProperty(node: ts.ParameterDeclaration): boolean {
   ]);
 }
 
-function sameMethodName(left: ClassMethod, right: ClassMethod, sourceFile: ts.SourceFile): boolean {
-  const leftName = memberName(left, sourceFile);
-  const rightName = memberName(right, sourceFile);
-  return leftName !== undefined && leftName === rightName;
-}
-
 export function forEachClass(sourceFile: ts.SourceFile, callback: (node: ClassLike) => void): void {
   function visit(node: ts.Node): void {
     if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
@@ -107,7 +102,8 @@ export function getClassMethods(node: ClassLike): ClassMethod[] {
     }
     return !methods.slice(index + 1).some(
       (candidate) =>
-        ts.isMethodDeclaration(candidate) && sameMethodName(method, candidate, node.getSourceFile()),
+        ts.isMethodDeclaration(candidate) &&
+        classMethodKey(method, node.getSourceFile()) === classMethodKey(candidate, node.getSourceFile()),
     );
   });
 }

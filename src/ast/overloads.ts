@@ -44,6 +44,18 @@ function isStaticMember(node: ts.MethodDeclaration): boolean {
   return (node.modifiers ?? []).some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword);
 }
 
+export function classMethodKey(method: ts.MethodDeclaration, sourceFile: ts.SourceFile): string {
+  const name = method.name;
+  const text =
+    ts.isIdentifier(name) ||
+    ts.isStringLiteral(name) ||
+    ts.isNumericLiteral(name) ||
+    ts.isNoSubstitutionTemplateLiteral(name)
+      ? name.text
+      : name.getText(sourceFile);
+  return `${isStaticMember(method) ? "static" : "instance"}:${text}`;
+}
+
 function memberNameText(name: ts.PropertyName | ts.BindingName | undefined, sourceFile: ts.SourceFile): string {
   return name ? name.getText(sourceFile) : "";
 }
@@ -152,9 +164,7 @@ function groupClassMembers(
 
   for (const member of members) {
     if (ts.isMethodDeclaration(member)) {
-      const isStatic = isStaticMember(member);
-      const name = memberNameText(member.name, sourceFile);
-      const key = isStatic ? `static:${name}` : `instance:${name}`;
+      const key = classMethodKey(member, sourceFile);
       const list = methodGroups.get(key);
       if (list) {
         list.push(member);
