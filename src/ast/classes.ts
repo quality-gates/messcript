@@ -90,22 +90,23 @@ export function getClassMethods(node: ClassLike): ClassMethod[] {
       ts.isSetAccessorDeclaration(member),
   );
 
-  return methods.filter((method, index) => {
+  const seenMethodKeys = new Set<string>();
+  let seenConstructor = false;
+  const selected: ClassMethod[] = [];
+  for (let index = methods.length - 1; index >= 0; index--) {
+    const method = methods[index];
     if (ts.isConstructorDeclaration(method)) {
-      if (method.body) {
-        return true;
-      }
-      return !methods.slice(index + 1).some((candidate) => ts.isConstructorDeclaration(candidate));
+      if (method.body || !seenConstructor) selected.push(method);
+      seenConstructor = true;
+    } else if (ts.isMethodDeclaration(method)) {
+      const key = classMethodKey(method, node.getSourceFile());
+      if (method.body || !seenMethodKeys.has(key)) selected.push(method);
+      seenMethodKeys.add(key);
+    } else {
+      selected.push(method);
     }
-    if (!ts.isMethodDeclaration(method) || method.body) {
-      return true;
-    }
-    return !methods.slice(index + 1).some(
-      (candidate) =>
-        ts.isMethodDeclaration(candidate) &&
-        classMethodKey(method, node.getSourceFile()) === classMethodKey(candidate, node.getSourceFile()),
-    );
-  });
+  }
+  return selected.reverse();
 }
 
 export function getClassFields(node: ClassLike): ClassField[] {
