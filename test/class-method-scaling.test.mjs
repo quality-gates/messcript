@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
 import { test } from "node:test";
 import ts from "typescript";
-
-const require = createRequire(import.meta.url);
-const overloads = require("../dist/ast/overloads.js");
-const { getClassMethods } = require("../dist/ast/classes.js");
+import { getClassMethods } from "../dist/ast/classes.js";
 
 function parse(source) {
   return ts.createSourceFile("fixture.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
@@ -40,24 +36,19 @@ class Example {
   ]);
 });
 
-test("distinct ambient methods require linear overload key work", () => {
-  const original = overloads.classMethodKey;
-  let calls = 0;
-  overloads.classMethodKey = (...args) => {
-    calls++;
-    return original(...args);
-  };
-  try {
-    for (const count of [20, 40, 80]) {
-      const declarations = Array.from({ length: count }, (_, i) => `method${i}(): void;`).join("\n");
-      const file = parse(`declare class Api { ${declarations} }`);
-      calls = 0;
-      const methods = getClassMethods(file.statements[0]);
-      assert.deepEqual(methods.map((method) => method.name.text),
-        Array.from({ length: count }, (_, i) => `method${i}`));
-      assert.ok(calls <= count * 2, `${count} methods required ${calls} key calls`);
+test("distinct ambient methods require linear name lookup work", () => {
+  for (const count of [20, 40, 80]) {
+    const declarations = Array.from({ length: count }, (_, i) => `method${i}(): void;`).join("\n");
+    const file = parse(`declare class Api { ${declarations} }`);
+    let reads = 0;
+    for (const member of file.statements[0].members) {
+      const name = member.name;
+      Object.defineProperty(member, "name", { get() { reads++; return name; } });
     }
-  } finally {
-    overloads.classMethodKey = original;
+    const methods = getClassMethods(file.statements[0]);
+    const lookupReads = reads;
+    assert.deepEqual(methods.map((method) => method.name.text),
+      Array.from({ length: count }, (_, i) => `method${i}`));
+    assert.ok(lookupReads <= count * 2, `${count} methods required ${lookupReads} name reads`);
   }
 });
