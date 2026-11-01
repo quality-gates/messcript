@@ -156,6 +156,36 @@ class Service {
   booleanGetProperties.checkParameterizedMethods = false;
 });
 
+test("nested nullable boolean unions are classified without repeated leaf visits", () => {
+  for (const depth of [3, 6, 9, 12]) {
+    let type = "boolean";
+    for (let i = 0; i < depth; i++) type = `(${type} | undefined)`;
+    const file = sourceFile(`export function probe(flag: ${type}) {}`);
+    let leaf = file.statements[0].parameters[0].type;
+    while (leaf.kind !== ts.SyntaxKind.BooleanKeyword) {
+      leaf = ts.isParenthesizedTypeNode(leaf) ? leaf.type : leaf.types[0];
+    }
+    let reads = 0;
+    Object.defineProperty(leaf, "kind", {
+      configurable: true,
+      get() { reads++; return ts.SyntaxKind.BooleanKeyword; },
+    });
+    assert.deepEqual(names(findBooleanArgumentFlag(file)), ["flag"]);
+    assert.ok(reads <= 16, `depth ${depth} visited the boolean leaf ${reads} times`);
+  }
+});
+
+test("nested boolean unions preserve flag and return inference", () => {
+  const file = sourceFile(`
+export function flags(yes: ((boolean | undefined) | null), no: ((boolean | undefined) | string)) {}
+export function getYes(): ((true | undefined) | null) { throw 0; }
+export function getNo(): ((boolean | undefined) | string) { throw 0; }
+export function getNullish(): null | undefined { throw 0; }
+`);
+  assert.deepEqual(names(findBooleanArgumentFlag(file)), ["yes"]);
+  assert.deepEqual(names(findBooleanGetMethodName(file)), ["getYes"]);
+});
+
 test("boolean rules recognize boolean literal types", () => {
   const file = sourceFile(`
 export function toggle(flag: true) {}
