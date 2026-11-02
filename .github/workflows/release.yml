@@ -66,6 +66,8 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
       - name: Run the complete test suite
+        env:
+          NODE_OPTIONS: --test-reporter=tap
         run: npm test
       - name: Check TypeScript
         run: npm run check
