@@ -138,13 +138,28 @@ function deduplicateBindings(bindings: readonly NamedBinding[], sourceFile: ts.S
   });
 }
 
-export function collectVariables(sourceFile: ts.SourceFile): NamedBinding[] {
+// messcript-disable-next-line GlobalVariable
+const NAME_CACHES = {
+  variables: new WeakMap<ts.SourceFile, readonly NamedBinding[]>(),
+  parameters: new WeakMap<ts.SourceFile, readonly NamedBinding[]>(),
+  properties: new WeakMap<ts.SourceFile, readonly NamedBinding[]>(),
+  bindings: new WeakMap<ts.SourceFile, readonly NamedBinding[]>(),
+  constants: new WeakMap<ts.SourceFile, readonly NamedBinding[]>(),
+};
+
+export function collectVariables(sourceFile: ts.SourceFile): readonly NamedBinding[] {
+  const cached = NAME_CACHES.variables.get(sourceFile);
+  if (cached !== undefined) return cached;
   const variables: NamedBinding[] = [];
   addVariableDeclarations(variables, sourceFile);
-  return deduplicateBindings(variables, sourceFile);
+  const result = deduplicateBindings(variables, sourceFile);
+  NAME_CACHES.variables.set(sourceFile, result);
+  return result;
 }
 
-export function collectParameters(sourceFile: ts.SourceFile): NamedBinding[] {
+export function collectParameters(sourceFile: ts.SourceFile): readonly NamedBinding[] {
+  const cached = NAME_CACHES.parameters.get(sourceFile);
+  if (cached !== undefined) return cached;
   const parameters: NamedBinding[] = [];
   const analysis = analyzeOverloads(sourceFile);
   for (const group of analysis.parameterizedGroups) {
@@ -165,10 +180,14 @@ export function collectParameters(sourceFile: ts.SourceFile): NamedBinding[] {
       }
     }
   }
-  return deduplicateBindings(parameters, sourceFile);
+  const result = deduplicateBindings(parameters, sourceFile);
+  NAME_CACHES.parameters.set(sourceFile, result);
+  return result;
 }
 
-export function collectProperties(sourceFile: ts.SourceFile): NamedBinding[] {
+export function collectProperties(sourceFile: ts.SourceFile): readonly NamedBinding[] {
+  const cached = NAME_CACHES.properties.get(sourceFile);
+  if (cached !== undefined) return cached;
   const properties: NamedBinding[] = [];
   forEachClass(sourceFile, (node) => addClassFields(properties, node, sourceFile));
   function visit(node: ts.Node): void {
@@ -178,7 +197,9 @@ export function collectProperties(sourceFile: ts.SourceFile): NamedBinding[] {
     ts.forEachChild(node, visit);
   }
   visit(sourceFile);
-  return deduplicateBindings(properties, sourceFile);
+  const result = deduplicateBindings(properties, sourceFile);
+  NAME_CACHES.properties.set(sourceFile, result);
+  return result;
 }
 
 function addTypeParameters(identifiers: NamedBinding[], sourceFile: ts.SourceFile): void {
@@ -195,13 +216,17 @@ function addTypeParameters(identifiers: NamedBinding[], sourceFile: ts.SourceFil
   visit(sourceFile);
 }
 
-export function collectBindings(sourceFile: ts.SourceFile): NamedBinding[] {
+export function collectBindings(sourceFile: ts.SourceFile): readonly NamedBinding[] {
+  const cached = NAME_CACHES.bindings.get(sourceFile);
+  if (cached !== undefined) return cached;
   const typeParameters: NamedBinding[] = [];
   addTypeParameters(typeParameters, sourceFile);
-  return deduplicateBindings(
+  const result = deduplicateBindings(
     [...collectVariables(sourceFile), ...collectParameters(sourceFile), ...collectProperties(sourceFile), ...typeParameters],
     sourceFile,
   );
+  NAME_CACHES.bindings.set(sourceFile, result);
+  return result;
 }
 
 function namedTypeName(node: NamedType, sourceFile: ts.SourceFile): string | undefined {
@@ -294,7 +319,9 @@ export function classifyName(name: string, node: ts.Node): NameConvention {
   return kind !== undefined && /^[A-Z]/.test(name) ? "component" : "ordinary";
 }
 
-export function collectSemanticConstants(sourceFile: ts.SourceFile): NamedBinding[] {
+export function collectSemanticConstants(sourceFile: ts.SourceFile): readonly NamedBinding[] {
+  const cached = NAME_CACHES.constants.get(sourceFile);
+  if (cached !== undefined) return cached;
   const constants: NamedBinding[] = [];
   function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
     const modifiers = (node as ts.Node & { modifiers?: readonly ts.Modifier[] }).modifiers;
@@ -319,6 +346,7 @@ export function collectSemanticConstants(sourceFile: ts.SourceFile): NamedBindin
     ts.forEachChild(node, visit);
   }
   visit(sourceFile);
+  NAME_CACHES.constants.set(sourceFile, constants);
   return constants;
 }
 

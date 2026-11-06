@@ -132,6 +132,19 @@ const expressionFunction = function expressionFunction() {};
   assert.equal(getFunctionContext(allFunctions.find((node) => ts.isArrowFunction(node)), file), "arrow function arrow()");
 });
 
+test("name collections are reused per source file without sharing between files", () => {
+  const text = "const value = 1; function f<T>(argument: T) { return { property: argument }; }";
+  const first = sourceFile(text);
+  const second = sourceFile(text);
+  for (const collect of [collectVariables, collectParameters, collectProperties, collectBindings, collectSemanticConstants]) {
+    const result = collect(first);
+    assert.ok(result.length > 0);
+    assert.strictEqual(collect(first), result);
+    assert.notStrictEqual(collect(second), result);
+    assert.deepEqual(names(collect(second)), names(result));
+  }
+});
+
 test("name collection covers bindings, signatures, types, constants, and React components", () => {
   const file = sourceFile(`
 const top = 1;
