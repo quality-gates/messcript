@@ -6,6 +6,7 @@ exercised, and links the issues it filed. Evidence for a report lives under
 
 | Date | Version | Report | Issues filed |
 |---|---|---|---|
+| 2026-11-09 | 0.1.21 (`fb11fcd`) | [2026-11-09-messcript.md](2026-11-09-messcript.md) | None |
 | 2026-11-01 | 0.1.19 (`c34600b`) | [2026-11-01-messcript.md](2026-11-01-messcript.md) | None |
 | 2026-10-10 | 0.1.17 (`c951bf2`) | [2026-10-10-messcript.md](2026-10-10-messcript.md) | [#303](https://github.com/quality-gates/messcript/issues/303), [#304](https://github.com/quality-gates/messcript/issues/304) |
 | 2026-10-03 | 0.1.15 (`c920402`) | [2026-10-03-messcript.md](2026-10-03-messcript.md) | [#281](https://github.com/quality-gates/messcript/issues/281), [#282](https://github.com/quality-gates/messcript/issues/282), [#283](https://github.com/quality-gates/messcript/issues/283), [#284](https://github.com/quality-gates/messcript/issues/284), [#285](https://github.com/quality-gates/messcript/issues/285) |
