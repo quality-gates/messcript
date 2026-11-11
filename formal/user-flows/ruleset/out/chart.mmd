@@ -1,0 +1,37 @@
+---
+title: "Custom XML Ruleset Configuration User Flow"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: Authoring
+    lg1: Validation
+    lg2: Success
+    lg3: Failure
+  }
+  class lg0 blue
+  class lg1 yellow
+  class lg2 teal
+  class lg3 pink
+  s0: Drafting team-policy.xml
+  s1: Referencing base ruleset (typescript)
+  s2: Excluding rules (#60;exclude name='...'/>)
+  s3: Validating XML and checking cycles
+  s4: Custom policy active for scan
+  s5: Configuration error reported
+  s6: Tuning thresholds (#60;property value='...'/>)
+  [*] --> s0
+  s0 --> s1: add #60;rule ref='typescript'/>
+  s1 --> s2: add #60;exclude name='...'/>
+  s1 --> s3: invoke messcript with xml
+  s2 --> s3: invoke messcript with xml
+  s2 --> s6: set custom threshold
+  s3 --> s4: xml valid, no cycles
+  s3 --> s5: parse error or circular reference
+  s6 --> s3: invoke messcript with xml
+  class s0 blue
+  class s1 blue
+  class s2 blue
+  class s3 yellow
+  class s4 teal
+  class s5 pink
+  class s6 blue

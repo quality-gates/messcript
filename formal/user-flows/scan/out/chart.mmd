@@ -1,0 +1,43 @@
+---
+title: "messcript CLI Analysis Flow"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: Setup
+    lg1: Pipeline
+    lg2: Exit
+  }
+  class lg0 blue
+  class lg1 teal
+  class lg2 purple
+  s0: Ready to run
+  s1: Parsing CLI arguments
+  s2: Discovering source files
+  s3: Loading rulesets
+  s4: Analyzing AST
+  s5: Filtering suppressions
+  s6: Formatting report
+  s7: Operational error exit (code 1)
+  s8: Clean exit (code 0)
+  s9: Violations reported (code 2)
+  [*] --> s0
+  s0 --> s1: run messcript CLI
+  s1 --> s2: options validated
+  s2 --> s3: walk directory tree
+  s3 --> s4: merge ruleset definitions
+  s4 --> s5: no violations found or violations detected
+  s4 --> s6: file syntax error
+  s5 --> s6: apply pragma masks
+  s6 --> s7: render report
+  s6 --> s8: render report
+  s6 --> s9: render report
+  class s0 blue
+  class s1 teal
+  class s2 teal
+  class s3 teal
+  class s4 teal
+  class s5 teal
+  class s6 teal
+  class s7 purple
+  class s8 purple
+  class s9 purple
