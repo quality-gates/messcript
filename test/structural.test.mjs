@@ -1269,6 +1269,30 @@ export function realLog() {
 });
 
 test("exit-expression resolves deep property chains linearly without exponential stalls", () => {
+  function countExpressionAccesses(sourceNode, fn) {
+    let visits = 0;
+    function instrument(node) {
+      if ("expression" in node) {
+        let expr = node.expression;
+        Object.defineProperty(node, "expression", {
+          get() {
+            visits++;
+            return expr;
+          },
+          set(v) {
+            expr = v;
+          },
+          configurable: true,
+          enumerable: true,
+        });
+      }
+      ts.forEachChild(node, instrument);
+    }
+    instrument(sourceNode);
+    fn();
+    return visits;
+  }
+
   for (const depth of [16, 24, 32]) {
     const file = sourceFile(`
 export function deepChain() {
@@ -1281,14 +1305,16 @@ export function deepLog() {
   window.globalThis.console.log("hello");
 }
 `);
-    const start = performance.now();
-    const exitFindings = findExitExpression(file);
-    const devFindings = findDevelopmentCodeFragment(file);
-    const elapsedMs = performance.now() - start;
+    let exitFindings;
+    let devFindings;
+    const visits = countExpressionAccesses(file, () => {
+      exitFindings = findExitExpression(file);
+      devFindings = findDevelopmentCodeFragment(file);
+    });
 
     assert.deepEqual(exitFindings.map((finding) => finding.context), ["function deepExit()"]);
     assert.deepEqual(devFindings.map((finding) => finding.context), ["function deepLog()"]);
-    assert.ok(elapsedMs < 100, `depth ${depth} took ${elapsedMs.toFixed(2)}ms`);
+    assert.ok(visits <= depth * 25, `depth ${depth} required ${visits} expression accesses (expected <= ${depth * 25})`);
   }
 });
 
@@ -1838,50 +1864,78 @@ function testConditions(n, y) {
 });
 
 test("findGlobalVariable performs linear candidate lookup work for distinct-name bindings and distinct static fields", () => {
+  function trackCandidateInspections(fn) {
+    let inspections = 0;
+    const originalGet = Map.prototype.get;
+    const originalFilter = Array.prototype.filter;
+    const originalIterator = Array.prototype[Symbol.iterator];
+
+    Map.prototype.get = function (...args) {
+      inspections++;
+      return originalGet.apply(this, args);
+    };
+
+    Array.prototype.filter = function (predicate, thisArg) {
+      if (this.length > 5) {
+        return originalFilter.call(this, (val, idx, arr) => {
+          inspections++;
+          return predicate.call(thisArg, val, idx, arr);
+        }, thisArg);
+      }
+      return originalFilter.call(this, predicate, thisArg);
+    };
+
+    Array.prototype[Symbol.iterator] = function () {
+      const iterator = originalIterator.call(this);
+      if (this.length > 5) {
+        return {
+          next() {
+            const res = iterator.next();
+            if (!res.done) {
+              inspections++;
+            }
+            return res;
+          },
+          [Symbol.iterator]() {
+            return this;
+          },
+        };
+      }
+      return iterator;
+    };
+
+    try {
+      const result = fn();
+      return { result, inspections };
+    } finally {
+      Map.prototype.get = originalGet;
+      Array.prototype.filter = originalFilter;
+      Array.prototype[Symbol.iterator] = originalIterator;
+    }
+  }
+
   for (const count of [20, 40, 80]) {
     const files = Array.from({ length: count }, (_, i) =>
       sourceFile(`export let value${i} = 0; value${i}++;`, `file${i}.ts`),
     );
-    let lookups = 0;
-    const originalGet = Map.prototype.get;
-    Map.prototype.get = function (...args) {
-      lookups++;
-      return originalGet.apply(this, args);
-    };
-    let findings;
-    try {
-      findings = findGlobalVariable(files);
-    } finally {
-      Map.prototype.get = originalGet;
-    }
+    const { result: findings, inspections } = trackCandidateInspections(() => findGlobalVariable(files));
     assert.deepEqual(
       findings.map((f) => f.context),
       Array.from({ length: count }, (_, i) => `global variable value${i}`),
     );
-    assert.ok(lookups <= count * 2, `${count} bindings required ${lookups} candidate lookups`);
+    assert.ok(inspections <= count * 6, `${count} bindings required ${inspections} candidate inspections`);
   }
 
   for (const count of [20, 40, 80]) {
     const files = Array.from({ length: count }, (_, i) =>
       sourceFile(`export class Class${i} { static prop${i} = 0; } Class${i}.prop${i}++;`, `file${i}.ts`),
     );
-    let lookups = 0;
-    const originalGet = Map.prototype.get;
-    Map.prototype.get = function (...args) {
-      lookups++;
-      return originalGet.apply(this, args);
-    };
-    let findings;
-    try {
-      findings = findGlobalVariable(files);
-    } finally {
-      Map.prototype.get = originalGet;
-    }
+    const { result: findings, inspections } = trackCandidateInspections(() => findGlobalVariable(files));
     assert.deepEqual(
       findings.map((f) => f.context),
       Array.from({ length: count }, (_, i) => `static field prop${i}`),
     );
-    assert.ok(lookups <= count * 3, `${count} static fields required ${lookups} candidate lookups`);
+    assert.ok(inspections <= count * 6, `${count} static fields required ${inspections} candidate inspections`);
   }
 });
 
