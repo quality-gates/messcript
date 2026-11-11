@@ -1836,3 +1836,52 @@ function testConditions(n, y) {
   assert.ok(findings.every((f) => f.context === "function testConditions()"));
   assert.ok(messages(findings).every((message) => /Avoid assigning values to variables in if clauses and the like/.test(message)));
 });
+
+test("findGlobalVariable performs linear candidate lookup work for distinct-name bindings and distinct static fields", () => {
+  for (const count of [20, 40, 80]) {
+    const files = Array.from({ length: count }, (_, i) =>
+      sourceFile(`export let value${i} = 0; value${i}++;`, `file${i}.ts`),
+    );
+    let lookups = 0;
+    const originalGet = Map.prototype.get;
+    Map.prototype.get = function (...args) {
+      lookups++;
+      return originalGet.apply(this, args);
+    };
+    let findings;
+    try {
+      findings = findGlobalVariable(files);
+    } finally {
+      Map.prototype.get = originalGet;
+    }
+    assert.deepEqual(
+      findings.map((f) => f.context),
+      Array.from({ length: count }, (_, i) => `global variable value${i}`),
+    );
+    assert.ok(lookups <= count * 2, `${count} bindings required ${lookups} candidate lookups`);
+  }
+
+  for (const count of [20, 40, 80]) {
+    const files = Array.from({ length: count }, (_, i) =>
+      sourceFile(`export class Class${i} { static prop${i} = 0; } Class${i}.prop${i}++;`, `file${i}.ts`),
+    );
+    let lookups = 0;
+    const originalGet = Map.prototype.get;
+    Map.prototype.get = function (...args) {
+      lookups++;
+      return originalGet.apply(this, args);
+    };
+    let findings;
+    try {
+      findings = findGlobalVariable(files);
+    } finally {
+      Map.prototype.get = originalGet;
+    }
+    assert.deepEqual(
+      findings.map((f) => f.context),
+      Array.from({ length: count }, (_, i) => `static field prop${i}`),
+    );
+    assert.ok(lookups <= count * 3, `${count} static fields required ${lookups} candidate lookups`);
+  }
+});
+
