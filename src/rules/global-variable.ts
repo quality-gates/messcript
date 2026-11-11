@@ -212,6 +212,33 @@ function collectStaticFields(sourceFile: ts.SourceFile): StaticField[] {
   return fields;
 }
 
+function indexBindingsByName(bindings: readonly Binding[]): Map<string, Binding[]> {
+  const index = new Map<string, Binding[]>();
+  for (const binding of bindings) {
+    const list = index.get(binding.name);
+    if (list) {
+      list.push(binding);
+    } else {
+      index.set(binding.name, [binding]);
+    }
+  }
+  return index;
+}
+
+function indexFieldsByKey(fields: readonly StaticField[]): Map<string, StaticField[]> {
+  const index = new Map<string, StaticField[]>();
+  for (const field of fields) {
+    const key = `${field.className}#${field.name}`;
+    const list = index.get(key);
+    if (list) {
+      list.push(field);
+    } else {
+      index.set(key, [field]);
+    }
+  }
+  return index;
+}
+
 function assignmentOperator(kind: ts.SyntaxKind): boolean {
   return [
     ts.SyntaxKind.EqualsToken,
@@ -322,8 +349,12 @@ function localBindingVisible(name: string, target: ts.Node, functionNode: Functi
   return visible;
 }
 
-function globalBindingFor(name: string, node: ts.Node, bindings: readonly Binding[]): Binding | undefined {
-  const candidates = bindings.filter((binding) => binding.name === name);
+function globalBindingFor(
+  name: string,
+  node: ts.Node,
+  bindingsByName: ReadonlyMap<string, readonly Binding[]>,
+): Binding | undefined {
+  const candidates = bindingsByName.get(name) ?? [];
   if (!enclosingFunction(node)) {
     return candidates.find((binding) =>
       binding.sourceFile === node.getSourceFile() ||
@@ -358,8 +389,13 @@ function isObjectAssign(node: ts.Expression): boolean {
 
 const mutatingMethods = new Set(["add", "copywithin", "delete", "fill", "pop", "push", "reverse", "set", "shift", "sort", "splice", "unshift"]);
 
-function markBindingMutation(node: ts.Node, name: string, bindings: readonly Binding[], mutated: Set<Binding>): void {
-  const binding = globalBindingFor(name, node, bindings);
+function markBindingMutation(
+  node: ts.Node,
+  name: string,
+  bindingsByName: ReadonlyMap<string, readonly Binding[]>,
+  mutated: Set<Binding>,
+): void {
+  const binding = globalBindingFor(name, node, bindingsByName);
   if (binding) {
     mutated.add(binding);
   }
@@ -369,29 +405,25 @@ function markBindingMutation(node: ts.Node, name: string, bindings: readonly Bin
 function markPropertyMutation(
   node: ts.PropertyAccessExpression | ts.ElementAccessExpression,
   sourceFile: ts.SourceFile,
-  bindings: readonly Binding[],
-  fields: readonly StaticField[],
+  bindingsByName: ReadonlyMap<string, readonly Binding[]>,
+  fieldsByKey: ReadonlyMap<string, readonly StaticField[]>,
   mutatedBindings: Set<Binding>,
   mutatedFields: Set<StaticField>,
 ): void {
   const receiver = receiverName(node.expression);
   if (receiver) {
-    markBindingMutation(node, receiver, bindings, mutatedBindings);
+    markBindingMutation(node, receiver, bindingsByName, mutatedBindings);
     const qualified = staticReceiver(node);
     if (qualified) {
-      for (const field of fields) {
-        if (field.className === qualified.className && field.name === qualified.fieldName) {
-          mutatedFields.add(field);
-        }
+      for (const field of fieldsByKey.get(`${qualified.className}#${qualified.fieldName}`) ?? []) {
+        mutatedFields.add(field);
       }
     }
   }
   const staticThis = staticThisReceiver(node, sourceFile);
   if (staticThis) {
-    for (const field of fields) {
-      if (field.className === staticThis.className && field.name === staticThis.fieldName) {
-        mutatedFields.add(field);
-      }
+    for (const field of fieldsByKey.get(`${staticThis.className}#${staticThis.fieldName}`) ?? []) {
+      mutatedFields.add(field);
     }
   }
 }
@@ -441,16 +473,16 @@ function extractDestructuringTargets(
 
 function observeMutations(
   sourceFile: ts.SourceFile,
-  bindings: readonly Binding[],
-  fields: readonly StaticField[],
+  bindingsByName: ReadonlyMap<string, readonly Binding[]>,
+  fieldsByKey: ReadonlyMap<string, readonly StaticField[]>,
   mutatedBindings: Set<Binding>,
   mutatedFields: Set<StaticField>,
 ): void {
   function markWriteTarget(target: ts.Identifier | ts.PropertyAccessExpression | ts.ElementAccessExpression): void {
     if (ts.isIdentifier(target)) {
-      markBindingMutation(target, target.text, bindings, mutatedBindings);
+      markBindingMutation(target, target.text, bindingsByName, mutatedBindings);
     } else {
-      markPropertyMutation(target, sourceFile, bindings, fields, mutatedBindings, mutatedFields);
+      markPropertyMutation(target, sourceFile, bindingsByName, fieldsByKey, mutatedBindings, mutatedFields);
     }
   }
 
@@ -466,9 +498,9 @@ function observeMutations(
     if (updated || ts.isDeleteExpression(node)) {
       const operand = unwrapExpression(ts.isDeleteExpression(node) ? node.expression : node.operand);
       if (ts.isIdentifier(operand)) {
-        markBindingMutation(operand, operand.text, bindings, mutatedBindings);
+        markBindingMutation(operand, operand.text, bindingsByName, mutatedBindings);
       } else if (ts.isPropertyAccessExpression(operand) || ts.isElementAccessExpression(operand)) {
-        markPropertyMutation(operand, sourceFile, bindings, fields, mutatedBindings, mutatedFields);
+        markPropertyMutation(operand, sourceFile, bindingsByName, fieldsByKey, mutatedBindings, mutatedFields);
       }
     }
     if (
@@ -479,16 +511,16 @@ function observeMutations(
       if (method && mutatingMethods.has(method)) {
         const receiver = unwrapExpression(node.expression.expression);
         if (ts.isIdentifier(receiver)) {
-          markBindingMutation(node, receiver.text, bindings, mutatedBindings);
+          markBindingMutation(node, receiver.text, bindingsByName, mutatedBindings);
         } else if (ts.isPropertyAccessExpression(receiver) || ts.isElementAccessExpression(receiver)) {
-          markPropertyMutation(receiver, sourceFile, bindings, fields, mutatedBindings, mutatedFields);
+          markPropertyMutation(receiver, sourceFile, bindingsByName, fieldsByKey, mutatedBindings, mutatedFields);
         }
       }
     }
     if (ts.isCallExpression(node) && isObjectAssign(node.expression)) {
       const target = node.arguments[0] && unwrapExpression(node.arguments[0]);
       if (target && ts.isIdentifier(target)) {
-        markBindingMutation(target, target.text, bindings, mutatedBindings);
+        markBindingMutation(target, target.text, bindingsByName, mutatedBindings);
       }
     }
     ts.forEachChild(node, visit);
@@ -502,10 +534,12 @@ export function findGlobalVariable(
 ): Finding[] {
   const bindings = sourceFiles.flatMap((sourceFile) => collectBindings(sourceFile));
   const fields = sourceFiles.flatMap((sourceFile) => collectStaticFields(sourceFile));
+  const bindingsByName = indexBindingsByName(bindings);
+  const fieldsByKey = indexFieldsByKey(fields);
   const mutatedBindings = new Set<Binding>();
   const mutatedFields = new Set<StaticField>();
   for (const sourceFile of sourceFiles) {
-    observeMutations(sourceFile, bindings, fields, mutatedBindings, mutatedFields);
+    observeMutations(sourceFile, bindingsByName, fieldsByKey, mutatedBindings, mutatedFields);
   }
 
   const findings: Finding[] = [];
