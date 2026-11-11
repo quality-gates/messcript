@@ -1,0 +1,33 @@
+---
+title: "In-Source Comment Suppression User Flow"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: Detection
+    lg1: Authoring
+    lg2: Output
+  }
+  class lg0 orange
+  class lg1 teal
+  class lg2 purple
+  s0: Violation detected in source
+  s1: Single line suppressed
+  s2: Region disable active
+  s3: Region enable restored
+  s4: Clean report (violation hidden)
+  s5: Strict report (flagged as [suppressed])
+  [*] --> s0
+  s0 --> s1: add // messcript-disable-next-line
+  s0 --> s2: add /#42; messcript-disable #42;/
+  s1 --> s4: run default scan
+  s1 --> s5: run scan with --strict
+  s2 --> s3: add /#42; messcript-enable #42;/
+  s2 --> s4: run default scan
+  s2 --> s5: run scan with --strict
+  s3 --> s0: scan lines after region
+  class s0 orange
+  class s1 teal
+  class s2 teal
+  class s3 teal
+  class s4 purple
+  class s5 purple

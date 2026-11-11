@@ -1,0 +1,137 @@
+stateDiagram-v2
+  s0: conflictFound=FALSE keyState="Empty" cacheState="Uncached" propCount=0 status="Evaluating"
+  s1: conflictFound=FALSE keyState="Empty" cacheState="CachedPermanentError" propCount=0 status="Evaluating"
+  s2: conflictFound=FALSE keyState="Empty" cacheState="CachedValid" propCount=0 status="Evaluating"
+  s3: conflictFound=FALSE keyState="Empty" cacheState="Uncached" propCount=0 status="Done"
+  s4: conflictFound=FALSE keyState="Get" cacheState="Uncached" propCount=1 status="Evaluating"
+  s5: conflictFound=FALSE keyState="Set" cacheState="Uncached" propCount=1 status="Evaluating"
+  s6: conflictFound=FALSE keyState="Value" cacheState="Uncached" propCount=1 status="Evaluating"
+  s7: conflictFound=FALSE keyState="Empty" cacheState="CachedPermanentError" propCount=0 status="Done"
+  s8: conflictFound=FALSE keyState="Empty" cacheState="CachedValid" propCount=0 status="Done"
+  s9: conflictFound=FALSE keyState="Get" cacheState="CachedPermanentError" propCount=1 status="Evaluating"
+  s10: conflictFound=FALSE keyState="Get" cacheState="CachedValid" propCount=1 status="Evaluating"
+  s11: conflictFound=FALSE keyState="Get" cacheState="Uncached" propCount=1 status="Done"
+  s12: conflictFound=FALSE keyState="GetAndSet" cacheState="Uncached" propCount=2 status="Evaluating"
+  s13: conflictFound=FALSE keyState="Set" cacheState="CachedPermanentError" propCount=1 status="Evaluating"
+  s14: conflictFound=FALSE keyState="Set" cacheState="CachedValid" propCount=1 status="Evaluating"
+  s15: conflictFound=FALSE keyState="Set" cacheState="Uncached" propCount=1 status="Done"
+  s16: conflictFound=FALSE keyState="Value" cacheState="CachedPermanentError" propCount=1 status="Evaluating"
+  s17: conflictFound=FALSE keyState="Value" cacheState="CachedValid" propCount=1 status="Evaluating"
+  s18: conflictFound=FALSE keyState="Value" cacheState="Uncached" propCount=1 status="Done"
+  s19: conflictFound=TRUE keyState="Conflict" cacheState="Uncached" propCount=2 status="Evaluating"
+  s20: conflictFound=FALSE keyState="Get" cacheState="CachedPermanentError" propCount=1 status="Done"
+  s21: conflictFound=FALSE keyState="Get" cacheState="CachedValid" propCount=1 status="Done"
+  s22: conflictFound=FALSE keyState="GetAndSet" cacheState="CachedPermanentError" propCount=2 status="Evaluating"
+  s23: conflictFound=FALSE keyState="GetAndSet" cacheState="CachedValid" propCount=2 status="Evaluating"
+  s24: conflictFound=FALSE keyState="GetAndSet" cacheState="Uncached" propCount=2 status="Done"
+  s25: conflictFound=FALSE keyState="Set" cacheState="CachedPermanentError" propCount=1 status="Done"
+  s26: conflictFound=FALSE keyState="Set" cacheState="CachedValid" propCount=1 status="Done"
+  s27: conflictFound=FALSE keyState="Value" cacheState="CachedPermanentError" propCount=1 status="Done"
+  s28: conflictFound=FALSE keyState="Value" cacheState="CachedValid" propCount=1 status="Done"
+  s29: conflictFound=TRUE keyState="Conflict" cacheState="CachedPermanentError" propCount=2 status="Evaluating"
+  s30: conflictFound=TRUE keyState="Conflict" cacheState="CachedValid" propCount=2 status="Evaluating"
+  s31: conflictFound=TRUE keyState="Conflict" cacheState="Uncached" propCount=2 status="Done"
+  s32: conflictFound=TRUE keyState="Conflict" cacheState="Uncached" propCount=3 status="Evaluating"
+  s33: conflictFound=TRUE keyState="Get" cacheState="Uncached" propCount=3 status="Evaluating"
+  s34: conflictFound=TRUE keyState="Set" cacheState="Uncached" propCount=3 status="Evaluating"
+  s35: conflictFound=FALSE keyState="GetAndSet" cacheState="CachedPermanentError" propCount=2 status="Done"
+  s36: conflictFound=FALSE keyState="GetAndSet" cacheState="CachedValid" propCount=2 status="Done"
+  s37: conflictFound=TRUE keyState="Conflict" cacheState="CachedPermanentError" propCount=2 status="Done"
+  s38: conflictFound=TRUE keyState="Conflict" cacheState="CachedPermanentError" propCount=3 status="Evaluating"
+  s39: conflictFound=TRUE keyState="Conflict" cacheState="CachedValid" propCount=2 status="Done"
+  s40: conflictFound=TRUE keyState="Conflict" cacheState="CachedValid" propCount=3 status="Evaluating"
+  s41: conflictFound=TRUE keyState="Conflict" cacheState="Uncached" propCount=3 status="Done"
+  s42: conflictFound=TRUE keyState="Get" cacheState="CachedPermanentError" propCount=3 status="Evaluating"
+  s43: conflictFound=TRUE keyState="Get" cacheState="CachedValid" propCount=3 status="Evaluating"
+  s44: conflictFound=TRUE keyState="Get" cacheState="Uncached" propCount=3 status="Done"
+  s45: conflictFound=TRUE keyState="Set" cacheState="CachedPermanentError" propCount=3 status="Evaluating"
+  s46: conflictFound=TRUE keyState="Set" cacheState="CachedValid" propCount=3 status="Evaluating"
+  s47: conflictFound=TRUE keyState="Set" cacheState="Uncached" propCount=3 status="Done"
+  s48: conflictFound=TRUE keyState="Conflict" cacheState="CachedPermanentError" propCount=3 status="Done"
+  s49: conflictFound=TRUE keyState="Conflict" cacheState="CachedValid" propCount=3 status="Done"
+  s50: conflictFound=TRUE keyState="Get" cacheState="CachedPermanentError" propCount=3 status="Done"
+  s51: conflictFound=TRUE keyState="Get" cacheState="CachedValid" propCount=3 status="Done"
+  s52: conflictFound=TRUE keyState="Set" cacheState="CachedPermanentError" propCount=3 status="Done"
+  s53: conflictFound=TRUE keyState="Set" cacheState="CachedValid" propCount=3 status="Done"
+  [*] --> s0
+  s0 --> s1: CompileRegexSyntaxError
+  s0 --> s2: CompileRegexSuccess
+  s0 --> s3: Finish
+  s0 --> s4: AddGet
+  s0 --> s5: AddSet
+  s0 --> s6: AddValue
+  s1 --> s7: Finish
+  s1 --> s9: AddGet
+  s1 --> s13: AddSet
+  s1 --> s16: AddValue
+  s2 --> s8: Finish
+  s2 --> s10: AddGet
+  s2 --> s14: AddSet
+  s2 --> s17: AddValue
+  s4 --> s9: CompileRegexSyntaxError
+  s4 --> s10: CompileRegexSuccess
+  s4 --> s11: Finish
+  s4 --> s12: AddSet
+  s4 --> s19: AddGet or AddValue
+  s5 --> s12: AddGet
+  s5 --> s13: CompileRegexSyntaxError
+  s5 --> s14: CompileRegexSuccess
+  s5 --> s15: Finish
+  s5 --> s19: AddSet or AddValue
+  s6 --> s16: CompileRegexSyntaxError
+  s6 --> s17: CompileRegexSuccess
+  s6 --> s18: Finish
+  s6 --> s19: AddGet or AddSet or AddValue
+  s9 --> s20: Finish
+  s9 --> s22: AddSet
+  s9 --> s29: AddGet or AddValue
+  s10 --> s21: Finish
+  s10 --> s23: AddSet
+  s10 --> s30: AddGet or AddValue
+  s12 --> s22: CompileRegexSyntaxError
+  s12 --> s23: CompileRegexSuccess
+  s12 --> s24: Finish
+  s12 --> s32: AddGet or AddSet or AddValue
+  s13 --> s22: AddGet
+  s13 --> s25: Finish
+  s13 --> s29: AddSet or AddValue
+  s14 --> s23: AddGet
+  s14 --> s26: Finish
+  s14 --> s30: AddSet or AddValue
+  s16 --> s27: Finish
+  s16 --> s29: AddGet or AddSet or AddValue
+  s17 --> s28: Finish
+  s17 --> s30: AddGet or AddSet or AddValue
+  s19 --> s29: CompileRegexSyntaxError
+  s19 --> s30: CompileRegexSuccess
+  s19 --> s31: Finish
+  s19 --> s32: AddValue
+  s19 --> s33: AddGet
+  s19 --> s34: AddSet
+  s22 --> s35: Finish
+  s22 --> s38: AddGet or AddSet or AddValue
+  s23 --> s36: Finish
+  s23 --> s40: AddGet or AddSet or AddValue
+  s29 --> s37: Finish
+  s29 --> s38: AddValue
+  s29 --> s42: AddGet
+  s29 --> s45: AddSet
+  s30 --> s39: Finish
+  s30 --> s40: AddValue
+  s30 --> s43: AddGet
+  s30 --> s46: AddSet
+  s32 --> s38: CompileRegexSyntaxError
+  s32 --> s40: CompileRegexSuccess
+  s32 --> s41: Finish
+  s33 --> s42: CompileRegexSyntaxError
+  s33 --> s43: CompileRegexSuccess
+  s33 --> s44: Finish
+  s34 --> s45: CompileRegexSyntaxError
+  s34 --> s46: CompileRegexSuccess
+  s34 --> s47: Finish
+  s38 --> s48: Finish
+  s40 --> s49: Finish
+  s42 --> s50: Finish
+  s43 --> s51: Finish
+  s45 --> s52: Finish
+  s46 --> s53: Finish

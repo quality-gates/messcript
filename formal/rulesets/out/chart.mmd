@@ -1,0 +1,239 @@
+stateDiagram-v2
+  s0: cycleDetected=FALSE rootExists=FALSE fileStack={"main.xml"} stepCount=0 status="Parsing" stack=<<>>
+  s1: cycleDetected=FALSE rootExists=FALSE fileStack={"main.xml", "base.xml"} stepCount=1 status="Parsing" stack=<<>>
+  s2: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=1 status="Parsing" stack=<<"rule">>
+  s3: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=1 status="Parsing" stack=<<"ruleset">>
+  s4: cycleDetected=TRUE rootExists=FALSE fileStack={"main.xml"} stepCount=1 status="CycleError" stack=<<>>
+  s5: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=2 status="Parsing" stack=<<"rule">>
+  s6: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=2 status="Parsing" stack=<<"ruleset">>
+  s7: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=2 status="Done" stack=<<>>
+  s8: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=2 status="ParseError" stack=<<"rule">>
+  s9: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=2 status="ParseError" stack=<<"ruleset">>
+  s10: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=2 status="Parsing" stack=<<"rule", "rule">>
+  s11: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=2 status="Parsing" stack=<<"rule", "ruleset">>
+  s12: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=2 status="Parsing" stack=<<"ruleset", "rule">>
+  s13: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=2 status="Parsing" stack=<<"ruleset", "ruleset">>
+  s14: cycleDetected=TRUE rootExists=FALSE fileStack={"main.xml", "base.xml"} stepCount=2 status="CycleError" stack=<<>>
+  s15: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml"} stepCount=2 status="CycleError" stack=<<"rule">>
+  s16: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml"} stepCount=2 status="CycleError" stack=<<"ruleset">>
+  s17: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=3 status="Done" stack=<<>>
+  s18: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=3 status="ParseError" stack=<<"rule">>
+  s19: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=3 status="ParseError" stack=<<"ruleset">>
+  s20: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=3 status="Parsing" stack=<<"rule", "rule">>
+  s21: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=3 status="Parsing" stack=<<"rule", "ruleset">>
+  s22: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=3 status="Parsing" stack=<<"ruleset", "rule">>
+  s23: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=3 status="Parsing" stack=<<"ruleset", "ruleset">>
+  s24: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=3 status="ParseError" stack=<<"rule", "rule">>
+  s25: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=3 status="ParseError" stack=<<"rule", "ruleset">>
+  s26: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=3 status="ParseError" stack=<<"ruleset", "rule">>
+  s27: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=3 status="ParseError" stack=<<"ruleset", "ruleset">>
+  s28: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=3 status="Parsing" stack=<<"rule", "rule", "rule">>
+  s29: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=3 status="Parsing" stack=<<"rule", "rule", "ruleset">>
+  s30: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=3 status="Parsing" stack=<<"rule", "ruleset", "rule">>
+  s31: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=3 status="Parsing" stack=<<"rule", "ruleset", "ruleset">>
+  s32: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=3 status="Parsing" stack=<<"rule">>
+  s33: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=3 status="Parsing" stack=<<"ruleset", "rule", "rule">>
+  s34: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=3 status="Parsing" stack=<<"ruleset", "rule", "ruleset">>
+  s35: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=3 status="Parsing" stack=<<"ruleset", "ruleset", "rule">>
+  s36: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=3 status="Parsing" stack=<<"ruleset", "ruleset", "ruleset">>
+  s37: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=3 status="Parsing" stack=<<"ruleset">>
+  s38: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=3 status="CycleError" stack=<<"rule">>
+  s39: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=3 status="CycleError" stack=<<"ruleset">>
+  s40: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml"} stepCount=3 status="CycleError" stack=<<"rule", "rule">>
+  s41: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml"} stepCount=3 status="CycleError" stack=<<"rule", "ruleset">>
+  s42: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml"} stepCount=3 status="CycleError" stack=<<"ruleset", "rule">>
+  s43: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml"} stepCount=3 status="CycleError" stack=<<"ruleset", "ruleset">>
+  s44: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml"} stepCount=3 status="CycleError" stack=<<>>
+  s45: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="ParseError" stack=<<"rule", "rule">>
+  s46: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="ParseError" stack=<<"rule", "ruleset">>
+  s47: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="ParseError" stack=<<"ruleset", "rule">>
+  s48: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="ParseError" stack=<<"ruleset", "ruleset">>
+  s49: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Parsing" stack=<<"rule", "rule", "rule">>
+  s50: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Parsing" stack=<<"rule", "rule", "ruleset">>
+  s51: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Parsing" stack=<<"rule", "ruleset", "rule">>
+  s52: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Parsing" stack=<<"rule", "ruleset", "ruleset">>
+  s53: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Parsing" stack=<<"rule">>
+  s54: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Parsing" stack=<<"ruleset", "rule", "rule">>
+  s55: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Parsing" stack=<<"ruleset", "rule", "ruleset">>
+  s56: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Parsing" stack=<<"ruleset", "ruleset", "rule">>
+  s57: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Parsing" stack=<<"ruleset", "ruleset", "ruleset">>
+  s58: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Parsing" stack=<<"ruleset">>
+  s59: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="Done" stack=<<>>
+  s60: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="ParseError" stack=<<"rule", "rule", "rule">>
+  s61: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="ParseError" stack=<<"rule", "rule", "ruleset">>
+  s62: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="ParseError" stack=<<"rule", "ruleset", "rule">>
+  s63: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="ParseError" stack=<<"rule", "ruleset", "ruleset">>
+  s64: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="ParseError" stack=<<"rule">>
+  s65: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="ParseError" stack=<<"ruleset", "rule", "rule">>
+  s66: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="ParseError" stack=<<"ruleset", "rule", "ruleset">>
+  s67: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="ParseError" stack=<<"ruleset", "ruleset", "rule">>
+  s68: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="ParseError" stack=<<"ruleset", "ruleset", "ruleset">>
+  s69: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="ParseError" stack=<<"ruleset">>
+  s70: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="Parsing" stack=<<"rule", "rule">>
+  s71: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="Parsing" stack=<<"rule", "ruleset">>
+  s72: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="Parsing" stack=<<"ruleset", "rule">>
+  s73: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="Parsing" stack=<<"ruleset", "ruleset">>
+  s74: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="CycleError" stack=<<"rule", "rule">>
+  s75: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="CycleError" stack=<<"rule", "ruleset">>
+  s76: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="CycleError" stack=<<"ruleset", "rule">>
+  s77: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="CycleError" stack=<<"ruleset", "ruleset">>
+  s78: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="CycleError" stack=<<>>
+  s79: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="CycleError" stack=<<"rule", "rule", "rule">>
+  s80: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="CycleError" stack=<<"rule", "rule", "ruleset">>
+  s81: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="CycleError" stack=<<"rule", "ruleset", "rule">>
+  s82: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="CycleError" stack=<<"rule", "ruleset", "ruleset">>
+  s83: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="CycleError" stack=<<"rule">>
+  s84: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="CycleError" stack=<<"ruleset", "rule", "rule">>
+  s85: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="CycleError" stack=<<"ruleset", "rule", "ruleset">>
+  s86: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="CycleError" stack=<<"ruleset", "ruleset", "rule">>
+  s87: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="CycleError" stack=<<"ruleset", "ruleset", "ruleset">>
+  s88: cycleDetected=TRUE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="CycleError" stack=<<"ruleset">>
+  s89: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Timeout" stack=<<"rule", "rule", "rule">>
+  s90: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Timeout" stack=<<"rule", "rule", "ruleset">>
+  s91: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Timeout" stack=<<"rule", "ruleset", "rule">>
+  s92: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Timeout" stack=<<"rule", "ruleset", "ruleset">>
+  s93: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Timeout" stack=<<"rule">>
+  s94: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Timeout" stack=<<"ruleset", "rule", "rule">>
+  s95: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Timeout" stack=<<"ruleset", "rule", "ruleset">>
+  s96: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Timeout" stack=<<"ruleset", "ruleset", "rule">>
+  s97: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Timeout" stack=<<"ruleset", "ruleset", "ruleset">>
+  s98: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml", "base.xml"} stepCount=4 status="Timeout" stack=<<"ruleset">>
+  s99: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="Timeout" stack=<<"rule", "rule">>
+  s100: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="Timeout" stack=<<"rule", "ruleset">>
+  s101: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="Timeout" stack=<<"ruleset", "rule">>
+  s102: cycleDetected=FALSE rootExists=TRUE fileStack={"main.xml"} stepCount=4 status="Timeout" stack=<<"ruleset", "ruleset">>
+  [*] --> s0
+  s0 --> s1: ExpandFile
+  s0 --> s2: OpenTag
+  s0 --> s3: OpenTag
+  s0 --> s4: ExpandFile
+  s1 --> s5: OpenTag
+  s1 --> s6: OpenTag
+  s1 --> s14: ExpandFile
+  s2 --> s5: ExpandFile
+  s2 --> s7: CloseTag
+  s2 --> s8: CloseTag
+  s2 --> s10: OpenTag
+  s2 --> s11: OpenTag
+  s2 --> s15: ExpandFile
+  s3 --> s6: ExpandFile
+  s3 --> s7: CloseTag
+  s3 --> s9: CloseTag
+  s3 --> s12: OpenTag
+  s3 --> s13: OpenTag
+  s3 --> s16: ExpandFile
+  s5 --> s17: CloseTag
+  s5 --> s18: CloseTag
+  s5 --> s20: OpenTag
+  s5 --> s21: OpenTag
+  s5 --> s38: ExpandFile
+  s6 --> s17: CloseTag
+  s6 --> s19: CloseTag
+  s6 --> s22: OpenTag
+  s6 --> s23: OpenTag
+  s6 --> s39: ExpandFile
+  s7 --> s17: ExpandFile
+  s7 --> s44: ExpandFile
+  s10 --> s20: ExpandFile
+  s10 --> s24: CloseTag
+  s10 --> s28: OpenTag
+  s10 --> s29: OpenTag
+  s10 --> s32: CloseTag
+  s10 --> s40: ExpandFile
+  s11 --> s21: ExpandFile
+  s11 --> s25: CloseTag
+  s11 --> s30: OpenTag
+  s11 --> s31: OpenTag
+  s11 --> s32: CloseTag
+  s11 --> s41: ExpandFile
+  s12 --> s22: ExpandFile
+  s12 --> s26: CloseTag
+  s12 --> s33: OpenTag
+  s12 --> s34: OpenTag
+  s12 --> s37: CloseTag
+  s12 --> s42: ExpandFile
+  s13 --> s23: ExpandFile
+  s13 --> s27: CloseTag
+  s13 --> s35: OpenTag
+  s13 --> s36: OpenTag
+  s13 --> s37: CloseTag
+  s13 --> s43: ExpandFile
+  s17 --> s78: ExpandFile
+  s20 --> s45: CloseTag
+  s20 --> s49: OpenTag
+  s20 --> s50: OpenTag
+  s20 --> s53: CloseTag
+  s20 --> s74: ExpandFile
+  s21 --> s46: CloseTag
+  s21 --> s51: OpenTag
+  s21 --> s52: OpenTag
+  s21 --> s53: CloseTag
+  s21 --> s75: ExpandFile
+  s22 --> s47: CloseTag
+  s22 --> s54: OpenTag
+  s22 --> s55: OpenTag
+  s22 --> s58: CloseTag
+  s22 --> s76: ExpandFile
+  s23 --> s48: CloseTag
+  s23 --> s56: OpenTag
+  s23 --> s57: OpenTag
+  s23 --> s58: CloseTag
+  s23 --> s77: ExpandFile
+  s28 --> s49: ExpandFile
+  s28 --> s60: CloseTag
+  s28 --> s70: CloseTag
+  s28 --> s79: ExpandFile
+  s29 --> s50: ExpandFile
+  s29 --> s61: CloseTag
+  s29 --> s70: CloseTag
+  s29 --> s80: ExpandFile
+  s30 --> s51: ExpandFile
+  s30 --> s62: CloseTag
+  s30 --> s71: CloseTag
+  s30 --> s81: ExpandFile
+  s31 --> s52: ExpandFile
+  s31 --> s63: CloseTag
+  s31 --> s71: CloseTag
+  s31 --> s82: ExpandFile
+  s32 --> s53: ExpandFile
+  s32 --> s59: CloseTag
+  s32 --> s64: CloseTag
+  s32 --> s70: OpenTag
+  s32 --> s71: OpenTag
+  s32 --> s83: ExpandFile
+  s33 --> s54: ExpandFile
+  s33 --> s65: CloseTag
+  s33 --> s72: CloseTag
+  s33 --> s84: ExpandFile
+  s34 --> s55: ExpandFile
+  s34 --> s66: CloseTag
+  s34 --> s72: CloseTag
+  s34 --> s85: ExpandFile
+  s35 --> s56: ExpandFile
+  s35 --> s67: CloseTag
+  s35 --> s73: CloseTag
+  s35 --> s86: ExpandFile
+  s36 --> s57: ExpandFile
+  s36 --> s68: CloseTag
+  s36 --> s73: CloseTag
+  s36 --> s87: ExpandFile
+  s37 --> s58: ExpandFile
+  s37 --> s59: CloseTag
+  s37 --> s69: CloseTag
+  s37 --> s72: OpenTag
+  s37 --> s73: OpenTag
+  s37 --> s88: ExpandFile
+  s49 --> s89: StepLimit
+  s50 --> s90: StepLimit
+  s51 --> s91: StepLimit
+  s52 --> s92: StepLimit
+  s53 --> s93: StepLimit
+  s54 --> s94: StepLimit
+  s55 --> s95: StepLimit
+  s56 --> s96: StepLimit
+  s57 --> s97: StepLimit
+  s58 --> s98: StepLimit
+  s70 --> s99: StepLimit
+  s71 --> s100: StepLimit
+  s72 --> s101: StepLimit
+  s73 --> s102: StepLimit
