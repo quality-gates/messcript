@@ -28,23 +28,43 @@ function memberKey(node: MemberAccess): string | undefined {
 }
 
 function isGlobalObject(node: ts.Expression): boolean {
-  return globalObjectNames.has(globalReference(node) ?? "");
+  const reference = globalReference(node);
+  return reference !== undefined && globalObjectNames.has(reference);
 }
 
 function dottedName(node: ts.Expression, resolvesRoot: boolean): string | undefined {
-  const expression = unwrapExpression(node);
-  if (ts.isIdentifier(expression)) {
-    return resolvesRoot && isLocallyBound(expression) ? undefined : expression.text;
+  let current = unwrapExpression(node);
+  const keys: string[] = [];
+  while (isMemberAccess(current)) {
+    const key = memberKey(current);
+    if (key === undefined) {
+      return undefined;
+    }
+    keys.push(key);
+    current = unwrapExpression(current.expression);
   }
-  if (!isMemberAccess(expression)) {
+  if (!ts.isIdentifier(current)) {
     return undefined;
   }
-  const key = memberKey(expression);
-  if (key === undefined || isGlobalObject(expression.expression)) {
-    return key;
+  const rootBound = isLocallyBound(current);
+  if (resolvesRoot && rootBound) {
+    return undefined;
   }
-  const receiver = dottedName(expression.expression, resolvesRoot);
-  return receiver === undefined ? undefined : `${receiver}.${key}`;
+  if (keys.length === 0) {
+    return current.text;
+  }
+  keys.reverse();
+  let isGlobal = !rootBound && globalObjectNames.has(current.text);
+  let result: string | undefined = isGlobal ? undefined : current.text;
+  for (const key of keys) {
+    if (isGlobal) {
+      result = key;
+      isGlobal = globalObjectNames.has(key);
+    } else {
+      result = `${result}.${key}`;
+    }
+  }
+  return result;
 }
 
 /**

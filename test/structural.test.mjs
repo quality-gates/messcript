@@ -1268,6 +1268,30 @@ export function realLog() {
   assert.deepEqual(findDevelopmentCodeFragment(file).map((finding) => finding.context), ["function report()", "function realLog()"]);
 });
 
+test("exit-expression resolves deep property chains linearly without exponential stalls", () => {
+  for (const depth of [16, 24, 32]) {
+    const file = sourceFile(`
+export function deepChain() {
+  root${".x".repeat(depth)}();
+}
+export function deepExit() {
+  globalThis.window.globalThis.process.exit(1);
+}
+export function deepLog() {
+  window.globalThis.console.log("hello");
+}
+`);
+    const start = performance.now();
+    const exitFindings = findExitExpression(file);
+    const devFindings = findDevelopmentCodeFragment(file);
+    const elapsedMs = performance.now() - start;
+
+    assert.deepEqual(exitFindings.map((finding) => finding.context), ["function deepExit()"]);
+    assert.deepEqual(devFindings.map((finding) => finding.context), ["function deepLog()"]);
+    assert.ok(elapsedMs < 100, `depth ${depth} took ${elapsedMs.toFixed(2)}ms`);
+  }
+});
+
 test("development-code-fragment matches library and configured names whatever their root is bound to", () => {
   const file = sourceFile(`
 import createDebug from "debug";
