@@ -28,23 +28,52 @@ function memberKey(node: MemberAccess): string | undefined {
 }
 
 function isGlobalObject(node: ts.Expression): boolean {
-  return globalObjectNames.has(globalReference(node) ?? "");
+  const reference = globalReference(node);
+  return reference !== undefined && globalObjectNames.has(reference);
+}
+
+function collectMemberKeys(node: ts.Expression): { root: ts.Expression; keys: string[] } | undefined {
+  let current = unwrapExpression(node);
+  const keys: string[] = [];
+  while (isMemberAccess(current)) {
+    const key = memberKey(current);
+    if (key === undefined) {
+      return undefined;
+    }
+    keys.push(key);
+    current = unwrapExpression(current.expression);
+  }
+  return { root: current, keys: keys.reverse() };
+}
+
+function assembleMemberChain(rootText: string, keys: readonly string[], isRootGlobal: boolean): string {
+  let isGlobal = isRootGlobal;
+  let result = isGlobal ? "" : rootText;
+  for (const key of keys) {
+    if (isGlobal) {
+      result = key;
+      isGlobal = globalObjectNames.has(key);
+    } else {
+      result = `${result}.${key}`;
+    }
+  }
+  return result;
 }
 
 function dottedName(node: ts.Expression, resolvesRoot: boolean): string | undefined {
-  const expression = unwrapExpression(node);
-  if (ts.isIdentifier(expression)) {
-    return resolvesRoot && isLocallyBound(expression) ? undefined : expression.text;
-  }
-  if (!isMemberAccess(expression)) {
+  const chain = collectMemberKeys(node);
+  if (!chain || !ts.isIdentifier(chain.root)) {
     return undefined;
   }
-  const key = memberKey(expression);
-  if (key === undefined || isGlobalObject(expression.expression)) {
-    return key;
+  const rootBound = isLocallyBound(chain.root);
+  if (resolvesRoot && rootBound) {
+    return undefined;
   }
-  const receiver = dottedName(expression.expression, resolvesRoot);
-  return receiver === undefined ? undefined : `${receiver}.${key}`;
+  if (chain.keys.length === 0) {
+    return chain.root.text;
+  }
+  const isRootGlobal = !rootBound && globalObjectNames.has(chain.root.text);
+  return assembleMemberChain(chain.root.text, chain.keys, isRootGlobal);
 }
 
 /**
