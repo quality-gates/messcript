@@ -32,7 +32,7 @@ function isGlobalObject(node: ts.Expression): boolean {
   return reference !== undefined && globalObjectNames.has(reference);
 }
 
-function dottedName(node: ts.Expression, resolvesRoot: boolean): string | undefined {
+function collectMemberKeys(node: ts.Expression): { root: ts.Expression; keys: string[] } | undefined {
   let current = unwrapExpression(node);
   const keys: string[] = [];
   while (isMemberAccess(current)) {
@@ -43,19 +43,12 @@ function dottedName(node: ts.Expression, resolvesRoot: boolean): string | undefi
     keys.push(key);
     current = unwrapExpression(current.expression);
   }
-  if (!ts.isIdentifier(current)) {
-    return undefined;
-  }
-  const rootBound = isLocallyBound(current);
-  if (resolvesRoot && rootBound) {
-    return undefined;
-  }
-  if (keys.length === 0) {
-    return current.text;
-  }
-  keys.reverse();
-  let isGlobal = !rootBound && globalObjectNames.has(current.text);
-  let result: string | undefined = isGlobal ? undefined : current.text;
+  return { root: current, keys: keys.reverse() };
+}
+
+function assembleMemberChain(rootText: string, keys: readonly string[], isRootGlobal: boolean): string {
+  let isGlobal = isRootGlobal;
+  let result = isGlobal ? "" : rootText;
   for (const key of keys) {
     if (isGlobal) {
       result = key;
@@ -65,6 +58,22 @@ function dottedName(node: ts.Expression, resolvesRoot: boolean): string | undefi
     }
   }
   return result;
+}
+
+function dottedName(node: ts.Expression, resolvesRoot: boolean): string | undefined {
+  const chain = collectMemberKeys(node);
+  if (!chain || !ts.isIdentifier(chain.root)) {
+    return undefined;
+  }
+  const rootBound = isLocallyBound(chain.root);
+  if (resolvesRoot && rootBound) {
+    return undefined;
+  }
+  if (chain.keys.length === 0) {
+    return chain.root.text;
+  }
+  const isRootGlobal = !rootBound && globalObjectNames.has(chain.root.text);
+  return assembleMemberChain(chain.root.text, chain.keys, isRootGlobal);
 }
 
 /**
