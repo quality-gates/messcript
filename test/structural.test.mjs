@@ -1647,6 +1647,47 @@ export class Client {
   assert.match(classFinding.message, /coupling between objects value of 5/);
 });
 
+test("coupling counts dependencies referenced inside class static blocks", () => {
+  const methods = Array.from({ length: 12 }, (_, i) => `  m${i}() { return new External${i}(); }`).join("\n");
+  const file = sourceFile(`class C {\n  static {\n    const v = new External12();\n    console.log(v);\n  }\n${methods}\n}\n`);
+  const findings = findCouplingBetweenObjects(file, 13);
+  assert.ok(findings.some((finding) => finding.context === "class C" && /value of 13/.test(finding.message)));
+  assert.ok(findings.some((finding) => finding.context === "module structural" && /value of 13/.test(finding.message)));
+
+  const typeFile = sourceFile(`
+export class Typed {
+  static { const x: StaticType = null as any; console.log(x); }
+  run() { return new Runner(); }
+}
+`);
+  assert.match(messages(findCouplingBetweenObjects(typeFile, 1)).find((message) => /class Typed/.test(message)) ?? "", /value of 2/);
+
+  const nestedFile = sourceFile(`
+export class Outer {
+  static { class Inner { build() { return new InnerHelper(); } } }
+  run() { return new Direct(); }
+}
+`);
+  const nestedFindings = findCouplingBetweenObjects(nestedFile, 1);
+  assert.match(messages(nestedFindings).find((message) => /class Outer/.test(message)) ?? "", /value of 1/);
+  assert.match(messages(nestedFindings).find((message) => /class Inner/.test(message)) ?? "", /value of 1/);
+
+  const nestedTypeFile = sourceFile(`
+export class Outer {
+  static { class Inner { field: InnerType; } }
+  run() { return new Direct(); }
+}
+`);
+  const nestedTypeFindings = findCouplingBetweenObjects(nestedTypeFile, 1);
+  assert.match(messages(nestedTypeFindings).find((message) => /class Outer/.test(message)) ?? "", /value of 1/);
+  assert.match(messages(nestedTypeFindings).find((message) => /class Inner/.test(message)) ?? "", /value of 1/);
+
+  const selfFile = sourceFile(`
+export class Self { static { new Self(); } run() { return new Other(); } }
+`);
+  assert.match(messages(findCouplingBetweenObjects(selfFile, 1)).find((message) => /class Self/.test(message)) ?? "", /value of 1/);
+});
+
 test("coupling module findings report the basename without declaration or packaging extensions", () => {
   const template = `export class Named { value: ExternalValue; }\n`;
   const cases = [
