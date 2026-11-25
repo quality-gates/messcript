@@ -274,8 +274,11 @@ export function getFunctionBindingName(node: FunctionLike, sourceFile: ts.Source
   if (node.name) {
     return bindingName(node.name);
   }
-  if ((ts.isArrowFunction(node) || ts.isFunctionExpression(node)) && ts.isVariableDeclaration(node.parent)) {
-    return bindingName(node.parent.name);
+  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+    const parent = node.parent;
+    if (ts.isVariableDeclaration(parent) || ts.isPropertyDeclaration(parent) || ts.isPropertyAssignment(parent)) {
+      return bindingName(parent.name);
+    }
   }
   return undefined;
 }
@@ -284,10 +287,10 @@ export function getNameWithoutSigil(name: string): string {
   return name.replace(/^[$#_]+/, "");
 }
 
-type ValueDeclaration = ts.VariableDeclaration | ts.PropertyDeclaration | ts.ParameterDeclaration;
+type ValueDeclaration = ts.VariableDeclaration | ts.PropertyDeclaration | ts.PropertyAssignment | ts.ParameterDeclaration;
 
 function isValueDeclaration(node: ts.Node): node is ValueDeclaration {
-  return ts.isVariableDeclaration(node) || ts.isPropertyDeclaration(node) || ts.isParameter(node);
+  return ts.isVariableDeclaration(node) || ts.isPropertyDeclaration(node) || ts.isPropertyAssignment(node) || ts.isParameter(node);
 }
 
 function valueDeclaration(node: ts.Node): ValueDeclaration | undefined {
