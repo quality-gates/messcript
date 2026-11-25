@@ -87,9 +87,16 @@ function addImportDependencies(sourceFile: ts.SourceFile, dependencies: Set<stri
   }
 }
 
+function isNestedClassBoundary(node: ts.Node, stopAtNestedClass: boolean): boolean {
+  return stopAtNestedClass && (ts.isClassDeclaration(node) || ts.isClassExpression(node));
+}
+
 // messcript-disable-next-line CyclomaticComplexity
-function collectTypeDependencies(node: ts.Node | undefined, sourceFile: ts.SourceFile, dependencies: Set<string>, ownName?: string): void {
+function collectTypeDependencies(node: ts.Node | undefined, sourceFile: ts.SourceFile, dependencies: Set<string>, ownName?: string, stopAtNestedClass = false): void {
   if (!node) {
+    return;
+  }
+  if (isNestedClassBoundary(node, stopAtNestedClass)) {
     return;
   }
   if (ts.isTypeReferenceNode(node)) {
@@ -115,13 +122,10 @@ function collectTypeDependencies(node: ts.Node | undefined, sourceFile: ts.Sourc
       addDependency(dependencies, node.qualifier.getText(sourceFile), ownName);
     }
   }
-  ts.forEachChild(node, (child) => collectTypeDependencies(child, sourceFile, dependencies, ownName));
+  ts.forEachChild(node, (child) => collectTypeDependencies(child, sourceFile, dependencies, ownName, stopAtNestedClass));
 }
 
-function collectExpressionDependencies(node: ts.Node | undefined, sourceFile: ts.SourceFile, dependencies: Set<string>, ownName?: string): void {
-  if (!node) {
-    return;
-  }
+function collectExpressionDependency(node: ts.Node, sourceFile: ts.SourceFile, dependencies: Set<string>, ownName?: string): void {
   if (ts.isNewExpression(node)) {
     const name = entityNameText(node.expression, sourceFile);
     if (name) {
@@ -134,7 +138,14 @@ function collectExpressionDependencies(node: ts.Node | undefined, sourceFile: ts
       dependencies.add(`module:${argument.text}`);
     }
   }
-  ts.forEachChild(node, (child) => collectExpressionDependencies(child, sourceFile, dependencies, ownName));
+}
+
+function collectExpressionDependencies(node: ts.Node | undefined, sourceFile: ts.SourceFile, dependencies: Set<string>, ownName?: string, stopAtNestedClass = false): void {
+  if (!node || isNestedClassBoundary(node, stopAtNestedClass)) {
+    return;
+  }
+  collectExpressionDependency(node, sourceFile, dependencies, ownName);
+  ts.forEachChild(node, (child) => collectExpressionDependencies(child, sourceFile, dependencies, ownName, stopAtNestedClass));
 }
 
 function collectDecorators(node: ts.Node, sourceFile: ts.SourceFile, dependencies: Set<string>, ownName?: string): void {
@@ -180,7 +191,18 @@ function collectClassDependencies(node: ClassLike, sourceFile: ts.SourceFile): S
   for (const member of node.members) {
     visit(member);
   }
+  collectStaticBlockDependencies(node, sourceFile, dependencies, ownName);
   return dependencies;
+}
+
+function collectStaticBlockDependencies(node: ClassLike, sourceFile: ts.SourceFile, dependencies: Set<string>, ownName?: string): void {
+  for (const member of node.members) {
+    if (!ts.isClassStaticBlockDeclaration(member)) {
+      continue;
+    }
+    collectExpressionDependencies(member.body, sourceFile, dependencies, ownName, true);
+    collectTypeDependencies(member.body, sourceFile, dependencies, ownName, true);
+  }
 }
 
 function collectModuleDependencies(sourceFile: ts.SourceFile): Set<string> {
