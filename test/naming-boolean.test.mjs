@@ -754,6 +754,40 @@ test("ShortMethodName honors configured exceptions", () => {
   }
 });
 
+test("ShortMethodName and BooleanGetMethodName resolve arrow/function-expression class fields and object-literal properties", () => {
+  const shortFile = sourceFile(`
+class Service {
+  ab = () => 1;
+  cd = function () { return 1; };
+  longMethodName = () => 1;
+  [computedKey] = () => 1;
+}
+const handlers = {
+  ef: () => 1,
+  gh: function () { return 1; },
+  longHandlerName: () => 1,
+  [computedKey]: () => 1,
+};
+`);
+  assert.deepEqual(names(findShortMethodName(shortFile)).sort(), ["ab", "cd", "ef", "gh"]);
+
+  const booleanFile = sourceFile(`
+class Service {
+  getActive = (): boolean => true;
+  getReady = function (): boolean { return true; };
+  getCount = (): number => 1;
+  isReady = (): boolean => true;
+}
+const handlers = {
+  getVisible: (): boolean => true,
+  getEnabled: function (): boolean { return true; },
+  getTotal: (): number => 1,
+  isEnabled: (): boolean => true,
+};
+`);
+  assert.deepEqual(names(findBooleanGetMethodName(booleanFile)).sort(), ["getActive", "getEnabled", "getReady", "getVisible"]);
+});
+
 test("naming boundaries and AST name roles remain observable", () => {
   const classAtLimit = `A${"b".repeat(39)}`;
   const classOverLimit = `${classAtLimit}b`;
